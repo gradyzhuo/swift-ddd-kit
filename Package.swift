@@ -6,8 +6,8 @@ import PackageDescription
 let package = Package(
     name: "DDDKit",
     platforms: [
-        .macOS(.v10_15),
-        .iOS(.v13),
+        .macOS(.v13),
+        .iOS(.v16),
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
@@ -15,6 +15,9 @@ let package = Package(
             name: "DDDCore",
             targets: ["DDDCore"]
         ),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/gradyzhuo/EventStoreDB-Swift.git", from: "0.2.0")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -31,11 +34,14 @@ let package = Package(
             name: "EventSourcing",
             dependencies: [
                 "DDDCore",
+                .product(name: "EventStoreDB", package: "eventstoredb-swift")
             ]
         ),
         .testTarget(
             name: "DDDCoreTests",
-            dependencies: ["DDDCore"]
+            dependencies: ["DDDCore", "EventSourcing",
+                .product(name: "EventStoreDB", package: "eventstoredb-swift")
+            ]
         ),
     ]
 )

@@ -1,4 +1,3 @@
-import DDDCore
 import Foundation
 
 public protocol DomainEventListener {

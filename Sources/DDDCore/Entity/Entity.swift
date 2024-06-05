@@ -7,8 +7,6 @@
 
 import Foundation
 
-public protocol Entity<Id>: AnyObject, Codable {
-    associatedtype Id: Identifiable
+public protocol Entity: AnyObject, Identifiable {
 
-    var id: Id { get }
 }
