@@ -5,20 +5,19 @@ public protocol AggregateRoot: Entity {
     associatedtype DeletedEventType: DeletedEvent
 
     var metadata: AggregateRootMetadata { get }
-    
+
     init?(first createdEvent: CreatedEventType, other events: [any DomainEvent]) throws
-    
+
     func add(domainEvent: some DomainEvent) throws
     func when(happened event: some DomainEvent) throws
-    
+
     func ensureInvariant() throws
     func markAsDelete() throws
 }
 
-
 extension AggregateRoot {
     public init?(events: [any DomainEvent]) throws {
-        var sortedEvents = events.sorted{
+        var sortedEvents = events.sorted {
             $0.occurred < $1.occurred
         }
         guard let createdEvent = sortedEvents.removeFirst() as? CreatedEventType else {
@@ -27,19 +26,19 @@ extension AggregateRoot {
 
         try self.init(first: createdEvent, other: sortedEvents)
     }
-    
+
     public var isDeleted: Bool {
         metadata.isDeleted
     }
- 
+
     public var events: [any DomainEvent] {
         metadata.events
     }
-    
+
     public var version: UInt? {
         metadata.version
     }
-    
+
     public func apply(event: some DomainEvent) throws {
         try ensureInvariant()
         try when(happened: event)
@@ -49,10 +48,10 @@ extension AggregateRoot {
 
     public func apply(events: [any DomainEvent]) throws {
         for event in events {
-            try self.apply(event: event)
+            try apply(event: event)
         }
     }
-    
+
     public func add(domainEvent: some DomainEvent) throws {
         metadata.events.append(domainEvent)
     }
@@ -61,21 +60,15 @@ extension AggregateRoot {
         metadata.events.removeAll()
     }
 
-    public func ensureInvariant() throws {
-        
-    }
-
+    public func ensureInvariant() throws {}
 }
 
 extension AggregateRoot {
-    
     public static var category: String {
-        return "\(Self.self)"
+        "\(Self.self)"
     }
-    
-    public static func getStreamName(id: ID)->String{
-        return "\(category)-\(id)"
+
+    public static func getStreamName(id: ID) -> String {
+        "\(category)-\(id)"
     }
 }
-
-

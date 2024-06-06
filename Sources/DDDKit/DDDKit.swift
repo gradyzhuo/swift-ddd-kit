@@ -1,4 +1,4 @@
-import DDDCore
 import CQRS
-import EventSourcing
+import DDDCore
 import KurrentSupport
+import EventSourcing

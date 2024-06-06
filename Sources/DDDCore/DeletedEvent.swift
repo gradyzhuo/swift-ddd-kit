@@ -1,5 +1,3 @@
 import Foundation
 
-public protocol DeletedEvent: DomainEvent {
-    
-}
+public protocol DeletedEvent: DomainEvent {}

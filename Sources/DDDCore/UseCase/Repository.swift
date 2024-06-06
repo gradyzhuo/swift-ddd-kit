@@ -14,5 +14,3 @@ public protocol Repository {
     func save(aggregateRoot: T) async throws
     func delete(aggregateRoot: T) async throws
 }
-
-

@@ -14,24 +14,23 @@ extension EventSourcingRepository {
             return nil
         }
 
-        guard forcly || !(events.contains{ $0 is AggregateRootType.DeletedEventType }) else {
+        guard forcly || !(events.contains { $0 is AggregateRootType.DeletedEventType }) else {
             return nil
         }
 
-        let deletedEvent = events.first{
+        let deletedEvent = events.first {
             $0 is AggregateRootType.DeletedEventType
         } as? AggregateRootType.DeletedEventType
 
-        events.removeAll{
+        events.removeAll {
             $0 is AggregateRootType.DeletedEventType
         }
 
-        let aggregateRoot = try AggregateRootType.init(events: events)
+        let aggregateRoot = try AggregateRootType(events: events)
 
         if let deletedEvent {
             aggregateRoot?.metadata.isDeleted = true
             try aggregateRoot?.apply(event: deletedEvent)
-            
         }
 
         try aggregateRoot?.clearAllDomainEvents()
