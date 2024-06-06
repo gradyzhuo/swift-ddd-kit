@@ -1,6 +1,8 @@
 import Foundation
 import DDDCore
+import EventSourcing
 import EventStoreDB
+
 
 public class KurrentStorageCoordinator<AggregateRootType: AggregateRoot>: EventStorageCoordinator {
     
@@ -20,7 +22,7 @@ public class KurrentStorageCoordinator<AggregateRootType: AggregateRoot>: EventS
         
         let response = try await client.appendStream(to: .init(name: streamName), events: events) { options in
             guard let version else {
-                return options
+                return options.revision(expected: .any)
             }
             return options.revision(expected: .revision(UInt64(version)))
         }

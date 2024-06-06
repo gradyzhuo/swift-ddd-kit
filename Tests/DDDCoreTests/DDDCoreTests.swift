@@ -1,5 +1,6 @@
 @testable import DDDCore
 @testable import EventSourcing
+@testable import KurrentSupport
 
 import EventStoreDB
 import XCTest

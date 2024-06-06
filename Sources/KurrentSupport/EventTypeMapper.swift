@@ -7,6 +7,7 @@
 
 import Foundation
 import EventStoreDB
+import EventSourcing
 import DDDCore
 
 public protocol EventTypeMapper {

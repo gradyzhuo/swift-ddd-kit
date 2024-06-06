@@ -12,9 +12,9 @@ let package = Package(
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
-            name: "DDDCore",
-            targets: ["DDDCore"]
-        ),
+            name: "DDDKit",
+            targets: ["DDDKit"]
+        )
     ],
     dependencies: [
         .package(url: "https://github.com/gradyzhuo/EventStoreDB-Swift.git", from: "0.2.0")
@@ -22,6 +22,13 @@ let package = Package(
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
+        .target(
+            name: "DDDKit", dependencies: [
+                "DDDCore",
+                "CQRS",
+                "EventSourcing",
+                "KurrentSupport"
+            ]),
         .target(
             name: "DDDCore"),
         .target(
@@ -33,15 +40,20 @@ let package = Package(
         .target(
             name: "EventSourcing",
             dependencies: [
+                "DDDCore"
+            ]
+        ),
+        .target(
+            name: "KurrentSupport",
+            dependencies: [
                 "DDDCore",
+                "EventSourcing",
                 .product(name: "EventStoreDB", package: "eventstoredb-swift")
             ]
         ),
         .testTarget(
             name: "DDDCoreTests",
-            dependencies: ["DDDCore", "EventSourcing",
-                .product(name: "EventStoreDB", package: "eventstoredb-swift")
-            ]
+            dependencies: ["DDDKit"]
         ),
     ]
 )

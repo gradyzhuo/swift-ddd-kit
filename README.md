@@ -1,5 +1,22 @@
 # DDDKit
 
+#### Swift Package Manager
+
+The Swift Package Manager is the preferred way to get EventStoreDB. Simply add the package dependency to your Package.swift:
+
+```swift
+dependencies: [
+  .package(url: "https://github.com/Mendesky/DDDKit.git", from: "0.2.0")
+]
+```
+...and depend on "EventStoreDB" in the necessary targets:
+
+```swift
+.target(
+  name: ...,
+  dependencies: [.product(name: "DDDKit", package: "DDDKit")]
+]
+```
 
 ### event
 ```

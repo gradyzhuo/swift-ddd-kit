@@ -17,7 +17,9 @@ public protocol AggregateRoot: Entity {
 
 extension AggregateRoot {
     public init?(events: [any DomainEvent]) throws {
-        var sortedEvents = events.sorted(using: KeyPathComparator(\.occurred))
+        var sortedEvents = events.sorted{
+            $0.occurred < $1.occurred
+        }
         guard let createdEvent = sortedEvents.removeFirst() as? CreatedEventType else {
             return nil
         }
