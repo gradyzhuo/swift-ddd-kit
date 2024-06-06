@@ -53,7 +53,7 @@ extension AggregateRoot {
         }
     }
     
-    func add(domainEvent: some DDDCore.DomainEvent) throws {
+    public func add(domainEvent: some DomainEvent) throws {
         metadata.events.append(domainEvent)
     }
 
