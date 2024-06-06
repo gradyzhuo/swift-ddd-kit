@@ -29,7 +29,9 @@ extension EventSourcingRepository {
         let aggregateRoot = try AggregateRootType.init(events: events)
 
         if let deletedEvent {
+            aggregateRoot?.metadata.isDeleted = true
             try aggregateRoot?.apply(event: deletedEvent)
+            
         }
 
         try aggregateRoot?.clearAllDomainEvents()

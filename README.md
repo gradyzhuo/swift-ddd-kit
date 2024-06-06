@@ -29,23 +29,26 @@ import KurrentSupport
 ### event
 ```
 struct TestAggregateRootCreated: DomainEvent {
-    var eventType: String = "TestAggregateRootCreated"
+    var id: UUID = .init()
     var occurred: Date = .now
-    var aggregateId: String
+    var aggregateRootId: String
 }
 
 struct TestAggregateRootDeleted: DeletedEvent {
-    var eventType: String = "TestAggregateRootDeleted"
+    var id: UUID = .init()
 
     var occurred: Date = .now
 
-    var aggregateId: String
+    let aggregateRootId: String
+    let aggregateRoot2Id: String
 
-    init(aggregateId: String) {
-        self.aggregateId = aggregateId
+    init(aggregateRootId: String, aggregateRoot2Id: String) {
+        self.aggregateRootId = aggregateRootId
+        self.aggregateRoot2Id = aggregateRoot2Id
     }
 
 }
+
 ```
 
 ### AggregateRoot
@@ -63,12 +66,12 @@ class TestAggregateRoot: AggregateRoot {
     init(id: String){
         self.id = id
         
-        let event = TestAggregateRootCreated(aggregateId: id)
+        let event = TestAggregateRootCreated(aggregateRootId: id)
         try? self.apply(event: event)
     }
 
     required convenience init?(first firstEvent: TestAggregateRootCreated, other events: [any DDDCore.DomainEvent]) throws {
-        self.init(id: firstEvent.aggregateId)
+        self.init(id: firstEvent.aggregateRootId)
         try self.apply(events: events)
     }
 
@@ -76,7 +79,10 @@ class TestAggregateRoot: AggregateRoot {
         
     }
 
-    
+    func markAsDelete() throws {
+        let deletedEvent = DeletedEventType(aggregateRootId: self.id, aggregateRoot2Id: "aggregate2Id")
+        try apply(event: deletedEvent)
+    }
 }
 ```
 

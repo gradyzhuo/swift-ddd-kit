@@ -12,6 +12,7 @@ public protocol AggregateRoot: Entity {
     func when(happened event: some DomainEvent) throws
     
     func ensureInvariant() throws
+    func markAsDelete() throws
 }
 
 
@@ -64,10 +65,6 @@ extension AggregateRoot {
         
     }
 
-    public func markAsDelete() throws{
-        let deletedEvent = DeletedEventType(aggregateId: "\(self.id)")
-        try apply(event: deletedEvent)
-    }
 }
 
 extension AggregateRoot {

@@ -17,7 +17,7 @@ public class KurrentStorageCoordinator<AggregateRootType: AggregateRoot>: EventS
     public func append(events: [any DDDCore.DomainEvent], byId aggregateRootId: AggregateRootType.ID, version: UInt?) async throws -> UInt? {
         let streamName = AggregateRootType.getStreamName(id: aggregateRootId)
         let events = try events.map{
-            try EventData.init(eventType: $0.eventType, payload: $0)
+            try EventData(id: $0.id, eventType: $0.eventType, payload: $0)
         }
         
         let response = try await client.appendStream(to: .init(name: streamName), events: events) { options in

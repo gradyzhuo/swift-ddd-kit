@@ -5,8 +5,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/gradyzhuo/EventStoreDB-Swift.git",
       "state" : {
-        "revision" : "8496eb8d22ca286a7497e49a40f00afba30f8d60",
-        "version" : "0.4.0"
+        "revision" : "21c7c4a635b1126128535a722b49ed9a5a9823f1",
+        "version" : "0.4.1"
       }
     },
     {
