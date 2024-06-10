@@ -6,7 +6,7 @@ The Swift Package Manager is the preferred way to get EventStoreDB. Simply add t
 
 ```swift
 dependencies: [
-  .package(url: "https://github.com/Mendesky/DDDKit.git", from: "0.2.0")
+  .package(url: "git@github.com:Mendesky/DDDKit.git", from: "0.2.0")
 ]
 ```
 ...and depend on "EventStoreDB" in the necessary targets:
