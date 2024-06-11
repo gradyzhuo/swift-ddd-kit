@@ -8,8 +8,6 @@
 import Foundation
 
 public protocol Output: Sendable, Codable {
-    associatedtype AggregateRootType: AggregateRoot
-
-    var id: AggregateRootType.ID? { get }
+    var id: String? { get }
     var message: String? { get }
 }
