@@ -1,15 +1,18 @@
 import DDDCore
 import Foundation
 
-public protocol EventSourcingRepository<AggregateRootType, StorageCoordinator>: AnyObject {
-    associatedtype AggregateRootType: AggregateRoot
+public protocol EventSourcingRepository<AggregateRootType, StorageCoordinator>: Repository {
     associatedtype StorageCoordinator: EventStorageCoordinator where StorageCoordinator.AggregateRootType == AggregateRootType
 
     var coordinator: StorageCoordinator { get }
 }
 
 extension EventSourcingRepository {
-    public func find(byId id: AggregateRootType.ID, forcly: Bool = false) async throws -> AggregateRootType? {
+    public func find(byId id: AggregateRootType.ID) async throws -> AggregateRootType? {
+        return try await self.find(byId: id, forcly: false)
+    }
+    
+    public func find(byId id: AggregateRootType.ID, forcly: Bool) async throws -> AggregateRootType? {
         guard var events = try await coordinator.fetchEvents(byId: id) else {
             return nil
         }
@@ -44,11 +47,7 @@ extension EventSourcingRepository {
         try aggregateRoot.clearAllDomainEvents()
     }
 
-    public func delete(byId id: AggregateRootType.ID) async throws {
-        // coordinators[id]?.events.removeAll()
-        guard let aggregateRoot = try await find(byId: id) else {
-            return
-        }
+    public func delete(aggregateRoot: AggregateRootType) async throws {
         try aggregateRoot.markAsDelete()
         try await save(aggregateRoot: aggregateRoot)
     }

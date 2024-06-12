@@ -68,7 +68,7 @@ struct Mapper: EventTypeMapper {
     }
 }
 
-class TestRepository: EventSourcingRepository {
+class TestRepository: EventSourcingRepository {    
     typealias AggregateRootType = TestAggregateRoot
     typealias StorageCoordinator = KurrentStorageCoordinator<TestAggregateRoot>
 
@@ -109,7 +109,7 @@ final class DDDCoreTests: XCTestCase {
 
         try await repository.save(aggregateRoot: aggregateRoot)
 
-        try await repository.delete(byId: testId)
+        try await repository.delete(aggregateRoot: aggregateRoot)
 
         let finded = try await repository.find(byId: testId)
         XCTAssertNil(finded)
@@ -122,7 +122,7 @@ final class DDDCoreTests: XCTestCase {
 
         try await repository.save(aggregateRoot: aggregateRoot)
 
-        try await repository.delete(byId: testId)
+        try await repository.delete(aggregateRoot: aggregateRoot)
 
         let finded = try await repository.find(byId: testId, forcly: true)
         XCTAssertNotNil(finded)

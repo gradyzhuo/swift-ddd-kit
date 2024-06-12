@@ -7,10 +7,11 @@
 
 import Foundation
 
-public protocol Repository {
-    associatedtype T: AggregateRoot
+public protocol Repository: AnyObject {
+    associatedtype AggregateRootType: AggregateRoot
 
-    func findBy(id: T.ID) async throws -> T?
-    func save(aggregateRoot: T) async throws
-    func delete(aggregateRoot: T) async throws
+    func find(byId id: AggregateRootType.ID) async throws -> AggregateRootType?
+    func save(aggregateRoot: AggregateRootType) async throws
+    func delete(aggregateRoot: AggregateRootType) async throws
+    
 }

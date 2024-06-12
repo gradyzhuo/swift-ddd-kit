@@ -7,4 +7,8 @@
 
 import Foundation
 
-public protocol Entity: AnyObject, Identifiable {}
+public protocol Entity: AnyObject {
+    associatedtype ID: Hashable
+    
+    var id: ID { get }
+}
