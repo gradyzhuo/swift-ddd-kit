@@ -15,6 +15,10 @@ let package = Package(
             name: "DDDKit",
             targets: ["DDDKit"]
         ),
+        .library(
+            name: "TestUtility",
+            targets: ["TestUtility"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/gradyzhuo/EventStoreDB-Swift.git", from: "0.2.0"),
