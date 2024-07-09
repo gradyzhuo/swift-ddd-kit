@@ -33,6 +33,7 @@ let package = Package(
                 "CQRS",
                 "EventSourcing",
                 "KurrentSupport",
+                "EventBus",
                 .product(name: "Logging", package: "swift-log")
             ]
         ),
@@ -56,6 +57,12 @@ let package = Package(
                 "DDDCore",
                 "EventSourcing",
                 .product(name: "EventStoreDB", package: "eventstoredb-swift"),
+            ]
+        ),
+        .target(
+            name: "EventBus",
+            dependencies: [
+                "DDDCore",
             ]
         ),
         .target(
