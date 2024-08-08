@@ -1,4 +1,7 @@
-public protocol ReadModel: Projectable {}
+public protocol ReadModel: Projectable {
+
+    init?(events: [any DomainEvent]) throws
+}
 
 extension ReadModel {
 

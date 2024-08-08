@@ -1,4 +1,7 @@
-public protocol DTO: Projectable {}
+public protocol DTO: Projectable {
+
+    init?(events: [any DomainEvent]) throws
+}
 
 extension DTO {
 

@@ -82,12 +82,12 @@ class TestRepository: EventSourcingRepository {
 }
 
 class TestReadModel: ReadModel {
-
-    required init?(sortedEvents events: [any DomainEvent]) throws {
+    required init?(events: [any DDDCore.DomainEvent]) throws {
         try self.restore(events: events)
     }
 
     func when(happened event: some DDDCore.DomainEvent) throws {}
+
 }
 
 class TestProjection: EventSourcingProjection {
