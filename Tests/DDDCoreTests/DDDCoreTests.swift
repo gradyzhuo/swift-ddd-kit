@@ -90,7 +90,7 @@ class TestReadModel: ReadModel {
 
 }
 
-class TestProjection: EventSourcingProjection {
+class TestProjector: EventSourcingProjector {
     typealias ProjectableType = TestReadModel
     typealias StorageCoordinator = KurrentStorageCoordinator<TestReadModel>
 
@@ -148,14 +148,14 @@ final class DDDCoreTests: XCTestCase {
         XCTAssertEqual(finded?.deleted, false)
     }
 
-    func testProjectionFind() async throws {
+    func testProjectorFind() async throws {
         let testId = "idForTesting"
         let aggregateRoot = TestAggregateRoot(id: testId)
         let repository = try TestRepository(client: .init(settings: .localhost()))
         try await repository.save(aggregateRoot: aggregateRoot)
 
         let streamName = TestAggregateRoot.getStreamName(id: testId)
-        let projection = try TestProjection(client: .init(settings: .localhost()))
+        let projection = try TestProjector(client: .init(settings: .localhost()))
 
         let finded = try await projection.find(byStreamName: streamName)
         XCTAssertNotNil(finded)
