@@ -1,4 +1,4 @@
-public protocol ReadModel: Projectable {
+public protocol ReadModel: Projectable, Codable {
     associatedtype CreatedEventType: DomainEvent
 
     init?(first createdEvent: CreatedEventType, other events: [any DomainEvent]) throws
