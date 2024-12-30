@@ -2,7 +2,7 @@ import EventStoreDB
 import Foundation
 
 extension RecordedEvent {
-    public var mappingName: String {
+    public var mappingClassName: String {
         let decoder = JSONDecoder()
         do {
             let customMetadata = try decoder.decode(CustomMetadata.self, from: self.customMetadata)
