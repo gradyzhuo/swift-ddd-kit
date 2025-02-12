@@ -57,7 +57,6 @@ extension PropertyDefinition{
         }
         
         init(rawValue: String){
-            print("rawValue:", rawValue, "\(Self.int)")
             switch rawValue {
             case "\(Self.int)", Self.int.name:
                 self = .int

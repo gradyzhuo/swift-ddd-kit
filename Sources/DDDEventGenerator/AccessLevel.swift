@@ -5,7 +5,7 @@
 //  Created by 卓俊諺 on 2025/2/11.
 //
 
-package enum AccessLevel: String {
+package enum AccessLevel: String, Codable {
   /// The generated files should have `internal` access level.
   case `internal` = "internal"
   /// The generated files should have `public` access level.

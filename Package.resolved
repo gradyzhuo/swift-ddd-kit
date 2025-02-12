@@ -1,5 +1,5 @@
 {
-  "originHash" : "a905a816b3c5db5ceea749e8caf8a6be64c41d486c1736f00b986fd4f4a01760",
+  "originHash" : "0cc59f4323f514e55337814c33c9b61a579453d0a8f336f5d519660ebd7f91ec",
   "pins" : [
     {
       "identity" : "eventstoredb-swift",
@@ -35,6 +35,15 @@
       "state" : {
         "revision" : "bdbc8320f1fd14775062b47f41c262e6d2723296",
         "version" : "1.0.0"
+      }
+    },
+    {
+      "identity" : "swift-argument-parser",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-argument-parser",
+      "state" : {
+        "revision" : "41982a3656a71c768319979febd796c6fd111d5c",
+        "version" : "1.5.0"
       }
     },
     {
@@ -134,6 +143,15 @@
       "state" : {
         "revision" : "c8a44d836fe7913603e246acab7c528c2e780168",
         "version" : "1.4.0"
+      }
+    },
+    {
+      "identity" : "yams",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/jpsim/Yams.git",
+      "state" : {
+        "revision" : "3036ba9d69cf1fd04d433527bc339dc0dc75433d",
+        "version" : "5.1.3"
       }
     }
   ],

@@ -10,6 +10,7 @@ import PackagePlugin
 
 enum PluginError: Error {
     case inputNotFound
+    case configNotFound
 }
 
 @main struct DDDEventGeneratorPlugin {
@@ -23,13 +24,17 @@ enum PluginError: Error {
             throw PluginError.inputNotFound
         }
         
+        guard let configSource = (sourceFiles.first{ $0.url.lastPathComponent == "event-generator-config.yaml" }) else {
+            throw PluginError.configNotFound
+        }
+        
         let generatedEventsSource = pluginWorkDirectory.appending(path: "generated-event.swift")
         let generatedEventMapperSource = pluginWorkDirectory.appending(path: "generated-event-mapper.swift")
-        
+    
         return [
             try .buildCommand(displayName: "Event Generating...\(inputSource.url.path())", executable: tool("generate"), arguments: [
                 "event",
-                "--access-level", "internal",
+                "--configuration", "\(configSource.url.path())",
                 "--output", "\(generatedEventsSource.path())",
                 "\(inputSource.url.path())"
             ], inputFiles: [
@@ -39,7 +44,7 @@ enum PluginError: Error {
             ]),
             try .buildCommand(displayName: "EventMapper Generating...\(inputSource.url.path())", executable: tool("generate"), arguments: [
                 "event-mapper",
-                "--access-level", "internal",
+                "--configuration", "\(configSource.url.path())",
                 "--output", "\(generatedEventMapperSource.path())",
                 "\(inputSource.url.path())"
             ], inputFiles: [
@@ -48,32 +53,12 @@ enum PluginError: Error {
                 generatedEventMapperSource
             ])
         ]
-//        let inputs = try PluginUtils.validateInputs(
-//            workingDirectory: pluginWorkDirectory,
-//            tool: tool,
-//            sourceFiles: sourceFiles,
-//            targetName: targetName,
-//            pluginSource: .build
-//        )
-//
-//        let outputFiles: [Path] = GeneratorMode.allCases.map { inputs.genSourcesDir.appending($0.outputFileName) }
-//        return [
-//            .buildCommand(
-//                displayName: "Running swift-openapi-generator",
-//                executable: inputs.tool.path,
-//                arguments: inputs.arguments,
-//                environment: [:],
-//                inputFiles: [inputs.config, inputs.doc],
-//                outputFiles: outputFiles
-//            )
-//        ]
     }
 }
 
 extension DDDEventGeneratorPlugin: BuildToolPlugin {
     func createBuildCommands(context: PluginContext, target: Target) async throws -> [Command] {
         guard let swiftTarget = target as? SwiftSourceModuleTarget else {
-//            throw PluginError.incompatibleTarget(name: target.name)
             return []
         }
     
