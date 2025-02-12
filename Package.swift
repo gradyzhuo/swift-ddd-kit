@@ -19,10 +19,19 @@ let package = Package(
             name: "TestUtility",
             targets: ["TestUtility"]
         ),
+        .library(
+            name: "DDDEventGenerator",
+            targets: ["DDDEventGenerator"]
+        ),
+       .plugin(name: "DDDEventGeneratorPlugin", targets: [
+           "DDDEventGeneratorPlugin"
+       ])
     ],
     dependencies: [
-        .package(url: "https://github.com/gradyzhuo/EventStoreDB-Swift.git", from: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.5.4")
+    .package(url: "https://github.com/gradyzhuo/EventStoreDB-Swift.git", from: "1.0.0"),
+    .package(url: "https://github.com/apple/swift-log.git", from: "1.5.4"),
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+        .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3")
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -69,6 +78,23 @@ let package = Package(
             name: "DDDCoreTests",
             dependencies: ["DDDKit", "TestUtility"]
         ),
+        .target(name: "DDDEventGenerator",
+                dependencies: [
+                    "DDDKit",
+                    .product(name: "Yams", package: "yams")
+                ]),
+        
+        .executableTarget(name: "generate",
+                          dependencies: [
+                            "DDDEventGenerator",
+                            .product(name: "ArgumentParser", package: "swift-argument-parser")
+                          ]),
+        .plugin(
+          name: "DDDEventGeneratorPlugin",
+          capability: .buildTool(),
+          dependencies: [
+            "generate"
+          ]),
     ],
     swiftLanguageModes: [
         .v5
