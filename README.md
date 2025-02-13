@@ -186,6 +186,10 @@ accessModifier: package
 
 
 ### DomainEventGeneratorPlugin
+
+The `DomainEventGeneratorPlugin` help generate swift file of domain events by `event.yaml` in target.
+
+
 Add `DomainEventGeneratorPlugin` to target configuration in `Package.swift`.
 ```swift
 .target(
@@ -245,7 +249,11 @@ QuotationDeleted:
 ```
 
 ### ProjectionModelGeneratorPlugin
+
+The `ProjectionModelGeneratorPlugin` help generate swift file of projection model and event mapper by `projection-model.yaml` in target.
+
 Add `ProjectionModelGeneratorPlugin ` to target configuration in `Package.swift`.
+
 ```swift
 .target(
     name: "MyExecutable",
