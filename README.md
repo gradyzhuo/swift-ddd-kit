@@ -171,3 +171,118 @@ await client.clearStreams(aggregateRootType: TestAggregateRoot.self, id: "idForT
 //or
 await client.clearStreams(aggregateRootType: TestAggregateRoot.self, id: "idForTesting")
 ```
+
+## Plugin
+
+Prepare `event-generator-config.yaml` in target folder.
+```yaml
+accessModifier: { internal, package, public }
+```
+
+e.g.
+```yaml
+accessModifier: package
+```
+
+
+### DomainEventGeneratorPlugin
+Add `DomainEventGeneratorPlugin` to target configuration in `Package.swift`.
+```swift
+.target(
+    name: "MyExecutable",
+    dependencies: [
+        .product(name: "DDDKit", package: "DDDKit"),
+        ... //other dependencies
+	],
+    plugins: [
+        .plugin(name: "DomainEventGeneratorPlugin", package: "DDDKit"),
+        ... //other plugin
+    ]
+),
+
+```
+
+Prepare `event.yaml` in target folder.
+```yaml
+{event_name}:
+  kind: [optional][default: domainEvent] { createdEvent, deletedEvent, domainEvent} 
+  migration: [Optional]
+    eventType: { event_name_ migration_to }
+  aggregateRootId:
+    alias: { concrete_name }
+  properties:
+    - name: { property_name }
+      type: { String, Int, Float, Double, Date, UUID, Bool, or custom class }
+```
+e.g.
+```yaml
+NewLetterContentEdited:
+  migration:
+    eventType: LetterContentEdited
+  aggregateRootId:
+    alias: quotationId
+  properties:
+    - name: letterId
+      type: String
+    - name: content
+      type: String
+    - name: userId
+      type: String
+
+QuotationDeleted:
+  kind: deletedEvent
+  migration:
+    eventType: LetterContentEdited
+  aggregateRootId:
+    alias: quotationId
+  properties:
+    - name: letterId
+      type: String
+    - name: content
+      type: String
+    - name: userId
+      type: String
+```
+
+### ProjectionModelGeneratorPlugin
+Add `ProjectionModelGeneratorPlugin ` to target configuration in `Package.swift`.
+```swift
+.target(
+    name: "MyExecutable",
+    dependencies: [
+        .product(name: "DDDKit", package: "DDDKit"),
+        ... //other dependencies
+	],
+    plugins: [
+        .plugin(name: "ProjectionModelGeneratorPlugin", package: "DDDKit"),
+        ... //other plugin
+    ]
+),
+
+```
+
+Prepare `projection-model.yaml` in target folder.
+
+```yaml
+{model_name}:
+ model: {aggregateRoot, readModel}
+ createdEvent: { event_name implemented by DomainEvent }
+ deletedEvent: { event_name implemented  by DeletedEvent }
+ events: [readModel is required ]
+  - { event_name implemented by DomainEvent }
+```
+
+e.g. 
+```yaml
+Quotation:
+ model: aggregateRoot
+ createdEvent: QuotationCreated
+ deletedEvent: QuotationDeleted
+  
+GetQuotationReadModel:
+ model: readModel
+ createdEvent: QuotationCreated
+ events:
+  - xxxEdited
+  - xxxEdited
+```
