@@ -28,10 +28,9 @@ package struct EventDefinition: Codable {
                 let infos = $0.map{
                     let propertyName = $0.key
                     let propertyInfos = $0.value
-                                            .trimmingCharacters(in: .whitespaces)
                                             .split(separator: ",")
-                    let propertyType = String(propertyInfos[0])
-                    let index = Int(propertyInfos[1])
+                    let propertyType = String(propertyInfos[0].trimmingCharacters(in: .whitespaces))
+                    let index = Int(propertyInfos[1].trimmingCharacters(in: .whitespaces))
                     return (name:propertyName, type: propertyType, index: index)
                 }
                 let sortedInfos = infos.sorted{
