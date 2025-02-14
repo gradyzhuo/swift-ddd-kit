@@ -20,7 +20,26 @@ package struct EventDefinition: Codable {
         let kind = try container.decodeIfPresent(EventDefinition.EventKind.self, forKey: .kind)
         self.kind = kind ?? .domainEvent
         self.aggregateRootId = try container.decode(EventDefinition.AggregateRootIdDefinition.self, forKey: .aggregateRootId)
-        self.properties = try container.decodeIfPresent([PropertyDefinition].self, forKey: .properties)
+        do{
+            self.properties = try container.decodeIfPresent([PropertyDefinition].self, forKey: .properties)
+        }catch {
+            let convenienceProperties = try container.decodeIfPresent([String:String].self, forKey: .properties)
+            self.properties = convenienceProperties.map{
+                $0.map{
+                    let propertyName = $0.key
+                    let propertyInfos = $0.value
+                                            .trimmingCharacters(in: .whitespaces)
+                                            .split(separator: ",")
+                    let propertyType = String(propertyInfos[0])
+                    let index = String(propertyInfos[1])
+                    
+                    return PropertyDefinition.init(name: propertyName, type: .init(rawValue: propertyType))
+                }
+            }
+            
+            
+        }
+        
         self.deprecated = try container.decodeIfPresent(Bool.self, forKey: .deprecated)
     }
 }
