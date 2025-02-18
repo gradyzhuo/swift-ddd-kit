@@ -17,7 +17,7 @@ package struct ArgumentGenerator {
         
         columns.append("\(definition.name): \(definition.type.name)")
         if let defaultValue = definition.default {
-            columns.append(" = \(defaultValue)")
+            columns.append("= \(defaultValue)")
         }
         return columns.joined(separator: " ")
     }
