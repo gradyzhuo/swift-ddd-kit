@@ -9,7 +9,6 @@ public protocol AggregateRoot: Projectable, Entity {
     init?(first createdEvent: CreatedEventType, other events: [any DomainEvent]) throws
 
     func add(domainEvent: some DomainEvent) throws
-    func markAsDelete() throws
 }
 
 extension AggregateRoot {

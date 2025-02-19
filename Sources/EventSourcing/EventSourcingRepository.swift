@@ -47,10 +47,4 @@ extension EventSourcingRepository {
         aggregateRoot.metadata.version = latestRevision
         try aggregateRoot.clearAllDomainEvents()
     }
-
-    public func delete(aggregateRoot: AggregateRootType) async throws {
-        try aggregateRoot.markAsDelete()
-
-        try await save(aggregateRoot: aggregateRoot)
-    }
 }

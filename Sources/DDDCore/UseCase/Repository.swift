@@ -12,6 +12,5 @@ public protocol Repository: AnyObject {
 
     func find(byId id: AggregateRootType.ID) async throws -> AggregateRootType?
     func save(aggregateRoot: AggregateRootType) async throws
-    func delete(aggregateRoot: AggregateRootType) async throws
     
 }
