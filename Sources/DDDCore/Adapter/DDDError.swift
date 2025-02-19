@@ -39,4 +39,13 @@ extension DDDError {
         let message = "[\(errorCode)] The aggregateRoot (\(aggregateRootId)@\(aggregateRootType.self))  not found with executing usecase \(usecase)."
         return .init(code: errorCode, message: message, userInfos: [:])
     }
+    
+    public static func operationNotAllow(operation: String, reason: String, userInfos: [String: Any]? = nil) -> Self {
+        let errorCode = DDDError.USECASE_AGGREGATE_NOT_FOUND_CODE
+        let message = "[\(errorCode)] `\(operation)` not allowed, because \(reason)."
+        var userInfos = userInfos ?? [:]
+        userInfos["operation"] = operation
+        userInfos["reason"] = reason
+        return .init(code: errorCode, message: message, userInfos: userInfos)
+    }
 }
