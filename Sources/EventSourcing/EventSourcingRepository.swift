@@ -5,6 +5,9 @@ public protocol EventSourcingRepository<StorageCoordinator>: Repository {
     associatedtype StorageCoordinator: EventStorageCoordinator<AggregateRootType>
 
     var coordinator: StorageCoordinator { get }
+    
+    func find(byId id: AggregateRootType.ID) async throws -> AggregateRootType?
+    func save(aggregateRoot: AggregateRootType) async throws
 }
 
 extension EventSourcingRepository {

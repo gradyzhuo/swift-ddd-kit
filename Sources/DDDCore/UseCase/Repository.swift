@@ -9,8 +9,5 @@ import Foundation
 
 public protocol Repository: AnyObject {
     associatedtype AggregateRootType: AggregateRoot
-
-    func find(byId id: AggregateRootType.ID) async throws -> AggregateRootType?
-    func save(aggregateRoot: AggregateRootType) async throws
     
 }
