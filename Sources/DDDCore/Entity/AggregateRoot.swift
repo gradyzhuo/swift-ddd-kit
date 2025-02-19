@@ -41,6 +41,9 @@ extension AggregateRoot {
     }
 
     public func apply(event: some DomainEvent) throws {
+        guard !deleted else {
+            throw DDDError.operationNotAllow(operation: "apply", reason: "the aggregate root `\(Self.self)(\(id))` is deleted.", userInfos: ["event": event, "aggregateRootType": "\(Self.self)", "aggregateRootId": id])
+        }
         try ensureInvariant()
         try when(happened: event)
         try ensureInvariant()
