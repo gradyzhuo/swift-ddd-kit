@@ -18,7 +18,7 @@ public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStora
         let events = try events.map {
             let encoder = JSONEncoder()
             let customMetadata = try encoder.encode(CustomMetadata(className: "\(type(of: $0))"))
-            return try EventData(id: $0.id, eventType: $0.eventType, payload: $0, customMetadata: customMetadata)
+            return EventData(id: $0.id, eventType: $0.eventType, payload: $0, customMetadata: customMetadata)
         }
 
         let response = try await client.appendStream(to: .init(name: streamName), events: events) { options in
