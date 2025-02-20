@@ -56,7 +56,7 @@ struct GenerateProjectionModelCommand: ParsableCommand {
         
         let accessModifier = accessModifier ?? configuration.accessModifier
         
-        let headerGenerator = HeaderGenerator()
+        let headerGenerator = HeaderGenerator(dependencies: ["Foundation", "DDDCore"])
 
         var lines: [String] = []
         lines.append(contentsOf: headerGenerator.render())

@@ -48,14 +48,10 @@ struct GenerateEventMapperCommand: ParsableCommand {
         
         let accessModifier = accessModifier ?? configuration.accessModifier
 
-        let headerGenerator = HeaderGenerator()
+        let headerGenerator = HeaderGenerator(dependencies: ["Foundation", "DDDCore", "KurrentSupport", "KurrentDB"])
 
         var lines: [String] = []
         lines.append(contentsOf: headerGenerator.render())
-        lines.append("import Foundation")
-        lines.append("import DDDCore")
-        lines.append("import KurrentSupport")
-        lines.append("import KurrentDB")
         lines.append("")
         
         for (modelName, projectionModelDefinition) in projectionModelGenerator.definitions {

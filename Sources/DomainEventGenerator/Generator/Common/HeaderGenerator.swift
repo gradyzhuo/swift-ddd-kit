@@ -7,7 +7,11 @@
 
 package struct HeaderGenerator {
     
-    package init() { }
+    let dependencies: [String]
+    
+    package init(dependencies: [String]) {
+        self.dependencies = dependencies
+    }
     
     package func render() -> [String]{
         return [
@@ -19,6 +23,8 @@ package struct HeaderGenerator {
 //
 
 """
-        ]
+        ] + dependencies.map {
+            "import \($0)"
+        }
     }
 }
