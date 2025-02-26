@@ -96,7 +96,7 @@ class TestProjector: EventSourcingProjector {
 final class DDDCoreTests: XCTestCase {
     var client: EventStoreDBClient?
     override func setUp() async throws {
-        try self.client = .init(settings: .localhost())
+        self.client = .init(settings: .localhost())
         await client?.clearStreams(projectableType: TestAggregateRoot.self, id: "idForTesting") {
             print("error:", $0)
         }
@@ -104,10 +104,11 @@ final class DDDCoreTests: XCTestCase {
 
     func testRepositorySave() async throws {
         let testId = "idForTesting"
+        let testUserId = "testUserId"
         let aggregateRoot = TestAggregateRoot(id: testId)
-        let repository = try TestRepository(client: .init(settings: .localhost()))
-
-        try await repository.save(aggregateRoot: aggregateRoot)
+        let repository = TestRepository(client: .init(settings: .localhost()))
+        
+        try await repository.save(aggregateRoot: aggregateRoot, userId: testUserId)
 
         let finded = try await repository.find(byId: testId)
         XCTAssertNotNil(finded)
@@ -115,9 +116,10 @@ final class DDDCoreTests: XCTestCase {
 
     func testProjectorFind() async throws {
         let testId = "idForTesting"
+        let testUserId = "testUserId"
         let aggregateRoot = TestAggregateRoot(id: testId)
-        let repository = try TestRepository(client: .init(settings: .localhost()))
-        try await repository.save(aggregateRoot: aggregateRoot)
+        let repository = TestRepository(client: .init(settings: .localhost()))
+        try await repository.save(aggregateRoot: aggregateRoot, userId: testUserId)
 
         let projector = try TestProjector(client: .init(settings: .localhost()))
         let finded = try await projector.find(byId: testId)
