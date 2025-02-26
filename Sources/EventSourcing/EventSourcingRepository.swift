@@ -7,7 +7,7 @@ public protocol EventSourcingRepository<StorageCoordinator>: Repository {
     var coordinator: StorageCoordinator { get }
     
     func find(byId id: AggregateRootType.ID) async throws -> AggregateRootType?
-    func save(aggregateRoot: AggregateRootType) async throws
+    func save(aggregateRoot: AggregateRootType, customMetadata: Data?) async throws
 }
 
 extension EventSourcingRepository {
@@ -38,15 +38,15 @@ extension EventSourcingRepository {
             try aggregateRoot?.apply(event: deletedEvent)
         }
         
-        aggregateRoot?.metadata.version = UInt(fetchEventsResult.latestRevision)
+        aggregateRoot?.metadata.version = fetchEventsResult.latestRevision
 
         try aggregateRoot?.clearAllDomainEvents()
 
         return aggregateRoot
     }
 
-    public func save(aggregateRoot: AggregateRootType) async throws {
-        let latestRevision: UInt? = try await coordinator.append(events: aggregateRoot.events, byId: aggregateRoot.id, version: aggregateRoot.version)
+    public func save(aggregateRoot: AggregateRootType, customMetadata: Data?) async throws {
+        let latestRevision: UInt64? = try await coordinator.append(events: aggregateRoot.events, byId: aggregateRoot.id, version: aggregateRoot.version, customMetadata: customMetadata)
         aggregateRoot.metadata.version = latestRevision
         try aggregateRoot.clearAllDomainEvents()
     }

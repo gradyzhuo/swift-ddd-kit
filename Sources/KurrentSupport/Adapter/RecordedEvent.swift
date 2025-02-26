@@ -11,4 +11,10 @@ extension RecordedEvent {
             return self.eventType
         }
     }
+    
+    public var userId: String? {
+        let decoder = JSONDecoder()
+        let customMetadata = try? decoder.decode(CustomMetadata.self, from: self.customMetadata)
+        return customMetadata?.userId
+    }
 }

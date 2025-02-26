@@ -36,7 +36,7 @@ extension AggregateRoot {
         metadata.events
     }
 
-    public var version: UInt? {
+    public var version: UInt64? {
         metadata.version
     }
 
