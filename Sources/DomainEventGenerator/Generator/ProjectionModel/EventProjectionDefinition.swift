@@ -21,15 +21,23 @@ package struct EventProjectionDefinition: Codable {
         self.createdEvent = createdEvent
         self.deletedEvent = deletedEvent
         self.events = events
+        if case .readModel = model {
+            self.events.append(createdEvent)
+            if let deletedEvent {
+                self.events.append(deletedEvent)
+            }
+        }
     }
     
     package init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.idType = try container.decodeIfPresent(PropertyDefinition.PropertyType.self, forKey: .idType) ?? .string
-        self.model = try container.decode(EventProjectionDefinition.ModelKind.self, forKey: .model)
-        self.createdEvent = try container.decode(String.self, forKey: .createdEvent)
-        self.deletedEvent = try container.decodeIfPresent(String.self, forKey: .deletedEvent)
-        self.events = try container.decodeIfPresent([String].self, forKey: .events) ?? []
+        let idType = try container.decodeIfPresent(PropertyDefinition.PropertyType.self, forKey: .idType) ?? .string
+        let model = try container.decode(EventProjectionDefinition.ModelKind.self, forKey: .model)
+        let createdEvent = try container.decode(String.self, forKey: .createdEvent)
+        let deletedEvent = try container.decodeIfPresent(String.self, forKey: .deletedEvent)
+        let events = try container.decodeIfPresent([String].self, forKey: .events) ?? []
+        
+        self.init(idType: idType, model: model, createdEvent: createdEvent, deletedEvent: deletedEvent, events: events)
     }
 }
 
