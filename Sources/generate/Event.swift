@@ -45,7 +45,9 @@ struct GenerateEventCommand: ParsableCommand {
         
         let accessModifier = accessModifier ?? configuration.accessModifier
         
-        let headerGenerator = HeaderGenerator(dependencies: ["Foundation", "DDDCore"])
+        let defaultDependencies = ["Foundation", "DDDCore"]
+        let configDependencies = configuration.dependencies ?? []
+        let headerGenerator = HeaderGenerator(dependencies: defaultDependencies + configDependencies)
         
         var lines: [String] = []
         lines.append(contentsOf: headerGenerator.render())

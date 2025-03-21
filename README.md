@@ -177,11 +177,15 @@ await client.clearStreams(aggregateRootType: TestAggregateRoot.self, id: "idForT
 Prepare `event-generator-config.yaml` in target folder.
 ```yaml
 accessModifier: { internal, package, public }
+dependencies: [optional]
 ```
 
 e.g.
 ```yaml
 accessModifier: package
+dependencies: 
+  - General
+  - Utility
 ```
 
 

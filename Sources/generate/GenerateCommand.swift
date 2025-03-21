@@ -26,6 +26,7 @@ struct GeneratorConfiguration: Codable {
         case projectionModel = "projection-model"
     }
     let accessModifier: AccessLevel
+    let dependencies: [String]?
     let generate: [GenerateKind]?
 }
 

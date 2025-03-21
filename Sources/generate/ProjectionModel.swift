@@ -56,12 +56,12 @@ struct GenerateProjectionModelCommand: ParsableCommand {
         
         let accessModifier = accessModifier ?? configuration.accessModifier
         
-        let headerGenerator = HeaderGenerator(dependencies: ["Foundation", "DDDCore"])
-
+        let defaultDependencies = ["Foundation", "DDDCore"]
+        let configDependencies = configuration.dependencies ?? []
+        let headerGenerator = HeaderGenerator(dependencies: defaultDependencies + configDependencies)
+        
         var lines: [String] = []
         lines.append(contentsOf: headerGenerator.render())
-        lines.append("import Foundation")
-        lines.append("import DDDCore")
         lines.append("")
         lines.append(contentsOf: generator.render(accessLevel: accessModifier))
         
