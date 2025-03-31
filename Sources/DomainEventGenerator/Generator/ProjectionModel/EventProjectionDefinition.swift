@@ -44,7 +44,7 @@ extension EventProjectionDefinition{
         var `protocol`: String {
             switch self {
             case .aggregateRoot:
-                "AggregateRoot"
+                ""
             case .readModel:
                 "ReadModel"
             }
