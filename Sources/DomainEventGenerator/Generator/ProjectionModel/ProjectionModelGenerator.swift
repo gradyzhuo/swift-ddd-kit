@@ -48,10 +48,10 @@ package struct ProjectionModelGenerator {
             
             let createdEvent = definition.createdEvent
             
-            var whereExpression = "ID = \(definition.idType.name)"
-            whereExpression = whereExpression + ", CreatedEventType = \(createdEvent)"
+            var whereExpression = "ID == \(definition.idType.name)"
+            whereExpression = whereExpression + ", CreatedEventType == \(createdEvent)"
             if let deletedEvent = definition.deletedEvent{
-                whereExpression = whereExpression + ", DeletedEventType = \(deletedEvent)"
+                whereExpression = whereExpression + ", DeletedEventType == \(deletedEvent)"
             }
             
             lines.append("\(accessLevel.rawValue) protocol \(protocolName):\(definition.model.protocol) where \(whereExpression){")
