@@ -45,22 +45,19 @@ package struct ProjectionModelGenerator {
         
         for (modelName, definition) in definitions{
             let protocolName = "\(modelName)Protocol"
-            lines.append("\(accessLevel.rawValue) protocol \(protocolName):\(definition.model.protocol) {")
-            for eventName in definition.events{
-                lines.append("   func when(event: \(eventName)) throws")
-            }
-            lines.append("}")
-            lines.append("")
-            
-            //created
-            lines.append("extension \(protocolName) {")
-            lines.append("    \(accessLevel.rawValue) typealias ID = \(definition.idType.name)")
             
             let createdEvent = definition.createdEvent
-            lines.append("    \(accessLevel.rawValue) typealias CreatedEventType = \(createdEvent)")
             
+            var whereExpression = "ID = \(definition.idType.name)"
+            whereExpression = whereExpression + ", CreatedEventType = \(createdEvent)"
             if let deletedEvent = definition.deletedEvent{
-                lines.append("    \(accessLevel.rawValue) typealias DeletedEventType = \(deletedEvent)")
+                whereExpression = whereExpression + ", DeletedEventType = \(deletedEvent)"
+            }
+            
+            lines.append("\(accessLevel.rawValue) protocol \(protocolName):\(definition.model.protocol) where \(whereExpression){")
+            
+            for eventName in definition.events{
+                lines.append("   func when(event: \(eventName)) throws")
             }
             lines.append("}")
             lines.append("")
