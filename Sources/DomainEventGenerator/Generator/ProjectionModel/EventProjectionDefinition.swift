@@ -49,14 +49,5 @@ extension EventProjectionDefinition{
                 "ReadModel"
             }
         }
-        
-        var suffix: String {
-            switch self {
-            case .aggregateRoot:
-                ""
-            case .readModel:
-                "ReadModel"
-            }
-        }
     }
 }
