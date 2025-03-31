@@ -34,7 +34,7 @@ struct GenerateEventMapperCommand: ParsableCommand {
     var inputType: InputType = .yaml
     
     @Option
-    var aggregateRootName: String
+    var defaultAggregateRootName: String
     
     @Option
     var accessModifier: AccessLevel?
@@ -43,7 +43,7 @@ struct GenerateEventMapperCommand: ParsableCommand {
     var output: String? = nil
     
     func run() throws {
-        let eventGenerator = try EventGenerator(yamlFilePath: eventDefinitionPath)
+        let aggregateRootName = configuration.aggregateRootName ?? defaultAggregateRootName
         
         let projectionModelGenerator = try ProjectionModelGenerator(projectionModelYamlFileURL: .init(filePath: projectionModelDefinitionPath), aggregateRootName: aggregateRootName, aggregateEventsYamlFileURL: .init(filePath: eventDefinitionPath))
         

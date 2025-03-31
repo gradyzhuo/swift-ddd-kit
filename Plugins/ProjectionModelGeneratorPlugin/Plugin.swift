@@ -40,7 +40,7 @@ enum PluginError: Error {
             try .buildCommand(displayName: "ProjectionModel Generating...\(projectionModelSource.url.path())", executable: tool("generate"), arguments: [
                 "projection-model",
                 "--configuration", configSource.url.path(),
-                "--aggregate-root-name", targetName,
+                "--default-aggregate-root-name", targetName,
                 "--output", generatedProjectionHelperSource.path(),
                 "--events", eventSource.url.path(),
                 "\(projectionModelSource.url.path())"
@@ -53,7 +53,7 @@ enum PluginError: Error {
             try .buildCommand(displayName: "EventMapper Generating...\(eventSource.url.path())", executable: tool("generate"), arguments: [
                 "event-mapper",
                 "--configuration", configSource.url.path(),
-                "--aggregate-root-name", targetName,
+                "--default-aggregate-root-name", targetName,
                 "--output", generatedEventMapperSource.path(),
                 eventSource.url.path(),
                 projectionModelSource.url.path()

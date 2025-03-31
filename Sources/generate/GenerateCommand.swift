@@ -28,6 +28,7 @@ struct GeneratorConfiguration: Codable {
     let accessModifier: AccessLevel
     let dependencies: [String]?
     let generate: [GenerateKind]?
+    let aggregateRootName: String?
 }
 
 @main

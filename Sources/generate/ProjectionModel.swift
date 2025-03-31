@@ -30,7 +30,7 @@ struct GenerateProjectionModelCommand: ParsableCommand {
     var configuration: GeneratorConfiguration
     
     @Option
-    var aggregateRootName: String
+    var defaultAggregateRootName: String
     
     @Option
     var inputType: InputType = .yaml
@@ -42,6 +42,8 @@ struct GenerateProjectionModelCommand: ParsableCommand {
     var output: String? = nil
     
     func run() throws {
+        
+        let aggregateRootName = configuration.aggregateRootName ?? defaultAggregateRootName
         
         let generator = try ProjectionModelGenerator(projectionModelYamlFileURL: .init(filePath: projectionModelDefinitionPath), aggregateRootName: aggregateRootName, aggregateEventsYamlFileURL: .init(filePath: eventDefinitionPath))
     
