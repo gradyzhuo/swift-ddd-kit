@@ -22,7 +22,7 @@ package struct ProjectionModelGenerator {
         
         let aggregateRootProjectionModel = EventProjectionDefinition(model: .aggregateRoot, createdEvent: createdEvent?.name, deletedEvent: deletedEvent?.name, events: aggregateEventNames)
         
-        self.definitions = definitions.merging([(aggregateRootName, aggregateRootProjectionModel)]) { lhs, rhs in
+        self.definitions = filteredDefinitions.merging([(aggregateRootName, aggregateRootProjectionModel)]) { lhs, rhs in
             return lhs
         }
     }
