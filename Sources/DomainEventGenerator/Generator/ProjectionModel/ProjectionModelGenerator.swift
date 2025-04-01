@@ -20,7 +20,7 @@ package struct ProjectionModelGenerator {
         
         let filteredDefinitions = definitions.filter{ $0.value.model != .aggregateRoot }
         
-        let aggregateEventNames = aggregateEvents.events.filter{ $0.name != createdEvent.name && $0.name != deletedEvent?.name }.map{ $0.name }
+        let aggregateEventNames = aggregateEvents.events.filter{ $0.name != createdEvent.name && $0.name != deletedEvent?.name }.map(\.name)
         
         let aggregateRootProjectionModel = EventProjectionDefinition(model: .aggregateRoot, createdEvent: createdEvent.name, deletedEvent: deletedEvent?.name, events: aggregateEventNames)
         

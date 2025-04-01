@@ -7,11 +7,12 @@ public protocol ReadModel: Projectable, Codable {
 extension ReadModel {
 
     public init?(events: [any DomainEvent]) throws {
+        var events = events
         guard let createdEvent = events.removeFirst() as? CreatedEventType else {
             return nil
         }
 
-        try self.init(first: createdEvent, other: sortedEvents)
+        try self.init(first: createdEvent, other: events)
     }
 
     public func restore(event: some DomainEvent) throws {
