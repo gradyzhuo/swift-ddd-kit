@@ -34,7 +34,7 @@ enum PluginError: Error {
         }
         
         //generated directories target
-        let generatedTargetDirectory = pluginWorkDirectory.appending(component: "generated-projection-models", directoryHint: .isDirectory)
+        let generatedTargetDirectory = pluginWorkDirectory.appending(component: "generated", directoryHint: .isDirectory)
 
         //generated files target
         let generatedProjectionHelperSource = generatedTargetDirectory.appending(path: "generated-projection-model.swift")

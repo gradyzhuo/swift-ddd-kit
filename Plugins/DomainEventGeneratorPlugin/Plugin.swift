@@ -29,7 +29,7 @@ enum PluginError: Error {
         }
         
         //generated directories target
-        let generatedTargetDirectory = pluginWorkDirectory.appending(component: "generated-projection-models", directoryHint: .isDirectory)
+        let generatedTargetDirectory = pluginWorkDirectory.appending(component: "generated", directoryHint: .isDirectory)
 
         //generated files target
         let generatedEventsSource = generatedTargetDirectory.appending(path: "generated-event.swift")
