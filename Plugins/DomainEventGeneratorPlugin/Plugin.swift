@@ -35,17 +35,16 @@ enum PluginError: Error {
         let generatedEventsSource = generatedTargetDirectory.appending(path: "generated-event.swift")
     
         return [
-            try .prebuildCommand(
-                displayName: "Event Generating...\(inputSource.url.path())",
-                executable: tool("generate"),
-                arguments: [
-                    "event",
-                    "--configuration", "\(configSource.url.path())",
-                    "--output", "\(generatedEventsSource.path())",
-                    "\(inputSource.url.path())"
-                ],
-                outputFilesDirectory: generatedTargetDirectory)
-            
+            try .buildCommand(displayName: "Event Generating...\(inputSource.url.path())", executable: tool("generate"), arguments: [
+                "event",
+                "--configuration", "\(configSource.url.path())",
+                "--output", "\(generatedEventsSource.path())",
+                "\(inputSource.url.path())"
+            ], inputFiles: [
+                inputSource.url
+            ], outputFiles: [
+                generatedEventsSource
+            ])
         ]
     }
 }
