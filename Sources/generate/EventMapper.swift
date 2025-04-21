@@ -62,7 +62,11 @@ struct GenerateEventMapperCommand: ParsableCommand {
         lines.append("")
         
         for (modelName, projectionModelDefinition) in projectionModelGenerator.definitions {
-            
+            var eventNames = projectionModelDefinition.events
+            eventNames.append(projectionModelDefinition.createdEvent)
+            if let deletedEvent = projectionModelDefinition.deletedEvent {
+                eventNames.append(deletedEvent)
+            }
             let eventMapperGenerator = EventMapperGenerator(modelName: modelName, eventNames: projectionModelDefinition.events)
             lines.append(contentsOf: eventMapperGenerator.render(accessLevel: accessModifier))
             lines.append("")
