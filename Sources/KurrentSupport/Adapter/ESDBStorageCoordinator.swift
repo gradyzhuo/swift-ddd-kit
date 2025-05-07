@@ -1,6 +1,6 @@
 import DDDCore
 import EventSourcing
-import KurrentDB
+import EventStoreDB
 import Foundation
 import Logging
 
@@ -11,6 +11,11 @@ public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStora
     public init(client: KurrentDBClient, eventMapper: any EventTypeMapper) {
         self.eventMapper = eventMapper
         self.client = client
+    }
+    
+    public init(client: EventStoreDBClient, eventMapper: any EventTypeMapper) {
+        self.eventMapper = eventMapper
+        self.client = client.underlyingClient
     }
 
     public func append(events: [any DDDCore.DomainEvent], byId id: ProjectableType.ID, version: UInt64?, external: [String:String]?) async throws -> UInt64? {
