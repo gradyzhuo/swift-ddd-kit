@@ -1,6 +1,6 @@
 import Foundation
 
-public protocol DomainEventBus: Sendable {
+public protocol DomainEventBus {
     associatedtype Subscriber
     var eventSubscribers: [Subscriber] { get }
     

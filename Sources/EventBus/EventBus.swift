@@ -2,10 +2,10 @@ import DDDCore
 
 package struct GeneralSubscriber<Event: DomainEvent>: EventSubscriber{
     package let eventName: String
-    package let handle: @Sendable (Event) async throws -> Void
+    package let handle: (Event) async throws -> Void
 }
 
-public actor EventBus: @preconcurrency DomainEventBus {
+public class EventBus: DomainEventBus {
     public private(set) var eventSubscribers: [any EventSubscriber]
 
     public func publish(event: some DomainEvent) async throws {

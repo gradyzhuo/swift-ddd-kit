@@ -5,8 +5,8 @@
 //  Created by Grady Zhuo on 2025/5/8.
 //
 
-public protocol EventSubscriber: Sendable{
+public protocol EventSubscriber{
     associatedtype Event: DomainEvent
     var eventName: String { get }
-    var handle: @Sendable (Event) async throws -> Void { get }
+    var handle: (Event) async throws -> Void { get }
 }
