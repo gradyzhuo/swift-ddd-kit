@@ -44,8 +44,9 @@ public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStora
         let logger = Logger(label: "KurrentStorageCoordinator")
         let streamName = ProjectableType.getStreamName(id: id)
         do{
-            let responses = try await client.readStream(.init(name: streamName), since: .start){ options in
-                options.resolveLinks()
+            let responses = try await client.readStream(.init(name: streamName)){
+                    $0.startFrom(revision: .start)
+                      .resolveLinks()
             }
 
             let eventWrappers: [(event: any DomainEvent, revision: UInt64)] = try await responses.reduce(into: .init()) {
