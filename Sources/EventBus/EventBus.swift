@@ -9,9 +9,13 @@ public class EventBus: DomainEventBus {
     public private(set) var eventSubscribers: [any EventSubscriber]
 
     public func publish(event: some DomainEvent) async throws {
-        for eventSubscriber in eventSubscribers {
-            if eventSubscriber.eventName == event.eventType {
-                try await self.publish(of: eventSubscriber, event: event)
+        try await withThrowingDiscardingTaskGroup { group in
+            for eventSubscriber in eventSubscribers {
+                group.addTask { @MainActor in
+                    if eventSubscriber.eventName == event.eventType {
+                        try await self.publish(of: eventSubscriber, event: event)
+                    }
+                }
             }
         }
     }
