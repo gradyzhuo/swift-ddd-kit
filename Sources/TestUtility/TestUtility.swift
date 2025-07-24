@@ -14,17 +14,12 @@ let logger = Logger(label: "TestUtility")
 
 extension KurrentDBClient {
     public func clearStreams<T: Projectable>(projectableType: T.Type, id: T.ID, execpted revision: KurrentDB.StreamRevision = .any, errorHandler: ((_ error: Error)->Void)? = nil) async {
-        do{
-            let streamName = T.getStreamName(id: id)
-            guard let metadata = try await self.getStreamMetadata(streamName) else{
-                return
-            }
-            try await self.deleteStream(streamName){ options in
-                options.revision(expected: revision)
-            }
-        }catch {
-            logger.warning("The error happended when clear stream with \(id) in \(projectableType). error message: \(error)")
-            errorHandler?(error)
+        let streamName = T.getStreamName(id: id)
+        guard let metadata = try? await self.getStreamMetadata(streamName) else{
+            return
+        }
+        _ = try? await self.deleteStream(streamName){ options in
+            options.revision(expected: revision)
         }
     }
 }
