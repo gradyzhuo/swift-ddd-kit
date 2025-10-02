@@ -7,11 +7,13 @@
 
 import Foundation
 import KurrentDB
+import DDDCore
 
 
 public actor TestBundle {
     public let client: KurrentDBClient
-    public var streamIdentifiers: [StreamIdentifier] = []
+    public private(set) var streamIdentifiers: [StreamIdentifier] = []
+    public private(set) var commonIdentifiers: [String] = []
     public let cleanPhase: CleanPhase
     
     fileprivate init(client: KurrentDBClient, cleanPhase: TestBundle.CleanPhase) {
@@ -29,6 +31,21 @@ public actor TestBundle {
             await self.clearStream(streamIdentifier: streamIdentifier)
         }
         return id
+    }
+    
+    public func generateId(for category: String, prefix: String = "testing") async -> String {
+        let id = "\(prefix)\(UUID().uuidString)"
+        self.commonIdentifiers.append("\(category)-\(id)")
+        return id
+    }
+    
+    public func alsoClean<T: Projectable>(projectableType: T, id: T.ID) async {
+        let streamIdentifier = StreamIdentifier(name: T.getStreamName(id: id))
+        self.streamIdentifiers.append(streamIdentifier)
+        
+        if cleanPhase.contains(.begin) {
+            await self.clearStream(streamIdentifier: streamIdentifier)
+        }
     }
     
     fileprivate func clearStream(streamIdentifier: StreamIdentifier) async {
