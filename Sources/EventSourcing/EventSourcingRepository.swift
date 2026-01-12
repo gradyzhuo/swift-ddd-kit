@@ -35,6 +35,7 @@ extension EventSourcingRepository {
         let aggregateRoot = try AggregateRootType(events: events.filter{ !($0 is AggregateRootType.DeletedEventType) })
 
         if let deletedEvent {
+            aggregateRoot?.metadata.deleted = true
             try aggregateRoot?.apply(event: deletedEvent)
         }
         
@@ -49,5 +50,22 @@ extension EventSourcingRepository {
         let latestRevision: UInt64? = try await coordinator.append(events: aggregateRoot.events, byId: aggregateRoot.id, version: aggregateRoot.version, external: external)
         aggregateRoot.metadata.version = latestRevision
         try aggregateRoot.clearAllDomainEvents()
+    }
+    
+    public func delete(byId id: AggregateRootType.ID, external: [String:String]?) async throws {
+        guard let aggregateRoot = try await find(byId: id) else {
+            throw DDDError.aggregateNotFound(usecase: "DeleteAggregateRoot", aggregateRootType: AggregateRootType.self, aggregateRootId: "\(id)")
+        }
+        
+        try aggregateRoot.markDelete()
+        try await save(aggregateRoot: aggregateRoot, external: external)
+    }
+    
+    /// 危險操作!! 完全移除，不可恢復
+    public func purge(byId id: AggregateRootType.ID) async throws {
+        guard let _ = try await find(byId: id) else {
+            throw DDDError.aggregateNotFound(usecase: "DeleteAggregateRoot", aggregateRootType: AggregateRootType.self, aggregateRootId: "\(id)")
+        }
+        try await coordinator.purge(byId: id)
     }
 }

@@ -9,6 +9,10 @@ import Foundation
 package struct EventDefinitionCollection: Codable {
     let events: [Event]
     
+    package init(events: [Event]){
+        self.events = events
+    }
+    
     package init(from decoder: Decoder) throws {
         let dictionary = try [String: Event.Definition](from: decoder)
         self.events = dictionary.map {

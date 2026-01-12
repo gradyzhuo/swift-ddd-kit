@@ -39,6 +39,10 @@ extension DDDError {
     }
 
     public static func aggregateNotFound(usecase: any Usecase, aggregateRootType: any AggregateRoot.Type, aggregateRootId: String) -> Self {
+        aggregateNotFound(usecase: "\(usecase)", aggregateRootType: aggregateRootType, aggregateRootId: aggregateRootId)
+    }
+    
+    public static func aggregateNotFound(usecase: String, aggregateRootType: any AggregateRoot.Type, aggregateRootId: String) -> Self {
         let errorCode = DDDError.Code.aggregateNotFound
         let message = "[\(errorCode)] The aggregateRoot (\(aggregateRootId)@\(aggregateRootType.self))  not found with executing usecase \(usecase)."
         return .init(code: errorCode, message: message, userInfos: [:])
