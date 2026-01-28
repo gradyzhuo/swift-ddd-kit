@@ -34,6 +34,13 @@ package struct EventDefinitionCollection: Codable {
         }
     }
     
+    func getValidEvents(kind: Event.EventKind) -> [Event] {
+        return events.filter {
+            let deprecated = $0.definition.deprecated ?? false
+            return !deprecated && $0.definition.kind == kind
+        }
+    }
+    
 }
 
 package struct Event {
@@ -50,7 +57,7 @@ extension Event {
     package struct Definition: Codable {
         package var migration: MigrationDefinition?
         package var kind: EventKind = .domainEvent
-        package var aggregateRootId: AggregateRootIdDefinition
+        package var aggregateRootId: AggregateRootIdDefinition?
         package var properties: [PropertyDefinition]?
         package var deprecated: Bool?
         
@@ -60,7 +67,7 @@ extension Event {
             self.migration = try container.decodeIfPresent(MigrationDefinition.self, forKey: .migration)
             let kind = try container.decodeIfPresent(EventKind.self, forKey: .kind)
             self.kind = kind ?? .domainEvent
-            self.aggregateRootId = try container.decode(AggregateRootIdDefinition.self, forKey: .aggregateRootId)
+            self.aggregateRootId = try container.decodeIfPresent(AggregateRootIdDefinition.self, forKey: .aggregateRootId)
             do{
                 self.properties = try container.decodeIfPresent([PropertyDefinition].self, forKey: .properties)
             }catch {

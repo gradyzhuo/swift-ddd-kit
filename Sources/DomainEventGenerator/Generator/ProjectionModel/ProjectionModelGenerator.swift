@@ -13,16 +13,14 @@ package struct ProjectionModelGenerator {
     
     package init(definitions: [String: EventProjectionDefinition], aggregateRootName: String, aggregateEvents: EventDefinitionCollection) throws {
         
-        guard let createdEvent = aggregateEvents.getValidEvent(kind: .createdEvent) else {
-            throw ProjectionModelGeneratorError.invalidCreatedEvent
-        }
+        let createdEvents = aggregateEvents.getValidEvents(kind: .createdEvent)
         let deletedEvent = aggregateEvents.getValidEvent(kind: .deletedEvent)
         
         let filteredDefinitions = definitions.filter{ $0.value.model != .aggregateRoot }
         
-        let aggregateEventNames = aggregateEvents.events.filter{ $0.name != createdEvent.name && $0.name != deletedEvent?.name }.map(\.name)
+        let aggregateEventNames = aggregateEvents.events.filter{ e in !createdEvents.contains(where: { event in event.name == e.name}) && e.name != deletedEvent?.name }.map(\.name)
         
-        let aggregateRootProjectionModel = EventProjectionDefinition(model: .aggregateRoot, createdEvent: createdEvent.name, deletedEvent: deletedEvent?.name, events: aggregateEventNames)
+        let aggregateRootProjectionModel = EventProjectionDefinition(model: .aggregateRoot, createdEvents: createdEvents.map{ $0.name }, deletedEvent: deletedEvent?.name, events: aggregateEventNames)
         
         self.definitions = filteredDefinitions.merging([(aggregateRootName, aggregateRootProjectionModel)]) { lhs, rhs in
             return lhs
@@ -48,38 +46,85 @@ package struct ProjectionModelGenerator {
         try self.init(definitions: definitions, aggregateRootName: aggregateRootName, aggregateEvents: aggregateEventsDefinitions)
     }
     
+    package func renderAggregateRoot(accessLevel: AccessLevel, modelName: String, definition: EventProjectionDefinition){
+        
+        
+        
+    }
+    
+    
+    
     package func render(accessLevel: AccessLevel) -> [String] {
         var lines: [String] = []
         
         for (modelName, definition) in definitions{
+            
             let protocolName = "\(modelName)Protocol"
             
-            let createdEvent = definition.createdEvent
+            let createdEvents = definition.createdEvents
+            let deletedEvent = definition.deletedEvent
             
             var whereExpression = "ID == \(definition.idType.name)"
-            whereExpression = whereExpression + ", CreatedEventType == \(createdEvent)"
+            //whereExpression = whereExpression// + ", CreatedEventType == \(createdEvent)"
             if let deletedEvent = definition.deletedEvent{
                 whereExpression = whereExpression + ", DeletedEventType == \(deletedEvent)"
             }
             
             lines.append("\(accessLevel.rawValue) protocol \(protocolName):\(definition.model.protocol) where \(whereExpression){")
             
+            for createdEvent in createdEvents {
+                lines.append("   init?(first createdEvent: \(createdEvent), other events: [any DomainEvent]) async throws")
+            }
+            
             for eventName in definition.events{
                 lines.append("   func when(event: \(eventName)) throws")
+            }
+            if let deletedEvent = definition.deletedEvent {
+                lines.append("   func when(event: \(deletedEvent)) throws")
             }
             lines.append("}")
             lines.append("")
             
-            //whens
+            // `init` begin
+            lines.append("extension \(protocolName) {")
             lines.append("""
-extension \(protocolName) {
+    public init?(events: [any DomainEvent]) async throws {
+        var events = events
+        let firstEvent = events.removeFirst()
+        switch firstEvent {
+""")
+            for createdEvent in createdEvents {
+                lines.append("""
+        case let firstEvent as \(createdEvent):
+            try await self.init(first: firstEvent, other: events)
+""")
+            }
+            lines.append("""
+        default:
+             return nil
+        }
+    }
+""")
+            lines.append("}")
+            lines.append("")
+            
+            // `whens` begin
+            lines.append("extension \(protocolName) {")
+            
+            
+            lines.append("""
     \(accessLevel) func when(happened event: some DomainEvent) throws{
         switch event {
 """)
-            
             for eventName in definition.events{
                 lines.append("""
             case let event as \(eventName):
+            try when(event: event)
+""")
+            }
+            if let deletedEvent = definition.deletedEvent {
+                lines.append("""
+            case let event as \(deletedEvent):
             try when(event: event)
 """)
             }

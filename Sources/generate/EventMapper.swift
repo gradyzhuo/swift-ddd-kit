@@ -63,7 +63,7 @@ struct GenerateEventMapperCommand: ParsableCommand {
         
         for (modelName, projectionModelDefinition) in projectionModelGenerator.definitions {
             var eventNames = projectionModelDefinition.events
-            eventNames.append(projectionModelDefinition.createdEvent)
+            eventNames.append(contentsOf: projectionModelDefinition.createdEvents)
             if let deletedEvent = projectionModelDefinition.deletedEvent {
                 eventNames.append(deletedEvent)
             }

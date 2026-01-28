@@ -1,12 +1,10 @@
 import Foundation
 
-public protocol AggregateRoot: Projectable, Entity{
-    associatedtype CreatedEventType: DomainEvent
+public protocol AggregateRoot: Projectable, Entity where ID == String{
     associatedtype DeletedEventType: DeletedEvent
 
     var metadata: AggregateRootMetadata { set get }
 
-    init?(first createdEvent: CreatedEventType, other events: [any DomainEvent]) async throws
 
     func add(domainEvent: some DomainEvent) throws
     func ensureInvariant() throws
@@ -14,14 +12,6 @@ public protocol AggregateRoot: Projectable, Entity{
 }
 
 extension AggregateRoot {
-    public init?(events: [any DomainEvent]) async throws {
-        var events = events
-        guard let createdEvent = events.removeFirst() as? CreatedEventType else {
-            return nil
-        }
-
-        try await self.init(first: createdEvent, other: events)
-    }
     
     public var deleted: Bool {
         get {
@@ -41,8 +31,9 @@ extension AggregateRoot {
         }
     }
 
-    public func markDelete() throws {
-        fatalError("Not Implemented.")
+    public func markDelete() throws{
+        let event = DeletedEventType(aggregateRootId: self.id)
+        try self.apply(event: event)
     }
     
     public func apply(event: some DomainEvent) throws {

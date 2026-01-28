@@ -105,6 +105,22 @@ let package = Package(
             "generate"
           ]),
         .plugin(
+          name: "DomainEventCommandPlugin",
+          capability: .command(
+            intent: .custom(verb: "generate-events", description: "generate-events"),
+            permissions: [PluginPermission.writeToPackageDirectory(reason: "it will generate events swift files.")]),
+          dependencies: [
+            "generate"
+          ]),
+        .plugin(
+          name: "ProjectionModelCommandPlugin",
+          capability: .command(
+            intent: .custom(verb: "generate-model", description: "generate-model"),
+            permissions: [PluginPermission.writeToPackageDirectory(reason: "it will generate projection swift files.")]),
+          dependencies: [
+            "generate"
+          ]),
+        .plugin(
           name: "ProjectionModelGeneratorPlugin",
           capability: .buildTool(),
           dependencies: [

@@ -14,11 +14,14 @@ package struct EventAggregateRootIdExtensionGenerator {
     
     func render(accessLevel: AccessLevel = .internal)-> [String] {
         var lines: [String] = []
+        guard let aggregateRootId = self.event.definition.aggregateRootId else {
+            return lines
+        }
         lines.append("""
 extension \(event.name): Codable{
     \(accessLevel.rawValue) var aggregateRootId: String{
         get{
-            \(event.definition.aggregateRootId.alias)
+            \(aggregateRootId.alias)
         }
     }
 }

@@ -19,7 +19,7 @@ package struct EventStructureGenerator {
         
         let properties: [PropertyDefinition] = [
             .init(name: "id", type: .uuid, default: ".init()"),
-            .init(name: event.definition.aggregateRootId.alias, type: .string)
+            .init(name: event.definition.aggregateRootId?.alias ?? "aggregateRootId", type: .string)
         ] + (event.definition.properties ?? []) + [
             .init(name: "occurred", type: .date, default: ".now")
         ]
