@@ -1,4 +1,4 @@
-public protocol Projectable: Sendable {
+public protocol Projectable: Actor {
 
     associatedtype ID: Hashable & Sendable
     
@@ -6,7 +6,7 @@ public protocol Projectable: Sendable {
     
     var id: ID { get }
     init?(events: [any DomainEvent]) async throws
-    mutating func when(happened event: some DomainEvent) throws
+    func when(happened event: some DomainEvent) throws
 }
 
 extension Projectable {

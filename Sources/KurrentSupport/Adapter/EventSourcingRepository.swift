@@ -9,8 +9,8 @@ import DDDCore
 import EventSourcing
 
 extension EventSourcingRepository {
-    public func save(aggregateRoot: inout AggregateRootType, userId: String) async throws {
-        try await self.save(aggregateRoot: &aggregateRoot, external: ["userId": userId])
+    public func save(aggregateRoot: AggregateRootType, userId: String) async throws {
+        try await self.save(aggregateRoot: aggregateRoot, external: ["userId": userId])
     }
 }
 

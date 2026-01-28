@@ -7,7 +7,7 @@ public protocol EventSourcingRepository<StorageCoordinator>: Repository {
     var coordinator: StorageCoordinator { get }
     
     func find(byId id: AggregateRootType.ID) async throws -> AggregateRootType?
-    func save(aggregateRoot: inout AggregateRootType, external: [String:String]?) async throws
+    func save(aggregateRoot: AggregateRootType, external: [String:String]?) async throws
 }
 
 extension EventSourcingRepository {
@@ -35,7 +35,7 @@ extension EventSourcingRepository {
         var aggregateRoot = try await AggregateRootType(events: events.filter{ !($0 is AggregateRootType.DeletedEventType) })
 
         if let deletedEvent {
-            aggregateRoot?.metadata.deleted = true
+            try await aggregateRoot?.markDelete()
             try await aggregateRoot?.apply(event: deletedEvent)
         }
         
@@ -59,7 +59,7 @@ extension EventSourcingRepository {
             throw DDDError.aggregateNotFound(usecase: "DeleteAggregateRoot", aggregateRootType: AggregateRootType.self, aggregateRootId: "\(id)")
         }
         
-        try aggregateRoot.markDelete()
+        try await aggregateRoot.markDelete()
         try await save(aggregateRoot: aggregateRoot, external: external)
     }
     

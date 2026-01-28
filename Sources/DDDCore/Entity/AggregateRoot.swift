@@ -6,7 +6,7 @@ public protocol AggregateRoot: Projectable, Entity{
 
     var metadata: AggregateRootMetadata { set get }
 
-    init?(first createdEvent: CreatedEventType, other events: [any DomainEvent]) throws
+    init?(first createdEvent: CreatedEventType, other events: [any DomainEvent]) async throws
 
     func add(domainEvent: some DomainEvent) throws
     func ensureInvariant() throws
@@ -14,13 +14,13 @@ public protocol AggregateRoot: Projectable, Entity{
 }
 
 extension AggregateRoot {
-    public init?(events: [any DomainEvent]) throws {
+    public init?(events: [any DomainEvent]) async throws {
         var events = events
         guard let createdEvent = events.removeFirst() as? CreatedEventType else {
             return nil
         }
 
-        try self.init(first: createdEvent, other: events)
+        try await self.init(first: createdEvent, other: events)
     }
     
     public var deleted: Bool {
