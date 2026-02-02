@@ -7,7 +7,7 @@
 
 import Foundation
 
-public protocol Repository: Actor {
+public protocol Repository {
     associatedtype AggregateRootType: AggregateRoot
     
 }
