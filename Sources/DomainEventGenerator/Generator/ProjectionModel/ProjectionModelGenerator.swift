@@ -73,7 +73,7 @@ package struct ProjectionModelGenerator {
             lines.append("\(accessLevel.rawValue) protocol \(protocolName):\(definition.model.protocol) where \(whereExpression){")
             
             for createdEvent in createdEvents {
-                lines.append("   init?(first createdEvent: \(createdEvent), other events: [any DomainEvent]) async throws")
+                lines.append("   init?(first createdEvent: \(createdEvent), other events: [any DomainEvent]) throws")
             }
             
             for eventName in definition.events{
@@ -88,7 +88,7 @@ package struct ProjectionModelGenerator {
             // `init` begin
             lines.append("extension \(protocolName) {")
             lines.append("""
-    public init?(events: [any DomainEvent]) async throws {
+    public init?(events: [any DomainEvent]) throws {
         var events = events
         let firstEvent = events.removeFirst()
         switch firstEvent {
@@ -96,7 +96,7 @@ package struct ProjectionModelGenerator {
             for createdEvent in createdEvents {
                 lines.append("""
         case let firstEvent as \(createdEvent):
-            try await self.init(first: firstEvent, other: events)
+            try self.init(first: firstEvent, other: events)
 """)
             }
             lines.append("""

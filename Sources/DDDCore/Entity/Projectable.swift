@@ -5,7 +5,7 @@ public protocol Projectable {
     static var category: String { get }
     
     var id: ID { get }
-    init?(events: [any DomainEvent]) async throws
+    init?(events: [any DomainEvent]) throws
     func when(happened event: some DomainEvent) throws
 }
 
