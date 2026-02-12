@@ -21,7 +21,7 @@ struct GenerateProjectionModelCommand: ParsableCommand {
     @Argument(help: "The path of the projection-model file.", completion: .file(extensions: ["yaml", "yam"]))
     var projectionModelDefinitionPath: String
     
-    @Option(name: .customLong("test-configuration"),completion: .file(extensions: ["yaml", "yam"]), transform: {
+    @Option(name: .customLong("generator-configuration"),completion: .file(extensions: ["yaml", "yam"]), transform: {
         let url = URL(fileURLWithPath: $0)
         let yamlData = try Data(contentsOf: url)
         let yamlDecoder = YAMLDecoder()

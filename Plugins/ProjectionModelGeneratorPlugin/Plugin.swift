@@ -43,7 +43,7 @@ enum PluginError: Error {
         return [
             try .buildCommand(displayName: "ProjectionModel Generating...\(projectionModelSource.url.path())", executable: tool("generate"), arguments: [
                 "presenter",
-                "--configuration", configSource.url.path(),
+                "--generator-configuration", configSource.url.path(),
                 "--default-aggregate-root-name", targetName,
                 "--output", generatedProjectionHelperSource.path(),
                 "--events", eventSource.url.path(),
