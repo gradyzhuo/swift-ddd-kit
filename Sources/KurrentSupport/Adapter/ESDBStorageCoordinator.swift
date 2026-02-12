@@ -1,6 +1,6 @@
 import DDDCore
 import EventSourcing
-import EventStoreDB
+import KurrentDB
 import Foundation
 import Logging
 
@@ -13,12 +13,6 @@ public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStora
         self.eventMapper = eventMapper
         self.client = client
     }
-    
-    public init(client: EventStoreDBClient, eventMapper: any EventTypeMapper) {
-        self.eventMapper = eventMapper
-        self.client = client.underlyingClient
-    }
-
     public func append(events: [any DDDCore.DomainEvent], byId id: ProjectableType.ID, version: UInt64?, external: [String:String]?) async throws -> UInt64? {
         let streamName = ProjectableType.getStreamName(id: id)
         let events = try events.map {
@@ -29,7 +23,7 @@ public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStora
             let encoder = JSONEncoder()
             return try EventData(id: $0.id, eventType: $0.eventType, model: $0, customMetadata: encoder.encode(customMetadata))
         }
-        let response = try await client.appendStream(.init(name: streamName), events: events){ options in
+        let response = try await client.appendToStream(.init(name: streamName), events: events){ options in
             guard let version else {
                 return options.revision(expected: .any)
             }
