@@ -59,7 +59,7 @@ let package = Package(
             dependencies: [
                 "DDDCore",
                 "EventSourcing",
-                .product(name: "EventStoreDB", package: "kurrentdb-swift")
+                .product(name: "KurrentDB", package: "kurrentdb-swift")
             ]),
         .target(
             name: "EventBus",
@@ -70,7 +70,7 @@ let package = Package(
             name: "TestUtility",
             dependencies: [
                 "DDDCore",
-                .product(name: "EventStoreDB", package: "kurrentdb-swift"),
+                .product(name: "KurrentDB", package: "kurrentdb-swift"),
             ]),
         .target(name: "MigrationUtility",
                 dependencies: [

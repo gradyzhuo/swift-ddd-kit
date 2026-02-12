@@ -7,7 +7,6 @@
 
 import DDDCore
 import KurrentDB
-import EventStoreDB
 import Logging
 
 let logger = Logger(label: "TestUtility")
