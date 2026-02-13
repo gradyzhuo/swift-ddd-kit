@@ -9,8 +9,18 @@ public protocol EventSourcingPresenter: Projectable {
 }
 
 extension EventSourcingPresenter {
+    public static var categoryRule: StreamCategoryRule{
+        return .fromClass(withPrefix: "")
+    }
+    
     public static var category: String{
-        return ReadModelType.category
+        get{
+            return switch categoryRule {
+            case .fromClass(let prefix):
+                "\(prefix)\(Self.self)".replacing("Presenter", with: "")
+            case .custom(let customCategory):
+                customCategory
+            }
+        }
     }
 }
-

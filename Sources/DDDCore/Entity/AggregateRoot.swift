@@ -16,8 +16,19 @@ public protocol AggregateRoot: Projectable, Entity where ID == String{
 
 extension AggregateRoot {
     
+    public static var categoryRule: StreamCategoryRule{
+        return .fromClass(withPrefix: "")
+    }
+    
     public static var category: String {
-        "\(Self.self)"
+        get{
+            return switch categoryRule {
+            case .fromClass(let prefix):
+                "\(prefix)\(Self.self)".replacing("Presenter", with: "")
+            case .custom(let customCategory):
+                customCategory
+            }
+        }
     }
     
     public var deleted: Bool {
