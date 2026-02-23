@@ -35,7 +35,7 @@ package struct EventMapperGenerator {
         for eventName in eventNames {
             lines.append("""
         case "\(eventName)":
-            {
+            try {
                 guard var event = try eventData.decode(to: \(eventName).self) else { return nil }
                 // handle metadata
                 let decoder = JSONDecoder()
