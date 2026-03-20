@@ -44,7 +44,7 @@ public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStora
         let streamName = ProjectableType.getStreamName(id: id)
         do{
             let stream = client.streams(specified: streamName)
-            let responses = try await stream.read {
+            let recordEvents = try await stream.read {
                 $0.direction = .forward
                 $0.revision = .start
                 $0.resolveLinks = true
@@ -85,7 +85,7 @@ public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStora
         }
     }
     
-    public func purge(byId id: ProjectableType.ID) async throws {
+    public func purge(byId id: String) async throws {
         let streamName = ProjectableType.getStreamName(id: id)
         try await self.client.streams(specified: streamName).delete()
     }

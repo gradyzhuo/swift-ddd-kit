@@ -1,5 +1,5 @@
 import Foundation
 
-public protocol PresenterInput: Sendable {
+public protocol CQRSProjectorInput: Sendable {
     var id: String { get }
 }

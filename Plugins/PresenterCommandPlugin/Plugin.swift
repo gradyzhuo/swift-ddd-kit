@@ -35,26 +35,8 @@ struct ProjectionModelCommandPlugin {
     ) throws {
         let (flagsAndOptions, inputs) = self.splitArgs(arguments)
         print(flagsAndOptions, inputs)
-        
-        guard let projectionModelSource = inputs.first(where: { $0.hasSuffix("projection-model.yaml") }) else {
-            throw CommandPluginError.projectionModelDefinitionFileNotFound
-        }
-        
-        guard let eventSource = inputs.first(where: { $0.hasSuffix("event.yaml") }) else {
-            throw CommandPluginError.eventDefinitionFileNotFound
-        }
-        
-        guard let configSource = inputs.first(where: { $0.hasSuffix("event-generator-config.yaml") }) else {
-            throw CommandPluginError.configFileNotFound
-        }
-        
+                
         //generated directories target
-        let generatedTargetDirectory = pluginWorkDirectoryURL.appending(component: "generated", directoryHint: .isDirectory)
-
-        //generated files target
-        let generatedProjectionHelperSource = generatedTargetDirectory.appending(path: "generated-projection-model.swift")
-        let generatedEventMapperSource = generatedTargetDirectory.appending(path: "generated-event-mapper.swift")
-        
         let executableURL = try tool("generate").url
         
         let process = Process()

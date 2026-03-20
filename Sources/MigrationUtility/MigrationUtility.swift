@@ -40,7 +40,7 @@ extension Migration {
             return nil
         }
         
-        guard var aggregateRoot = try await initAggregateRoot(recorded: createdRecordedEvent) else {
+        guard let aggregateRoot = try await initAggregateRoot(recorded: createdRecordedEvent) else {
             return nil
         }
         
@@ -64,7 +64,7 @@ extension Migration {
                 guard let event = try eventMapper.mapping(eventData: record) else {
                     break
                 }
-                try await aggregateRoot.apply(event: event)
+                try aggregateRoot.apply(event: event)
             }
         }
         return aggregateRoot
@@ -80,12 +80,12 @@ extension Migration {
         }
 
         let createdHandler = self.createdHandler ?? { createdEvent, userInfo in
-            let aggregateRoot = try await AggregateRootType.init(events: [createdEvent])
-            try await aggregateRoot?.apply(event: createdEvent)
+            let aggregateRoot = try AggregateRootType.init(events: [createdEvent])
+            try aggregateRoot?.apply(event: createdEvent)
             return aggregateRoot
         }
 
-        return try await createdHandler(oldEvent, userInfo)
+        return try createdHandler(oldEvent, userInfo)
     }
     
     func handleEvent<Handler: MigrationHandler>(aggregateRoot: AggregateRootType, handler: Handler, event: any DomainEvent) throws -> Bool {

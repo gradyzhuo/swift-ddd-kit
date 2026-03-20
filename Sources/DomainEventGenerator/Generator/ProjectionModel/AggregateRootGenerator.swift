@@ -39,8 +39,7 @@ package struct AggregateRootGenerator {
         let protocolName = "\(modelName)Protocol"
         
         let createdEvents = definition.createdEvents
-        let deletedEvent = definition.deletedEvent
-        
+
         var whereExpression = "ID == \(definition.idType.name)"
         if let deletedEvent = definition.deletedEvent{
             whereExpression = whereExpression + ", DeletedEventType == \(deletedEvent)"
