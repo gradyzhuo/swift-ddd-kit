@@ -9,7 +9,7 @@ fileprivate struct EventWrapped: Sendable{
     let revision: UInt64
 }
 
-public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStorageCoordinator {
+public class KurrentStorageCoordinator<StreamNaming: EventStreamNaming>: EventStorageCoordinator {
     let logger = Logger(label: "KurrentStorageCoordinator")
     let eventMapper: any EventTypeMapper
     let client: KurrentDBClient
@@ -20,7 +20,7 @@ public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStora
     }
 
     public func append(events: [any DDDCore.DomainEvent], byId id: String, version: UInt64?, external: [String:String]?) async throws -> UInt64? {
-        let streamName = ProjectableType.getStreamName(id: id)
+        let streamName = StreamNaming.getStreamName(id: id)
         let events = try events.map {
             let customMetadata = CustomMetadata(
                 className: "\(type(of: $0))",
@@ -41,7 +41,7 @@ public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStora
 
     public func fetchEvents(byId id: String) async throws -> (events: [any DomainEvent], latestRevision: UInt64)? {
         
-        let streamName = ProjectableType.getStreamName(id: id)
+        let streamName = StreamNaming.getStreamName(id: id)
         do{
             let stream = client.streams(specified: streamName)
             let recordEvents = try await stream.read {
@@ -86,7 +86,7 @@ public class KurrentStorageCoordinator<ProjectableType: Projectable>: EventStora
     }
     
     public func purge(byId id: String) async throws {
-        let streamName = ProjectableType.getStreamName(id: id)
+        let streamName = StreamNaming.getStreamName(id: id)
         try await self.client.streams(specified: streamName).delete()
     }
     

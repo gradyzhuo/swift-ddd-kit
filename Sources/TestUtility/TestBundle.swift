@@ -43,7 +43,7 @@ public actor TestBundle {
         return id
     }
     
-    public func alsoClean<T: Projectable>(projectableType: T.Type, id: String) async {
+    public func alsoClean<T: EventStreamNaming>(projectableType: T.Type, id: String) async {
         let streamIdentifier = StreamIdentifier(name: T.getStreamName(id: id))
         self.streamIdentifiers.append(streamIdentifier)
         

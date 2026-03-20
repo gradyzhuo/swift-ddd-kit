@@ -1,6 +1,6 @@
 import Foundation
 
-public protocol AggregateRoot: Projectable, Entity where ID == String{
+public protocol AggregateRoot: EventStreamNaming, Entity where ID == String{
     associatedtype DeletedEventType: DeletedEvent
 
     var metadata: AggregateRootMetadata { set get }

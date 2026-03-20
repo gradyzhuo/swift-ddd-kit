@@ -2,7 +2,7 @@ import Foundation
 import DDDCore
 import Logging
 
-public protocol EventSourcingProjector: Projectable {
+public protocol EventSourcingProjector: EventStreamNaming {
     associatedtype Input: CQRSProjectorInput
     associatedtype ReadModelType: ReadModel
     associatedtype StorageCoordinator: EventStorageCoordinator
