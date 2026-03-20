@@ -6,17 +6,13 @@ public enum StreamCategoryRule {
 }
 
 public protocol Projectable {
-
-    associatedtype ID: Hashable
-    
     static var categoryRule: StreamCategoryRule { get }
     static var category: String { get }
     
-    var id: ID { get }
 }
 
 extension Projectable {
-    public static func getStreamName(id: ID) -> String {
+    public static func getStreamName(id: String) -> String {
         "\(category)-\(id)"
     }
 }

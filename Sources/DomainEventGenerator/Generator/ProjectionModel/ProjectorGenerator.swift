@@ -8,7 +8,7 @@
 import Foundation
 import Yams
 
-package struct PresenterGenerator {
+package struct ProjectorGenerator {
     package let definitions: [String: EventProjectionDefinition]
     
     package init(projectionModelYamlFileURL: URL) throws {
@@ -35,9 +35,7 @@ package struct PresenterGenerator {
         
         for (modelName, definition) in definitions{
             
-            let protocolName = "\(modelName)PresenterProtocol"
-
-            var whereExpression = "ID == \(definition.idType.name)"
+            let protocolName = "\(modelName)ProjectorProtocol"
             
             //MARK: protocol definition generated
             ///
@@ -46,13 +44,13 @@ package struct PresenterGenerator {
             ///      func when(event: EventB) throws
             /// }
             ///
-            lines.append("\(accessLevel.rawValue) protocol \(protocolName): EventSourcingPresenter where \(whereExpression){")
+            lines.append("\(accessLevel.rawValue) protocol \(protocolName): EventSourcingProjector {")
             
             for eventName in definition.events{
-                lines.append("   func when(event: \(eventName)) throws")
+                lines.append("   func when(readModel: inout ReadModelType, event: \(eventName)) throws")
             }
             if let deletedEvent = definition.deletedEvent {
-                lines.append("   func when(event: \(deletedEvent)) throws")
+                lines.append("   func when(readModel: inout ReadModelType, event: \(deletedEvent)) throws")
             }
             lines.append("}")
             lines.append("")
@@ -62,14 +60,14 @@ package struct PresenterGenerator {
             // `init` begin
             lines.append("""
 extension \(protocolName) {
-    public func apply(events: [any DomainEvent]) throws {
+    public func apply(readModel: inout ReadModelType, events: [any DomainEvent]) throws {
         for event in events {
             switch event {
 """)
             for eventName in definition.events{
                 lines.append("""
             case let e as \(eventName):
-            try when(event: e)
+            try when(readModel: &readModel, event: e)
 """)
             }
             
@@ -89,6 +87,6 @@ extension \(protocolName) {
 }
 
 
-enum PresenterGeneratorError: Error{
+enum ProjectorGeneratorError: Error{
     case invalidCreatedEvent
 }

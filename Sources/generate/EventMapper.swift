@@ -47,8 +47,8 @@ struct GenerateEventMapperCommand: ParsableCommand {
         
         let aggregateEventsYamlFileURL = URL.init(filePath: eventDefinitionPath)
         let aggregateRootGenerator = try AggregateRootGenerator(aggregateRootName: aggregateRootName, aggregateEventsYamlFileURL: aggregateEventsYamlFileURL)
-        
-        let presenterGenerator = try PresenterGenerator(projectionModelYamlFileURL: .init(filePath: projectionModelDefinitionPath))
+    
+        let presenterGenerator = try ProjectorGenerator(projectionModelYamlFileURL: .init(filePath: projectionModelDefinitionPath))
 //        let projectionModelGenerator = try ProjectionModelGenerator(projectionModelYamlFileURL: .init(filePath: projectionModelDefinitionPath), aggregateRootName: aggregateRootName, aggregateEventsYamlFileURL: .init(filePath: eventDefinitionPath))
         
         guard let outputPath = output else {

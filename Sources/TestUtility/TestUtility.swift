@@ -12,7 +12,7 @@ import Logging
 let logger = Logger(label: "TestUtility")
 
 extension KurrentDBClient {
-    public func clearStreams<T: Projectable>(projectableType: T.Type, id: T.ID, execpted revision: KurrentDB.StreamRevision = .any, errorHandler: ((_ error: Error)->Void)? = nil) async {
+    public func clearStreams<T: Projectable>(projectableType: T.Type, id: String, execpted revision: KurrentDB.StreamRevision = .any, errorHandler: ((_ error: Error)->Void)? = nil) async {
         _ = try? await self.deleteStream(T.getStreamName(id: id)){ options in
             options.revision(expected: revision)
         }

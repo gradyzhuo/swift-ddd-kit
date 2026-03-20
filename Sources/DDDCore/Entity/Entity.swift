@@ -7,7 +7,7 @@
 
 import Foundation
 
-public protocol Entity: AnyObject {
+public protocol Entity: AnyObject where ID == String{
     associatedtype ID: Hashable
     
     var id: ID { get }

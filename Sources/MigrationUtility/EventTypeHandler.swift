@@ -9,6 +9,11 @@ import Foundation
 import KurrentDB
 
 struct AnyDomainEvent: DomainEvent {
+    var metadata: [String : String]?
+    
+    typealias Metadata = [String:String]
+    
+    
     var aggregateRootId: String = ""
     var occurred: Date = .now
     var id: UUID = .init()

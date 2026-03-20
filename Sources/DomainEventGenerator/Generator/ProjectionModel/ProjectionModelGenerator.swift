@@ -10,18 +10,18 @@ import Yams
 
 package struct ProjectionModelGenerator {
     package let aggregateRootGenerator: AggregateRootGenerator
-    package let presenterGenerator: PresenterGenerator
+    package let projectorGenerator: ProjectorGenerator
     
     package init(projectionModelYamlFileURL: URL, aggregateRootName: String, aggregateEventsYamlFileURL: URL) throws {
         self.aggregateRootGenerator = try .init(aggregateRootName: aggregateRootName, aggregateEventsYamlFileURL: aggregateEventsYamlFileURL)
-        self.presenterGenerator = try PresenterGenerator(projectionModelYamlFileURL: projectionModelYamlFileURL)
+        self.projectorGenerator = try ProjectorGenerator(projectionModelYamlFileURL: projectionModelYamlFileURL)
     }
     
     
     package func render(accessLevel: AccessLevel) -> [String] {
         var lines: [String] = []
         lines.append(contentsOf: aggregateRootGenerator.render(accessLevel: accessLevel))
-        lines.append(contentsOf: presenterGenerator.render(accessLevel: accessLevel))
+        lines.append(contentsOf: projectorGenerator.render(accessLevel: accessLevel))
         return lines
     }
 }
