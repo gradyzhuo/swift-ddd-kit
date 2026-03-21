@@ -19,7 +19,7 @@ struct AnyDomainEvent: DomainEvent {
     var id: UUID = .init()
 }
 
-public struct EventTypeHandler<EventType: DomainEvent, AggregateRootType: AggregateRoot, UserInfoType>: MigrationHandler{
+public struct EventTypeHandler<EventType: DomainEvent, AggregateRootType: AggregateRoot, UserInfoType: Sendable>: MigrationHandler{
     public var action: @Sendable (AggregateRootType, EventType, UserInfoType) throws -> Void
     
     init(action: @escaping @Sendable (AggregateRootType, EventType, UserInfoType) throws -> Void) {

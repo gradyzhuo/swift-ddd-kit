@@ -14,7 +14,7 @@ public protocol Migration: Sendable {
     associatedtype CreatedEvent: DomainEvent
     associatedtype AggregateRootType: AggregateRoot
     associatedtype EventMapper: EventTypeMapper
-    associatedtype UserInfoType
+    associatedtype UserInfoType: Sendable
     typealias CreatedHandler = @Sendable (_ createdEvent: CreatedEvent, _ userInfo: UserInfoType?) throws -> AggregateRootType?
     
     var eventMapper: EventMapper { get }
