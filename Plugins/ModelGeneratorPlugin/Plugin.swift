@@ -14,7 +14,7 @@ enum PluginError: Error {
     case configFileNotFound
 }
 
-@main struct ProjectionHelperGeneratorPlugin {
+@main struct ModelGeneratorPlugin {
     func createBuildCommands(
         pluginWorkDirectory: URL,
         tool: (String) throws -> URL,
@@ -71,7 +71,7 @@ enum PluginError: Error {
     }
 }
 
-extension ProjectionHelperGeneratorPlugin: BuildToolPlugin {
+extension ModelGeneratorPlugin: BuildToolPlugin {
     func createBuildCommands(context: PluginContext, target: Target) async throws -> [Command] {
         guard let swiftTarget = target as? SwiftSourceModuleTarget else {
             return []
@@ -92,7 +92,7 @@ extension ProjectionHelperGeneratorPlugin: BuildToolPlugin {
 #if canImport(XcodeProjectPlugin)
 import XcodeProjectPlugin
 
-extension ProjectionHelperGeneratorPlugin: XcodeBuildToolPlugin {
+extension ModelGeneratorPlugin: XcodeBuildToolPlugin {
     func createBuildCommands(context: XcodePluginContext, target: XcodeTarget) throws -> [Command] {
         try createBuildCommands(
             pluginWorkDirectory: context.pluginWorkDirectoryURL,

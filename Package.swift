@@ -26,8 +26,8 @@ let package = Package(
        .plugin(name: "DomainEventGeneratorPlugin", targets: [
            "DomainEventGeneratorPlugin"
        ]),
-       .plugin(name: "ProjectionModelGeneratorPlugin", targets: [
-           "ProjectionModelGeneratorPlugin"
+       .plugin(name: "ModelGeneratorPlugin", targets: [
+           "ModelGeneratorPlugin"
        ])
     ],
     dependencies: [
@@ -117,7 +117,7 @@ let package = Package(
             "generate",
           ]),
         .plugin(
-          name: "ProjectionModelGeneratorPlugin",
+          name: "ModelGeneratorPlugin",
           capability: .buildTool(),
           dependencies: [
             "generate"
