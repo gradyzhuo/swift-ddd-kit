@@ -9,7 +9,7 @@ import Foundation
 import ArgumentParser
 import DomainEventGenerator
 
-struct GenerateProjectionModelCommand: ParsableCommand {
+struct GenerateModelCommand: ParsableCommand {
     
     static let configuration = CommandConfiguration(
         commandName: "presenter",
