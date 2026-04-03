@@ -21,6 +21,10 @@ let package = Package(
             name: "MigrationUtility",
             targets: ["MigrationUtility"]),
         .library(
+            name: "ReadModelPersistence",
+            targets: ["ReadModelPersistence"]),
+        .library(name: "ReadModelPersistencePostgres", targets: ["ReadModelPersistencePostgres"]),
+        .library(
             name: "DomainEventGenerator",
             targets: ["DomainEventGenerator"]),
        .plugin(name: "DomainEventGeneratorPlugin", targets: [
@@ -36,6 +40,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3"),
         .package(url: "https://github.com/apple/swift-async-algorithms.git", from: "1.0.4"),
+        .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.21.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -46,6 +51,7 @@ let package = Package(
                 "EventSourcing",
                 "KurrentSupport",
                 "EventBus",
+                "ReadModelPersistence",
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "AsyncAlgorithms", package: "swift-async-algorithms"),
             ]),
@@ -75,6 +81,25 @@ let package = Package(
                 "DDDCore",
                 .product(name: "KurrentDB", package: "swift-kurrentdb"),
             ]),
+        .target(
+            name: "ReadModelPersistence",
+            dependencies: [
+                "DDDCore",
+                "EventSourcing",
+            ]),
+        .target(
+            name: "ReadModelPersistencePostgres",
+            dependencies: [
+                "ReadModelPersistence",
+                .product(name: "PostgresNIO", package: "postgres-nio"),
+            ]),
+        .testTarget(
+            name: "ReadModelPersistencePostgresIntegrationTests",
+            dependencies: [
+                "ReadModelPersistencePostgres",
+                "ReadModelPersistence",
+                .product(name: "PostgresNIO", package: "postgres-nio"),
+            ]),
         .target(name: "MigrationUtility",
                 dependencies: [
                     "DDDCore",
@@ -92,6 +117,10 @@ let package = Package(
         .testTarget(
             name: "DDDKitUnitTests",
             dependencies: ["DDDCore", "EventSourcing", "EventBus"]
+        ),
+        .testTarget(
+            name: "ReadModelPersistenceTests",
+            dependencies: ["ReadModelPersistence", "DDDCore", "EventSourcing"]
         ),
         .target(name: "DomainEventGenerator",
                 dependencies: [
