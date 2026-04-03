@@ -28,6 +28,8 @@ public struct PostgresJSONReadModelStore<Model: ReadModel & Sendable>: ReadModel
                 return StoredReadModel(readModel: model, revision: UInt64(bitPattern: revision))
             }
             return nil
+        } catch let e as ReadModelStoreError {
+            throw e
         } catch {
             throw ReadModelStoreError.fetchFailed(id: id, cause: error)
         }
@@ -46,6 +48,8 @@ public struct PostgresJSONReadModelStore<Model: ReadModel & Sendable>: ReadModel
                 ON CONFLICT (id, type) DO UPDATE
                     SET data = \(jsonString)::jsonb, revision = \(rev), updated_at = now()
                 """)
+        } catch let e as ReadModelStoreError {
+            throw e
         } catch {
             throw ReadModelStoreError.saveFailed(id: readModel.id, cause: error)
         }
@@ -56,6 +60,8 @@ public struct PostgresJSONReadModelStore<Model: ReadModel & Sendable>: ReadModel
             try await client.query(
                 "DELETE FROM \(unescaped: tableName) WHERE id = \(id) AND type = \(typeName)"
             )
+        } catch let e as ReadModelStoreError {
+            throw e
         } catch {
             throw ReadModelStoreError.deleteFailed(id: id, cause: error)
         }

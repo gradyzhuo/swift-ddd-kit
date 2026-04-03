@@ -2,6 +2,7 @@
 import Testing
 import Foundation
 import PostgresNIO
+import EventSourcing
 @testable import ReadModelPersistence
 @testable import ReadModelPersistencePostgres
 

@@ -1,2 +1,2 @@
 import DDDCore
-@_exported import EventSourcing
+import EventSourcing
