@@ -23,7 +23,9 @@ let package = Package(
         .library(
             name: "ReadModelPersistence",
             targets: ["ReadModelPersistence"]),
-        .library(name: "ReadModelPersistencePostgres", targets: ["ReadModelPersistencePostgres"]),
+        .library(
+            name: "ReadModelPersistencePostgres",
+            targets: ["ReadModelPersistencePostgres"]),
         .library(
             name: "DomainEventGenerator",
             targets: ["DomainEventGenerator"]),
@@ -97,7 +99,6 @@ let package = Package(
             name: "ReadModelPersistencePostgresIntegrationTests",
             dependencies: [
                 "ReadModelPersistencePostgres",
-                "ReadModelPersistence",
                 .product(name: "PostgresNIO", package: "postgres-nio"),
             ]),
         .target(name: "MigrationUtility",
