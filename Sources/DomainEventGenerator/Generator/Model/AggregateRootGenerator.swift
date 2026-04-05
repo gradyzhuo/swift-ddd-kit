@@ -19,7 +19,7 @@ package struct AggregateRootGenerator {
 
         let aggregateEventNames = aggregateEvents.events.filter{ e in !createdEvents.contains(where: { event in event.name == e.name}) && e.name != deletedEvent?.name }.map(\.name)
         
-        let aggregateRootProjectionModel = EventProjectionDefinition(model: .aggregateRoot, createdEvents: createdEvents.map{ $0.name }, deletedEvent: deletedEvent?.name, events: aggregateEventNames)
+        let aggregateRootProjectionModel = EventProjectionDefinition(model: .aggregateRoot, kurrentDBEvents: aggregateEventNames.map { .plain($0) }, createdKurrentDBEvents: createdEvents.map{ .plain($0.name) }, deletedEvent: deletedEvent?.name)
         
         self.wrappedDefinition = (aggregateRootName, aggregateRootProjectionModel)
     }

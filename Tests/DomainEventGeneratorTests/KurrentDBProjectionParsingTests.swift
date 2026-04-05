@@ -148,8 +148,15 @@ struct KurrentDBProjectionParsingTests {
             - OrderReassigned: ""
         """
         let decoder = YAMLDecoder()
-        #expect(throws: KurrentDBProjectionError.self) {
+        #expect {
             _ = try decoder.decode([String: EventProjectionDefinition].self, from: yaml)
+        } throws: { error in
+            // YAMLDecoder wraps non-DecodingErrors in DecodingError.dataCorrupted;
+            // check both the direct and wrapped case.
+            if error is KurrentDBProjectionError { return true }
+            if case .dataCorrupted(let ctx) = error as? DecodingError,
+               ctx.underlyingError is KurrentDBProjectionError { return true }
+            return false
         }
     }
 
