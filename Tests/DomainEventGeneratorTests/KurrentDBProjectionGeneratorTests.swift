@@ -119,3 +119,92 @@ struct KurrentDBProjectionGeneratorTests {
         #expect(js.contains("$init: function()"))
     }
 }
+
+@Suite("KurrentDBProjectionFileGenerator")
+struct KurrentDBProjectionFileGeneratorTests {
+
+    @Test("fileGeneratorWritesJsFile — writes correct JS file for definition with category")
+    func fileGeneratorWritesJsFile() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KurrentDBProjectionFileGeneratorTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let yamlContent = """
+        OC_GetOrder:
+          model: readModel
+          category: Order
+          idField: orderId
+          events:
+            - OrderCreated
+            - OrderUpdated
+        """
+        let yamlFileURL = tmpDir.appendingPathComponent("projection-model.yaml")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        try yamlContent.write(to: yamlFileURL, atomically: true, encoding: .utf8)
+
+        let outputDir = tmpDir.appendingPathComponent("output")
+        let generator = try KurrentDBProjectionFileGenerator(projectionModelYamlFileURL: yamlFileURL)
+        try generator.writeFiles(to: outputDir)
+
+        let jsFileURL = outputDir.appendingPathComponent("OC_GetOrderProjection.js")
+        #expect(FileManager.default.fileExists(atPath: jsFileURL.path))
+        let jsContent = try String(contentsOf: jsFileURL, encoding: .utf8)
+        #expect(jsContent.contains(#"fromStreams(["$ce-Order"])"#))
+        #expect(jsContent.contains("OrderCreated: function(state, event)"))
+        #expect(jsContent.contains("OrderUpdated: function(state, event)"))
+        #expect(jsContent.contains(#"linkTo("OC_GetOrder-" + event.body["orderId"], event)"#))
+    }
+
+    @Test("fileGeneratorSkipsDefinitionsWithoutCategory — no JS file written when category absent")
+    func fileGeneratorSkipsDefinitionsWithoutCategory() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KurrentDBProjectionFileGeneratorTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let yamlContent = """
+        NoCategoryModel:
+          model: readModel
+          events:
+            - SomeEvent
+        """
+        let yamlFileURL = tmpDir.appendingPathComponent("projection-model.yaml")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        try yamlContent.write(to: yamlFileURL, atomically: true, encoding: .utf8)
+
+        let outputDir = tmpDir.appendingPathComponent("output")
+        let generator = try KurrentDBProjectionFileGenerator(projectionModelYamlFileURL: yamlFileURL)
+        try generator.writeFiles(to: outputDir)
+
+        let jsFileURL = outputDir.appendingPathComponent("NoCategoryModelProjection.js")
+        #expect(!FileManager.default.fileExists(atPath: jsFileURL.path))
+    }
+
+    @Test("fileGeneratorCreatesOutputDirectory — output directory is created when absent")
+    func fileGeneratorCreatesOutputDirectory() throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KurrentDBProjectionFileGeneratorTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let yamlContent = """
+        OrderModel:
+          model: readModel
+          category: Order
+          idField: orderId
+          events:
+            - OrderCreated
+        """
+        let yamlFileURL = tmpDir.appendingPathComponent("projection-model.yaml")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        try yamlContent.write(to: yamlFileURL, atomically: true, encoding: .utf8)
+
+        let outputDir = tmpDir.appendingPathComponent("nested/output/dir")
+        #expect(!FileManager.default.fileExists(atPath: outputDir.path))
+
+        let generator = try KurrentDBProjectionFileGenerator(projectionModelYamlFileURL: yamlFileURL)
+        try generator.writeFiles(to: outputDir)
+
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: outputDir.path, isDirectory: &isDirectory)
+        #expect(exists && isDirectory.boolValue)
+    }
+}
