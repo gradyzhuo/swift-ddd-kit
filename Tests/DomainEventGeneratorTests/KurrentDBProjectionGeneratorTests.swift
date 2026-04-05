@@ -72,7 +72,7 @@ struct KurrentDBProjectionGeneratorTests {
             kurrentDBEvents: [.plain("OrderCreated")]
         )
         let generator = KurrentDBProjectionGenerator(name: "MyModel", definition: definition)
-        #expect(throws: KurrentDBProjectionError.self) {
+        #expect(throws: KurrentDBProjectionError.missingIdFieldForPlainEvent(modelName: "MyModel", eventName: "OrderCreated")) {
             _ = try generator.render()
         }
     }
@@ -177,6 +177,38 @@ struct KurrentDBProjectionFileGeneratorTests {
 
         let jsFileURL = outputDir.appendingPathComponent("NoCategoryModelProjection.js")
         #expect(!FileManager.default.fileExists(atPath: jsFileURL.path))
+    }
+
+    @Test("createdEvents appear before events in written JS file")
+    func fileGeneratorCreatedEventsAppearFirst() throws {
+        let yaml = """
+        OrderModel:
+          model: readModel
+          category: Order
+          idField: orderId
+          createdEvents:
+            - OrderCreated
+          events:
+            - OrderUpdated
+        """
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let yamlFile = tmpDir.appendingPathComponent("model.yaml")
+        try FileManager.default.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+        try yaml.write(to: yamlFile, atomically: true, encoding: .utf8)
+
+        let outputDir = tmpDir.appendingPathComponent("out")
+        let generator = try KurrentDBProjectionFileGenerator(projectionModelYamlFileURL: yamlFile)
+        try generator.writeFiles(to: outputDir)
+
+        let jsFile = outputDir.appendingPathComponent("OrderModelProjection.js")
+        let js = try String(contentsOf: jsFile, encoding: .utf8)
+
+        let createdRange = try #require(js.range(of: "OrderCreated"))
+        let updatedRange = try #require(js.range(of: "OrderUpdated"))
+        #expect(createdRange.lowerBound < updatedRange.lowerBound)
     }
 
     @Test("fileGeneratorCreatesOutputDirectory — output directory is created when absent")

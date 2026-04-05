@@ -71,6 +71,7 @@ package struct KurrentDBProjectionFileGenerator {
                 url: projectionModelYamlFileURL, reason: "The yaml file is empty.")
         }
         let yamlDecoder = YAMLDecoder()
+        // Decode errors propagate; unlike ProjectorGenerator, we do not swallow them.
         self.definitions = try yamlDecoder.decode([String: EventProjectionDefinition].self, from: yamlData)
     }
 
