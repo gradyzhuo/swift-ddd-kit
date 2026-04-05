@@ -48,7 +48,7 @@ struct KurrentDBProjectionParsingTests {
             return
         }
         #expect(name == "OrderReassigned")
-        #expect(body.contains("linkTo"))
+        #expect(body.trimmingCharacters(in: .whitespacesAndNewlines) == #"linkTo("Target-" + event.body.newId, event);"#)
     }
 
     @Test("mixed event list decodes correctly")
@@ -136,5 +136,37 @@ struct KurrentDBProjectionParsingTests {
             Issue.record("Expected second createdEvent to be .custom")
             return
         }
+    }
+
+    @Test("empty custom handler body throws emptyCustomHandlerBody error")
+    func emptyCustomBodyThrows() throws {
+        let yaml = """
+        MyModel:
+          model: readModel
+          category: Order
+          events:
+            - OrderReassigned: ""
+        """
+        let decoder = YAMLDecoder()
+        #expect(throws: KurrentDBProjectionError.self) {
+            _ = try decoder.decode([String: EventProjectionDefinition].self, from: yaml)
+        }
+    }
+
+    @Test("plain event without idField is decodable but generator throws missingIdField")
+    func plainEventWithoutIdFieldIsDecodable() throws {
+        // Parsing succeeds — the missingIdField error is raised at generation time (see KurrentDBProjectionGeneratorTests)
+        let yaml = """
+        MyModel:
+          model: readModel
+          category: Order
+          events:
+            - OrderCreated
+        """
+        let decoder = YAMLDecoder()
+        let definitions = try decoder.decode([String: EventProjectionDefinition].self, from: yaml)
+        let def = try #require(definitions["MyModel"])
+        #expect(def.kurrentDBEvents.count == 1)
+        #expect(def.idField == nil)
     }
 }

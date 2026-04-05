@@ -1,6 +1,6 @@
 import Foundation
 
-package enum KurrentDBProjectionEventItem {
+package enum KurrentDBProjectionEventItem: Equatable, Sendable {
     case plain(String)
     case custom(name: String, body: String)
 
