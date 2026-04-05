@@ -24,8 +24,8 @@ struct GenerateKurrentDBProjectionCommand: ParsableCommand {
     var output: String = "projections"
 
     func run() throws {
-        let inputURL = URL(filePath: input)
-        let outputURL = URL(filePath: output)
+        let inputURL = URL(fileURLWithPath: input)
+        let outputURL = URL(fileURLWithPath: output)
         let fileGenerator = try KurrentDBProjectionFileGenerator(projectionModelYamlFileURL: inputURL)
         try fileGenerator.writeFiles(to: outputURL)
     }
