@@ -50,7 +50,7 @@ package struct EventProjectionDefinition: Codable {
 
         // createdEvents: accepts String, [String], or mixed [{name: body}] list
         let createdKurrentDBEvents: [KurrentDBProjectionEventItem]
-        if let single = try? container.decodeIfPresent(String.self, forKey: .createdEvents).flatMap({ $0 }) {
+        if let single = try? container.decode(String.self, forKey: .createdEvents) {
             createdKurrentDBEvents = [.plain(single)]
         } else {
             createdKurrentDBEvents = try container.decodeIfPresent(
