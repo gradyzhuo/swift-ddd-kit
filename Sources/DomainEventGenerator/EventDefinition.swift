@@ -68,29 +68,32 @@ extension Event {
             let kind = try container.decodeIfPresent(EventKind.self, forKey: .kind)
             self.kind = kind ?? .domainEvent
             self.aggregateRootId = try container.decodeIfPresent(AggregateRootIdDefinition.self, forKey: .aggregateRootId)
-            do{
+            do {
                 self.properties = try container.decodeIfPresent([PropertyDefinition].self, forKey: .properties)
-            }catch {
-                let convenienceProperties = try container.decodeIfPresent([String:String].self, forKey: .properties)
-                self.properties = convenienceProperties.map{
-                    let infos = $0.map{
-                        let propertyName = $0.key
-                        let propertyInfos = $0.value
-                                                .split(separator: ",")
-                        let propertyType = String(propertyInfos[0].trimmingCharacters(in: .whitespaces))
-                        let index = Int(propertyInfos[1].trimmingCharacters(in: .whitespaces))
-                        return (name:propertyName, type: propertyType, index: index)
-                    }
-                    let sortedInfos = infos.sorted{
-                        guard let lhsIndex = $0.index, let rhsIndex = $1.index else {
-                            return false
+            } catch {
+                // Mapping format: "propertyName: Type" or legacy "propertyName: Type, index"
+                // Yams preserves YAML insertion order via allKeys, so explicit indices are no longer needed.
+                let orderedMap = try container.decodeIfPresent(OrderedStringMap.self, forKey: .properties)
+                self.properties = orderedMap.map { map in
+                    let items = map.pairs.map { key, value -> (name: String, type: String, index: Int?) in
+                        let parts = value.split(separator: ",").map {
+                            String($0.trimmingCharacters(in: .whitespaces))
                         }
-                        return lhsIndex < rhsIndex
+                        let rawType = parts[0]
+                        let index = parts.count > 1 ? Int(parts[1]) : nil
+                        return (name: key, type: rawType, index: index)
                     }
-                    
-                    return sortedInfos.map{
-                        .init(name: $0.name, type: .init(rawValue: $0.type))
+                    // Deprecated: if any property uses ", index" syntax, sort by index and warn.
+                    if items.contains(where: { $0.index != nil }) {
+                        fputs("warning: [DomainEventGenerator] \"Type, index\" syntax in properties is deprecated. " +
+                              "Write properties in the desired order and omit the index.\n", stderr)
+                        let sorted = items.sorted {
+                            guard let l = $0.index, let r = $1.index else { return false }
+                            return l < r
+                        }
+                        return sorted.map { PropertyDefinition(name: $0.name, type: .init(rawValue: $0.type)) }
                     }
+                    return items.map { PropertyDefinition(name: $0.name, type: .init(rawValue: $0.type)) }
                 }
             }
             
@@ -121,5 +124,25 @@ extension Event{
 extension Event {
     package struct AggregateRootIdDefinition: Codable {
         let alias: String
+    }
+}
+
+// MARK: - Ordered mapping decoder (preserves YAML insertion order)
+
+private struct OrderedStringMap: Decodable {
+    let pairs: [(key: String, value: String)]
+
+    private struct DynamicKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicKey.self)
+        pairs = try container.allKeys.map { key in
+            (key: key.stringValue, value: try container.decode(String.self, forKey: key))
+        }
     }
 }
