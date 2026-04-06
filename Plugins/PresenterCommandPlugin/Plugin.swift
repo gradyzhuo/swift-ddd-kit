@@ -43,42 +43,28 @@ struct ProjectionModelCommandPlugin {
         process.executableURL = executableURL
         process.arguments = arguments
 
-        let outputPipe = Pipe()
         let errorPipe = Pipe()
-        process.standardOutput = outputPipe
         process.standardError = errorPipe
 
         do {
           try process.run()
         } catch {
-          let stdErr: String?
-          if let errorData = try errorPipe.fileHandleForReading.readToEnd() {
-            stdErr = String(decoding: errorData, as: UTF8.self)
-          } else {
-            stdErr = nil
-          }
           throw CommandPluginError.generationFailure(
             executable: executableURL.absoluteStringNoScheme,
             arguments: arguments,
-            stdErr: stdErr
+            stdErr: stderrString(from: errorPipe)
           )
         }
         process.waitUntilExit()
-        
+
         if process.terminationReason == .exit && process.terminationStatus == 0 {
           return
         }
 
-        let stdErr: String?
-        if let errorData = try errorPipe.fileHandleForReading.readToEnd() {
-          stdErr = String(decoding: errorData, as: UTF8.self)
-        } else {
-          stdErr = nil
-        }
         throw CommandPluginError.generationFailure(
           executable: executableURL.absoluteStringNoScheme,
           arguments: arguments,
-          stdErr: stdErr
+          stdErr: stderrString(from: errorPipe)
         )
         
     }
@@ -99,6 +85,11 @@ struct ProjectionModelCommandPlugin {
 
       return (options, inputs)
     }
+}
+
+private func stderrString(from pipe: Pipe) -> String? {
+    guard let data = try? pipe.fileHandleForReading.readToEnd(), !data.isEmpty else { return nil }
+    return String(decoding: data, as: UTF8.self)
 }
 
 extension ProjectionModelCommandPlugin: CommandPlugin{

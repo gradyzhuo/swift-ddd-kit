@@ -32,20 +32,13 @@ struct GenerateKurrentDBProjectionsPlugin {
         process.executableURL = executableURL
         process.arguments = ["kurrentdb-projection"] + arguments
 
-        let outputPipe = Pipe()
         let errorPipe = Pipe()
-        process.standardOutput = outputPipe
         process.standardError = errorPipe
 
         do {
             try process.run()
         } catch {
-            let stdErr: String?
-            if let errorData = try errorPipe.fileHandleForReading.readToEnd() {
-                stdErr = String(decoding: errorData, as: UTF8.self)
-            } else {
-                stdErr = nil
-            }
+            let stdErr = stderrString(from: errorPipe)
             throw CommandPluginError.generationFailure(
                 executable: executableURL.absoluteStringNoScheme,
                 arguments: arguments,
@@ -58,18 +51,17 @@ struct GenerateKurrentDBProjectionsPlugin {
             return
         }
 
-        let stdErr: String?
-        if let errorData = try errorPipe.fileHandleForReading.readToEnd() {
-            stdErr = String(decoding: errorData, as: UTF8.self)
-        } else {
-            stdErr = nil
-        }
         throw CommandPluginError.generationFailure(
             executable: executableURL.absoluteStringNoScheme,
             arguments: arguments,
-            stdErr: stdErr
+            stdErr: stderrString(from: errorPipe)
         )
     }
+}
+
+private func stderrString(from pipe: Pipe) -> String? {
+    guard let data = try? pipe.fileHandleForReading.readToEnd(), !data.isEmpty else { return nil }
+    return String(decoding: data, as: UTF8.self)
 }
 
 extension GenerateKurrentDBProjectionsPlugin: CommandPlugin {
