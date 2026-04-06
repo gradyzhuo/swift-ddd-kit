@@ -266,6 +266,102 @@ OrderSummary:
     - OrderShipped
 ```
 
+### GenerateKurrentDBProjectionsPlugin
+
+Generates KurrentDB server-side projection `.js` files from `projection-model.yaml`. These projections run inside KurrentDB and route events into per-entity derived streams that Swift projectors read from.
+
+Unlike the build-tool plugins above, this is a **Command Plugin** — you run it on demand:
+
+```bash
+swift package generate-kurrentdb-projections \
+  path/to/projection-model.yaml \
+  --output projections/
+```
+
+Or use the CLI directly:
+
+```bash
+swift run generate kurrentdb-projection \
+  path/to/projection-model.yaml \
+  --output projections/
+```
+
+#### YAML schema
+
+Add `category` and `idField` to any `readModel` definition, and the plugin will generate a `.js` file for it. Definitions without `category` are skipped.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `category` | String | KurrentDB aggregate category. Generates `fromStreams(["$ce-{category}"])`. Required for JS generation. |
+| `idField` | String | Field in `event.body` used to route events to the per-entity stream. Required when any event uses the standard routing (plain string). |
+
+Each item in `events` / `createdEvents` can be:
+
+- **Plain string** — standard routing via `idField`:
+  ```yaml
+  events:
+    - OrderCreated
+  ```
+
+- **Mapping with `|` body** — custom JS placed inside the generated `function(state, event)` wrapper:
+  ```yaml
+  events:
+    - OrderReassigned: |
+        linkTo("OrderSummary-" + event.body.newOrderId, event);
+  ```
+
+Both forms can be mixed in the same list.
+
+#### Example
+
+```yaml
+# projection-model.yaml
+OrderSummary:
+  model: readModel
+  category: Order
+  idField: orderId
+  createdEvents:
+    - OrderCreated
+  events:
+    - OrderUpdated
+    - OrderReassigned: |
+        linkTo("OrderSummary-" + event.body.newOrderId, event);
+```
+
+Generated `projections/OrderSummaryProjection.js`:
+
+```js
+fromStreams(["$ce-Order"])
+.when({
+    $init: function(){ return {} },
+    OrderCreated: function(state, event) {
+        if (event.isJson) {
+            linkTo("OrderSummary-" + event.body["orderId"], event);
+        }
+    },
+    OrderUpdated: function(state, event) {
+        if (event.isJson) {
+            linkTo("OrderSummary-" + event.body["orderId"], event);
+        }
+    },
+    OrderReassigned: function(state, event) {
+        if (event.isJson) {
+            linkTo("OrderSummary-" + event.body.newOrderId, event);
+        }
+    },
+});
+```
+
+#### Three-tier design
+
+| Tier | YAML | Output |
+|------|------|--------|
+| Standard routing | `category` + `idField` + plain string events | Fully generated JS |
+| Custom handler | Event entry with `\|` body | Boilerplate generated, custom body embedded |
+| Full custom | No YAML — hand-written `.js` | Not touched by generator |
+
+Tiers 1 and 2 can be mixed within a single definition. Hand-written `.js` files in `projections/` coexist without conflict.
+
 ## Modules
 
 | Module | Purpose |
@@ -276,6 +372,8 @@ OrderSummary:
 | `KurrentSupport` | KurrentDB adapter: `KurrentStorageCoordinator`, `EventTypeMapper` |
 | `EventBus` | In-memory event bus for local event distribution |
 | `MigrationUtility` | Event schema migration framework |
+| `ReadModelPersistence` | `ReadModelStore` protocol + in-memory store for read model snapshots |
+| `ReadModelPersistencePostgres` | PostgreSQL + JSONB backed `ReadModelStore` (optional dependency) |
 | `TestUtility` | Test helpers: `TestBundle`, stream cleanup utilities |
 
 ## License
