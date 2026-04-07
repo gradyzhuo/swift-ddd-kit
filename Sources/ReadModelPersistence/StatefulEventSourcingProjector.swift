@@ -1,35 +1,48 @@
 import DDDCore
 import EventSourcing
 
-public protocol StatefulEventSourcingProjector: EventSourcingProjector where ReadModelType: Sendable {
-    associatedtype Store: ReadModelStore where Store.Model == ReadModelType
+/// A wrapper that adds stateful read model persistence to any `EventSourcingProjector`.
+///
+/// Instead of re-implementing projection logic, pass an existing projector and a store.
+/// `execute(input:)` handles incremental/full-replay automatically:
+/// - **No snapshot**: full replay → build + apply all events → save to store
+/// - **Snapshot found**: incremental → apply only events after stored revision → update store
+///
+/// ```swift
+/// let projector = OrderProjector(coordinator: coordinator)
+/// let stateful  = StatefulEventSourcingProjector(projector: projector, store: store)
+/// let result    = try await stateful.execute(input: input)
+/// ```
+public struct StatefulEventSourcingProjector<
+    Projector: EventSourcingProjector,
+    Store: ReadModelStore
+> where Store.Model == Projector.ReadModelType {
 
-    var store: Store { get }
+    public let projector: Projector
+    public let store: Store
+    private let _readModelId: (Projector.Input) -> Store.Model.ID
 
-    /// Map the projector input to the read model's store key.
-    /// A default is provided when `ReadModelType.ID == String`.
-    func readModelId(for input: Input) -> ReadModelType.ID
-}
-
-// MARK: - Default readModelId when ID is String
-
-extension StatefulEventSourcingProjector where ReadModelType.ID == String {
-    public func readModelId(for input: Input) -> String {
-        input.id
+    /// Designated initialiser — supply a custom `readModelId` closure when
+    /// `ReadModelType.ID` is not `String`.
+    public init(
+        projector: Projector,
+        store: Store,
+        readModelId: @escaping (Projector.Input) -> Store.Model.ID
+    ) {
+        self.projector = projector
+        self.store = store
+        self._readModelId = readModelId
     }
-}
 
-// MARK: - Default execute with incremental update
-
-extension StatefulEventSourcingProjector {
-
-    public func execute(input: Input) async throws -> CQRSProjectorOutput<ReadModelType>? {
-        let modelId = readModelId(for: input)
-        let stored = try await store.fetch(byId: modelId)
+    public func execute(input: Projector.Input) async throws -> CQRSProjectorOutput<Projector.ReadModelType>? {
+        let modelId = _readModelId(input)
+        let stored  = try await store.fetch(byId: modelId)
 
         if let stored {
-            // Incremental path: fetch only events after the stored revision.
-            guard let result = try await coordinator.fetchEvents(byId: input.id, afterRevision: stored.revision) else {
+            // Incremental path — fetch only events after the stored revision.
+            guard let result = try await projector.coordinator.fetchEvents(
+                byId: input.id, afterRevision: stored.revision
+            ) else {
                 return .init(readModel: stored.readModel, message: nil)
             }
 
@@ -38,31 +51,40 @@ extension StatefulEventSourcingProjector {
             }
 
             var readModel = stored.readModel
-            try apply(readModel: &readModel, events: result.events)
+            try projector.apply(readModel: &readModel, events: result.events)
             try await store.save(readModel: readModel, revision: result.latestRevision)
-
             return .init(readModel: readModel, message: nil)
+
         } else {
-            // Full replay path: first-time projection.
-            guard let fetchedResult = try await coordinator.fetchEvents(byId: input.id) else {
+            // Full replay path — first-time projection.
+            guard let fetchedResult = try await projector.coordinator.fetchEvents(byId: input.id) else {
                 return nil
             }
 
             guard !fetchedResult.events.isEmpty else {
                 throw DDDError.eventsNotFoundInProjector(
                     operation: "buildReadModel",
-                    projectorType: "\(Self.self)"
+                    projectorType: "\(Projector.self)"
                 )
             }
 
-            guard var readModel = try buildReadModel(input: input) else {
+            guard var readModel = try projector.buildReadModel(input: input) else {
                 return nil
             }
 
-            try apply(readModel: &readModel, events: fetchedResult.events)
+            try projector.apply(readModel: &readModel, events: fetchedResult.events)
             try await store.save(readModel: readModel, revision: fetchedResult.latestRevision)
-
             return .init(readModel: readModel, message: nil)
         }
+    }
+}
+
+// MARK: - Convenience init when ReadModel.ID == String
+
+extension StatefulEventSourcingProjector where Store.Model.ID == String {
+    /// Convenience initialiser when `ReadModelType.ID == String` —
+    /// `readModelId` defaults to `input.id`.
+    public init(projector: Projector, store: Store) {
+        self.init(projector: projector, store: store, readModelId: { $0.id })
     }
 }

@@ -17,7 +17,11 @@ let package = Package(
                 .product(name: "ReadModelPersistence", package: "swift-ddd-kit"),
                 .product(name: "ReadModelPersistencePostgres", package: "swift-ddd-kit"),
             ],
-            path: "Sources"
+            path: "Sources",
+            plugins: [
+                .plugin(name: "DomainEventGeneratorPlugin", package: "swift-ddd-kit"),
+                .plugin(name: "ModelGeneratorPlugin", package: "swift-ddd-kit"),
+            ]
         ),
     ]
 )

@@ -26,15 +26,19 @@ private struct TestInput: CQRSProjectorInput {
     let id: String
 }
 
-private struct TestProjector: StatefulEventSourcingProjector {
+/// Plain EventSourcingProjector — contains only projection logic, no store.
+private struct TestProjector: EventSourcingProjector {
     typealias Input = TestInput
     typealias ReadModelType = TestReadModel
     typealias StorageCoordinator = InMemoryStorageCoordinator
 
-    let coordinator: InMemoryStorageCoordinator
-    let store: InMemoryReadModelStore<TestReadModel>
-
     static var categoryRule: StreamCategoryRule { .custom("Test") }
+
+    let coordinator: InMemoryStorageCoordinator
+
+    func buildReadModel(input: TestInput) throws -> TestReadModel? {
+        TestReadModel(id: input.id)
+    }
 
     func apply(readModel: inout TestReadModel, events: [any DomainEvent]) throws {
         for event in events {
@@ -43,10 +47,6 @@ private struct TestProjector: StatefulEventSourcingProjector {
                 readModel.applyCount += 1
             }
         }
-    }
-
-    func buildReadModel(input: TestInput) throws -> TestReadModel? {
-        TestReadModel(id: input.id)
     }
 }
 
@@ -58,8 +58,11 @@ struct StatefulProjectorTests {
     @Test("首次 execute 全量重播並快取")
     func firstExecuteFullReplayAndCaches() async throws {
         let coordinator = InMemoryStorageCoordinator()
-        let store = InMemoryReadModelStore<TestReadModel>()
-        let projector = TestProjector(coordinator: coordinator, store: store)
+        let store       = InMemoryReadModelStore<TestReadModel>()
+        let stateful    = StatefulEventSourcingProjector(
+            projector: TestProjector(coordinator: coordinator),
+            store: store
+        )
 
         _ = try await coordinator.append(
             events: [
@@ -69,12 +72,11 @@ struct StatefulProjectorTests {
             byId: "a1", version: nil, external: nil
         )
 
-        let result = try await projector.execute(input: TestInput(id: "a1"))
+        let result = try await stateful.execute(input: TestInput(id: "a1"))
 
         #expect(result?.readModel.total == 30)
         #expect(result?.readModel.applyCount == 2)
 
-        // Verify stored in cache
         let cached = try await store.fetch(byId: "a1")
         #expect(cached != nil)
         #expect(cached?.readModel.total == 30)
@@ -84,10 +86,12 @@ struct StatefulProjectorTests {
     @Test("增量更新只 apply 新 events")
     func incrementalUpdateAppliesOnlyNewEvents() async throws {
         let coordinator = InMemoryStorageCoordinator()
-        let store = InMemoryReadModelStore<TestReadModel>()
-        let projector = TestProjector(coordinator: coordinator, store: store)
+        let store       = InMemoryReadModelStore<TestReadModel>()
+        let stateful    = StatefulEventSourcingProjector(
+            projector: TestProjector(coordinator: coordinator),
+            store: store
+        )
 
-        // Initial events
         _ = try await coordinator.append(
             events: [
                 CountIncremented(aggregateRootId: "a1", value: 10),
@@ -97,21 +101,18 @@ struct StatefulProjectorTests {
         )
 
         // First execute — full replay
-        _ = try await projector.execute(input: TestInput(id: "a1"))
+        _ = try await stateful.execute(input: TestInput(id: "a1"))
 
-        // Append more events
         _ = try await coordinator.append(
-            events: [
-                CountIncremented(aggregateRootId: "a1", value: 5),
-            ],
+            events: [CountIncremented(aggregateRootId: "a1", value: 5)],
             byId: "a1", version: 2, external: nil
         )
 
         // Second execute — incremental
-        let result = try await projector.execute(input: TestInput(id: "a1"))
+        let result = try await stateful.execute(input: TestInput(id: "a1"))
 
         #expect(result?.readModel.total == 35)
-        #expect(result?.readModel.applyCount == 3) // 2 from first + 1 incremental
+        #expect(result?.readModel.applyCount == 3)
 
         let cached = try await store.fetch(byId: "a1")
         #expect(cached?.revision == 3)
@@ -120,18 +121,21 @@ struct StatefulProjectorTests {
     @Test("無新 events 回傳快取不重新 apply")
     func noNewEventsReturnsCachedModel() async throws {
         let coordinator = InMemoryStorageCoordinator()
-        let store = InMemoryReadModelStore<TestReadModel>()
-        let projector = TestProjector(coordinator: coordinator, store: store)
+        let store       = InMemoryReadModelStore<TestReadModel>()
+        let stateful    = StatefulEventSourcingProjector(
+            projector: TestProjector(coordinator: coordinator),
+            store: store
+        )
 
         _ = try await coordinator.append(
             events: [CountIncremented(aggregateRootId: "a1", value: 10)],
             byId: "a1", version: nil, external: nil
         )
 
-        _ = try await projector.execute(input: TestInput(id: "a1"))
+        _ = try await stateful.execute(input: TestInput(id: "a1"))
 
         // Execute again without new events
-        let result = try await projector.execute(input: TestInput(id: "a1"))
+        let result = try await stateful.execute(input: TestInput(id: "a1"))
 
         #expect(result?.readModel.total == 10)
         #expect(result?.readModel.applyCount == 1) // Not re-applied
@@ -140,10 +144,13 @@ struct StatefulProjectorTests {
     @Test("不存在的 id 回傳 nil")
     func unknownIdReturnsNil() async throws {
         let coordinator = InMemoryStorageCoordinator()
-        let store = InMemoryReadModelStore<TestReadModel>()
-        let projector = TestProjector(coordinator: coordinator, store: store)
+        let store       = InMemoryReadModelStore<TestReadModel>()
+        let stateful    = StatefulEventSourcingProjector(
+            projector: TestProjector(coordinator: coordinator),
+            store: store
+        )
 
-        let result = try await projector.execute(input: TestInput(id: "ghost"))
+        let result = try await stateful.execute(input: TestInput(id: "ghost"))
         #expect(result == nil)
     }
 }
