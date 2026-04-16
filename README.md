@@ -2,6 +2,130 @@
 
 **swift-ddd-kit** is a Swift framework that brings Domain-Driven Design, Event Sourcing, and CQRS to Server-Side Swift. While the Swift backend ecosystem has grown significantly, the building blocks for production-grade DDD architecture — aggregate roots, event sourcing repositories, CQRS projectors, and event migration — have remained largely absent. swift-ddd-kit fills that gap.
 
+## Overview
+
+This framework focuses on:
+
+- Modeling business logic using **Aggregate Roots** as consistency boundaries
+- Capturing every state change as an immutable **Domain Event**
+- Replaying events to reconstruct state (**Event Sourcing**)
+- Separating write and read models through **CQRS Projectors**
+- Evolving event schemas safely with **Migration utilities**
+- Reducing boilerplate via **SPM build-tool plugins** (YAML → Swift code generation)
+
+## Architecture
+
+Write and Read are fully independent — they share no direct coupling. Both reach into KurrentDB separately: the Write side appends domain events; the Read side reads those same events to build query-optimized models.
+
+![Architecture Diagram](assets/architecture.png)
+
+<details>
+<summary>ASCII version</summary>
+
+```
+ ┌─────────────────────────────────────┬──────────────────────────────────────┐
+ │     WRITE SIDE (Command)            │     READ SIDE (Query)                │
+ ├─────────────────────────────────────┼──────────────────────────────────────┤
+ │ INTERFACE                           │ INTERFACE                            │
+ │   Command Handler                   │   Query Handler                      │
+ ├─────────────────────────────────────┼──────────────────────────────────────┤
+ │ APPLICATION                         │ APPLICATION                          │
+ │   Usecase                           │   EventSourcingProjector             │
+ │   EventSourcingRepository           │   ├─ buildReadModel(input:)          │
+ │                                     │   └─ apply(readModel:events:)        │
+ │                                     │   StatefulProjector                  │
+ ├─────────────────────────────────────┼──────────────────────────────────────┤
+ │ DOMAIN  (DDDCore)                   │ DOMAIN  (DDDCore)                    │
+ │   AggregateRoot                     │   ReadModel                          │
+ │   ├─ when(happened:)                │   └─ id (Codable)                    │
+ │   ├─ apply(event:)                  │                                      │
+ │   └─ ensureInvariant()              │                                      │
+ │   DomainEvent                       │                                      │
+ ├─────────────────────────────────────┼──────────────────────────────────────┤
+ │ INFRASTRUCTURE (KurrentSupport)     │ INFRASTRUCTURE (ReadModelPersistence)│
+ │   KurrentStorageCoordinator         │   KurrentStorageCoordinator          │
+ │   EventTypeMapper                   │   EventTypeMapper                    │
+ │                                     │   ReadModelStore                     │
+ └──────────────┬──────────────────────┴──────────────────┬───────────────────┘
+                │ appends                                 ▲         │ persists
+                ▼              reads events               │         ▼
+            KurrentDB ────────────────────────────────────┘   PostgreSQL / Memory
+           (Event Store)                             (Read Store)
+```
+
+</details>
+
+> Dependency direction follows Clean Architecture: all modules depend inward toward the Domain layer. Infrastructure implements Domain-defined protocols via Dependency Inversion.
+
+## Flow
+
+### Write Side (Command)
+
+```
+Command Handler
+  │
+  ├─ 1. repository.find(byId:)
+  │       └─ fetches event stream from KurrentDB → replays into AggregateRoot
+  │
+  ├─ 2. aggregate.apply(event:)
+  │       ├─ when(happened:)     mutates in-memory state
+  │       ├─ ensureInvariant()   validates domain invariants
+  │       └─ queues uncommitted events in AggregateRootMetadata
+  │
+  ├─ 3. repository.save(aggregateRoot:)
+  │       └─ appends uncommitted events to KurrentDB (optimistic concurrency)
+  │
+  └─ 4. eventBus.postAllEvent()
+          └─ publishes saved domain events to DomainEventBus subscribers
+```
+
+### Read Side (Query)
+
+```
+Query Handler
+  │
+  └─ StatefulEventSourcingProjector.execute(input:)
+        │
+        ├─ 1. store.fetch(byId:)
+        │       └─ loads cached ReadModel snapshot at revision N
+        │
+        ├─ 2. coordinator.fetchEvents(byId:, afterRevision: N)
+        │       └─ retrieves only new events from KurrentDB since last snapshot
+        │
+        ├─ 3. apply(readModel:events:)
+        │       └─ folds new events into the ReadModel
+        │
+        ├─ 4. store.save(readModel:, revision:)
+        │       └─ persists updated snapshot to PostgreSQL or in-memory store
+        │
+        └─ CQRSProjectorOutput<ReadModel>
+```
+
+## Design Principles
+
+**Separation of Concerns** — write model (domain), read model (projection), and infrastructure (event store) are kept distinct and independently replaceable.
+
+**Event-First Thinking** — state is never stored directly; it is always derived by replaying events. Events are the source of truth.
+
+**Explicit Domain Modeling** — business logic lives in aggregate roots. Anemic models with external mutation are avoided by design.
+
+## Why Swift?
+
+- Strong type system catches event schema mismatches at compile time
+- Native `async`/`await` concurrency maps cleanly onto event stream consumption
+- Swift 6 strict concurrency enables safe multi-actor architectures
+- A growing server-side ecosystem (SwiftNIO, Hummingbird, gRPC) makes Swift viable for production backends
+
+## Status
+
+This project is actively evolving. It is intended as:
+
+- A production-capable foundation for Swift backend systems following DDD + Event Sourcing
+- A reference implementation for teams exploring these patterns in Swift
+- A contribution to the Swift Server ecosystem
+
+Feedback and contributions are welcome. See open [issues](https://github.com/gradyzhuo/swift-ddd-kit/issues) for planned work.
+
 ## Requirements
 
 - Swift 6.0+
