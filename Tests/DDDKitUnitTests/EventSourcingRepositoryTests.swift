@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Synchronization
 @testable import DDDCore
 @testable import EventSourcing
 
@@ -58,9 +59,28 @@ private final class Item: AggregateRoot {
 // MARK: - In-Memory Coordinator
 
 private final class InMemoryCoordinator: EventStorageCoordinator {
-    var store: [String: (events: [any DomainEvent], revision: UInt64)] = [:]
-    var appendCallCount = 0
-
+    let _store: Mutex<[String: (events: [any DomainEvent], revision: UInt64)]> = .init([:])
+    let _appendCallCount: Mutex<Int> = .init(0)
+    
+    var store: [String: (events: [any DomainEvent], revision: UInt64)]{
+        get{
+            _store.withLock{ $0 }
+        }
+        
+        set{
+            _store.withLock{ $0 = newValue }
+        }
+    }
+    
+    var appendCallCount: Int {
+        get{
+            _appendCallCount.withLock{ $0 }
+        }
+        set{
+            _appendCallCount.withLock{ $0 = newValue }
+        }
+    }
+    
     func fetchEvents(byId id: String) async throws -> (events: [any DomainEvent], latestRevision: UInt64)? {
         guard let entry = store[id] else { return nil }
         return (events: entry.events, latestRevision: entry.revision)

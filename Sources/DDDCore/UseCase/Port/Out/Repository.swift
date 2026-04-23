@@ -7,7 +7,7 @@
 
 import Foundation
 
-public protocol Repository {
+public protocol Repository: Sendable {
     associatedtype AggregateRootType: AggregateRoot
     
 }

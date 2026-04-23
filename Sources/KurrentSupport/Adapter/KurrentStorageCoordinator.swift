@@ -9,7 +9,7 @@ fileprivate struct EventWrapped: Sendable{
     let revision: UInt64
 }
 
-public class KurrentStorageCoordinator<StreamNaming: EventStreamNaming>: EventStorageCoordinator {
+public final class KurrentStorageCoordinator<StreamNaming: EventStreamNaming>: EventStorageCoordinator {
     let logger = Logger(label: "KurrentStorageCoordinator")
     let eventMapper: any EventTypeMapper
     let client: KurrentDBClient
