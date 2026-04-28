@@ -6,6 +6,10 @@
 //  See spec: docs/superpowers/specs/2026-04-28-kurrent-projection-runner-design.md
 //
 
+import KurrentDB
+import Logging
+import os
+
 public enum KurrentProjection {
 
     public enum NackAction: Sendable, Equatable {
@@ -37,5 +41,36 @@ public enum KurrentProjection {
         public func decide(error: any Error, retryCount: Int) -> NackAction {
             retryCount >= max ? .skip : .retry
         }
+    }
+
+    public final class PersistentSubscriptionRunner: Sendable {
+
+        private let client: KurrentDBClient
+        private let stream: String
+        private let groupName: String
+        private let retryPolicy: any RetryPolicy
+        private let logger: Logging.Logger
+
+        // Registrations are appended via `register` (chainable, sync) and read by `run()`.
+        // Convention: register before run. Lock is defensive, not for concurrent register/run.
+        private let _registrations = OSAllocatedUnfairLock<[Registration]>(initialState: [])
+
+        public init(
+            client: KurrentDBClient,
+            stream: String,
+            groupName: String,
+            retryPolicy: any RetryPolicy = MaxRetriesPolicy(max: 5),
+            logger: Logging.Logger = Logging.Logger(label: "KurrentProjection.PersistentSubscriptionRunner")
+        ) {
+            self.client = client
+            self.stream = stream
+            self.groupName = groupName
+            self.retryPolicy = retryPolicy
+            self.logger = logger
+        }
+    }
+
+    fileprivate struct Registration: Sendable {
+        let dispatch: @Sendable (RecordedEvent) async throws -> Void
     }
 }
