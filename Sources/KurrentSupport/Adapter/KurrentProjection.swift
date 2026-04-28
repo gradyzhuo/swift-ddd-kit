@@ -79,10 +79,10 @@ public enum KurrentProjection {
             extractInput: @Sendable @escaping (RecordedEvent) -> Input?,
             execute: @Sendable @escaping (Input) async throws -> Void
         ) -> Self {
-            let registration = Registration { record in
+            let registration = Registration(dispatch: { record in
                 guard let input = extractInput(record) else { return }
                 try await execute(input)
-            }
+            })
             _registrations.withLock { $0.append(registration) }
             return self
         }
