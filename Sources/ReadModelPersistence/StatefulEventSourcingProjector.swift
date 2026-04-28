@@ -16,18 +16,18 @@ import EventSourcing
 public struct StatefulEventSourcingProjector<
     Projector: EventSourcingProjector,
     Store: ReadModelStore
-> where Store.Model == Projector.ReadModelType {
+>: Sendable where Store.Model == Projector.ReadModelType, Projector: Sendable {
 
     public let projector: Projector
     public let store: Store
-    private let _readModelId: (Projector.Input) -> Store.Model.ID
+    private let _readModelId: @Sendable (Projector.Input) -> Store.Model.ID
 
     /// Designated initialiser — supply a custom `readModelId` closure when
     /// `ReadModelType.ID` is not `String`.
     public init(
         projector: Projector,
         store: Store,
-        readModelId: @escaping (Projector.Input) -> Store.Model.ID
+        readModelId: @Sendable @escaping (Projector.Input) -> Store.Model.ID
     ) {
         self.projector = projector
         self.store = store

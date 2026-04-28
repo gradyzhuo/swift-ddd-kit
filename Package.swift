@@ -7,7 +7,10 @@ let package = Package(
     name: "swift-ddd-kit",
     platforms: [
         .macOS(.v15),
-        .iOS(.v16),
+        .iOS(.v18),
+        .tvOS(.v18),
+        .watchOS(.v11),
+        .visionOS(.v2),
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
@@ -106,6 +109,22 @@ let package = Package(
                 "ReadModelPersistence",
                 "EventSourcing",
                 .product(name: "PostgresNIO", package: "postgres-nio"),
+            ]),
+        .testTarget(
+            name: "KurrentSupportUnitTests",
+            dependencies: [
+                "KurrentSupport",
+                "EventSourcing",
+                "ReadModelPersistence",
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
+            ]),
+        .testTarget(
+            name: "KurrentSupportIntegrationTests",
+            dependencies: [
+                "KurrentSupport",
+                "EventSourcing",
+                "TestUtility",
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
             ]),
         .target(name: "MigrationUtility",
                 dependencies: [

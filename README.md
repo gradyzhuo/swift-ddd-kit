@@ -305,6 +305,37 @@ final class OrderProjector: EventSourcingProjector {
 }
 ```
 
+### Persistent Subscription Runner (KurrentSupport)
+
+Replaces hand-rolled `Task { for try await ... }` projection handlers with a
+declarative runner.
+
+```swift
+import KurrentSupport
+import EventSourcing
+
+let runner = KurrentProjection.PersistentSubscriptionRunner(
+    client: kdbClient,
+    stream: "$ce-Order",
+    groupName: "order-projection"
+)
+.register(orderProjectorStateful) { record in
+    OrderProjectorInput(orderId: parseId(from: record))
+}
+.register(customerProjectorStateful) { record in
+    CustomerProjectorInput(customerId: parseId(from: record))
+}
+
+try await runner.run()  // ServiceGroup-friendly; cancellation returns normally.
+```
+
+- Configurable retry via `RetryPolicy` (default: `MaxRetriesPolicy(max: 5)`).
+- Subscription failure throws out of `run()` — caller decides whether to restart.
+- Returning `nil` from the extract closure skips that projector for the event.
+- When subscribing to system streams (`$ce-`, `$et-`), create the persistent subscription with `resolveLink = true` so `record.streamIdentifier.name` references the original aggregate stream.
+- See `docs/superpowers/specs/2026-04-28-kurrent-projection-runner-design.md`
+  for the full design (including Phase 2: Postgres-shared-transaction box).
+
 ## Event Migration
 
 When event schemas evolve, `MigrationUtility` handles replaying old events through migration handlers without losing history.
