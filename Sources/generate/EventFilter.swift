@@ -18,9 +18,6 @@ struct GenerateEventFilterCommand: ParsableCommand {
         commandName: "event-filter",
         abstract: "Generate event-filter swift files.")
 
-    @Argument(help: "The path of the event file.", completion: .file(extensions: ["yaml", "yam"]))
-    var eventDefinitionPath: String
-
     @Argument(help: "The path of the projection-model file.", completion: .file(extensions: ["yaml", "yam"]))
     var projectionModelDefinitionPath: String
 
