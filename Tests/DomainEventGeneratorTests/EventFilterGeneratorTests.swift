@@ -19,6 +19,7 @@ struct EventFilterGeneratorTests {
         #expect(output.contains(#""OrderAmountUpdated""#))
         #expect(output.contains(#""OrderCancelled""#))
         #expect(output.contains("default:"))
+        #expect(output.contains("return true"))
         #expect(output.contains("return false"))
     }
 
