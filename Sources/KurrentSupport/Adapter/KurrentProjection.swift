@@ -124,6 +124,31 @@ public enum KurrentProjection {
             }
         }
 
+        /// Subscribe to the persistent subscription and dispatch each event to all
+        /// registered projectors in parallel. Acks on success.
+        ///
+        /// Returns when the parent `Task` is cancelled. Throws on subscription
+        /// connection failure (no auto-reconnect — caller must restart via
+        /// ServiceGroup or similar).
+        public func run() async throws {
+            let subscription = try await client
+                .persistentSubscriptions(stream: stream, group: groupName)
+                .subscribe()
+
+            for try await result in subscription.events {
+                if Task.isCancelled { return }
+
+                let record = result.event.record
+                do {
+                    try await dispatch(record: record)
+                    try await subscription.ack(readEvents: result.event)
+                } catch {
+                    // Failure handling (nack via RetryPolicy) — implemented in Task 10.
+                    logger.error("dispatch failed for event \(record.id) (type: \(record.eventType)): \(error). Failure handling not yet implemented; event will be re-delivered by KurrentDB.")
+                }
+            }
+        }
+
         // Test-only — used by unit tests to verify register chaining.
         // Internal access; not part of the public API.
         internal var registrationCount: Int {
