@@ -9,6 +9,8 @@
 import KurrentDB
 import Logging
 import os.lock
+import EventSourcing
+import ReadModelPersistence
 
 public enum KurrentProjection {
 
@@ -72,6 +74,27 @@ public enum KurrentProjection {
             self.groupName = groupName
             self.retryPolicy = retryPolicy
             self.logger = logger
+        }
+
+        /// Register a `StatefulEventSourcingProjector`. The `extractInput` closure
+        /// is called for each incoming event; return `nil` to skip this projector.
+        ///
+        /// - Important: The projector's `execute` must be idempotent. The runner
+        ///   nacks the entire event on any failure, which causes the event to be
+        ///   re-delivered. Already-successful projectors will be invoked again on
+        ///   re-delivery; `StatefulEventSourcingProjector` handles this naturally
+        ///   via its stored revision cursor (subsequent invocations become no-ops).
+        @discardableResult
+        public func register<Projector: EventSourcingProjector & Sendable, Store: ReadModelStore>(
+            _ stateful: StatefulEventSourcingProjector<Projector, Store>,
+            extractInput: @Sendable @escaping (RecordedEvent) -> Projector.Input?
+        ) -> Self
+            where Store.Model == Projector.ReadModelType,
+                  Projector.Input: Sendable
+        {
+            return register(extractInput: extractInput) { input in
+                _ = try await stateful.execute(input: input)
+            }
         }
 
         @discardableResult
