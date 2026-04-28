@@ -207,3 +207,25 @@ struct KurrentProjectionRunnerCancellationTests {
         _ = try await task.value
     }
 }
+
+@Suite("KurrentProjection.PersistentSubscriptionRunner — subscription failure", .serialized)
+struct KurrentProjectionRunnerSubscriptionFailureTests {
+
+    @Test("subscribe() failure (group does not exist) throws out of run()")
+    func subscribeFailureThrows() async throws {
+        let client = KurrentDBClient.makeIntegrationTestClient()
+        let nonExistentGroup = "definitely-not-a-real-group-\(UUID().uuidString)"
+        let stream = "$ce-NoSuchCategory\(UUID().uuidString.prefix(6))"
+
+        let runner = KurrentProjection.PersistentSubscriptionRunner(
+            client: client,
+            stream: stream,
+            groupName: nonExistentGroup
+        )
+
+        // Calling run() without first creating the persistent subscription should throw.
+        await #expect(throws: (any Error).self) {
+            try await runner.run()
+        }
+    }
+}
