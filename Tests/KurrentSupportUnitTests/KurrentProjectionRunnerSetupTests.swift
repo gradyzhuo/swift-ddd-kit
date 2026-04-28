@@ -46,7 +46,7 @@ struct KurrentProjectionRunnerSetupTests {
             .register(extractInput: { _ -> String? in nil }, execute: { _ in })
 
         #expect(returned === runner) // Same instance
-        #expect(runner.registrationCount == 2)
+        #expect(runner._registrationCountForTesting == 2)
     }
 }
 
@@ -96,6 +96,6 @@ extension KurrentProjectionRunnerSetupTests {
         let returned = runner.register(stateful) { _ in StubInput(id: "x") }
 
         #expect(returned === runner)
-        #expect(runner.registrationCount == 1)
+        #expect(runner._registrationCountForTesting == 1)
     }
 }

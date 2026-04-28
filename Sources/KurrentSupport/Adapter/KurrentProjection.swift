@@ -233,14 +233,18 @@ public enum KurrentProjection {
                 // Continue — nack failure should not crash the run loop.
             }
 
+            // .stop is honored even if the nack call above failed — the policy's
+            // decision to stop the runner is independent of whether the server
+            // received the nack message.
             if case .stop = action {
                 throw RunnerStopped(reason: "RetryPolicy returned .stop after \(result.retryCount) retries: \(error)")
             }
         }
 
         // Test-only — used by unit tests to verify register chaining.
-        // Internal access; not part of the public API.
-        internal var registrationCount: Int {
+        // Internal access; not part of the public API. The leading underscore
+        // and `ForTesting` suffix make the testing intent explicit at call sites.
+        internal var _registrationCountForTesting: Int {
             _registrations.withLock { $0.count }
         }
     }
