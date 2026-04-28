@@ -107,6 +107,23 @@ let package = Package(
                 "EventSourcing",
                 .product(name: "PostgresNIO", package: "postgres-nio"),
             ]),
+        .testTarget(
+            name: "KurrentSupportUnitTests",
+            dependencies: [
+                "KurrentSupport",
+                "EventSourcing",
+                "ReadModelPersistence",
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
+            ]),
+        .testTarget(
+            name: "KurrentSupportIntegrationTests",
+            dependencies: [
+                "KurrentSupport",
+                "EventSourcing",
+                "ReadModelPersistence",
+                "TestUtility",
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
+            ]),
         .target(name: "MigrationUtility",
                 dependencies: [
                     "DDDCore",
