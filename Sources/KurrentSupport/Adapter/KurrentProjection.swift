@@ -110,6 +110,20 @@ public enum KurrentProjection {
             return self
         }
 
+        /// Dispatch a single recorded event to all registered projectors in parallel.
+        /// Throws if any projector throws (TaskGroup semantics — others are cancelled).
+        internal func dispatch(record: RecordedEvent) async throws {
+            let snapshot = _registrations.withLock { $0 }
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for registration in snapshot {
+                    group.addTask {
+                        try await registration.dispatch(record)
+                    }
+                }
+                try await group.waitForAll()
+            }
+        }
+
         // Test-only — used by unit tests to verify register chaining.
         // Internal access; not part of the public API.
         internal var registrationCount: Int {
