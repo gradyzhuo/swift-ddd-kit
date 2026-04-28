@@ -12,6 +12,64 @@ import os.lock
 import EventSourcing
 import ReadModelPersistence
 
+/// Phase 1 of the KurrentDB read-side projection runner.
+///
+/// `PersistentSubscriptionRunner` subscribes to a KurrentDB persistent subscription
+/// and dispatches each incoming event to one or more registered projectors in parallel.
+/// Replaces the per-handler `start() { Task { ... } }` boilerplate found in application
+/// projection handlers.
+///
+/// ## Usage
+///
+/// ```swift
+/// let runner = KurrentProjection.PersistentSubscriptionRunner(
+///     client: kdbClient,
+///     stream: "$ce-Order",
+///     groupName: "order-projection"
+/// )
+/// .register(orderProjector) { record in
+///     OrderProjectorInput(orderId: extractId(from: record))
+/// }
+///
+/// try await runner.run()  // Blocks until cancelled or subscription drops.
+/// ```
+///
+/// ## Idempotency contract
+///
+/// Registered projectors must be idempotent. The runner nacks the entire event on any
+/// projector failure, causing KurrentDB to re-deliver the event. Already-successful
+/// projectors will be invoked again on re-delivery.
+///
+/// `StatefulEventSourcingProjector` satisfies this contract automatically via its stored
+/// revision cursor (re-invocations become no-ops). Users of the low-level closure overload
+/// must ensure their `execute` closure is idempotent.
+///
+/// ## Lifecycle
+///
+/// - `run()` blocks until the parent `Task` is cancelled (returns normally) or the
+///   subscription connection drops (throws).
+/// - The runner does not auto-reconnect — the caller is responsible for re-running it
+///   on failure (typically via Swift Service Lifecycle's `ServiceGroup`).
+///
+/// ## System projection streams
+///
+/// When subscribing to a system projection stream like `$ce-<Category>` or `$et-<Type>`,
+/// you must create the persistent subscription with `resolveLink = true`. Otherwise the
+/// `RecordedEvent` delivered to your `extractInput` closure will reference the system
+/// stream itself (e.g., `$ce-Order`) rather than the original aggregate stream
+/// (e.g., `Order-<id>`). This is a KurrentDB requirement, not enforced by the runner.
+///
+/// ```swift
+/// try await client.persistentSubscriptions(stream: "$ce-Order", group: "...")
+///     .create { options in
+///         options.settings.resolveLink = true
+///     }
+/// ```
+///
+/// ## Phase 2 (deferred)
+///
+/// Cross-projector transactional rollback (Postgres-shared transaction) is deferred to
+/// Phase 2. Phase 1 provides at-least-once delivery + projector-level idempotency only.
 public enum KurrentProjection {
 
     /// Disambiguates `Logger`: importing `os.lock` (for `OSAllocatedUnfairLock`)
