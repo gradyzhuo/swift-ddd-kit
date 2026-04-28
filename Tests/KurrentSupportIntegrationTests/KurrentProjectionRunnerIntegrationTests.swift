@@ -136,3 +136,43 @@ struct KurrentProjectionRunnerFailureTests {
         #expect(count >= 3, "Expected at least 3 calls (initial + 2 retries), got \(count)")
     }
 }
+
+@Suite("KurrentProjection.PersistentSubscriptionRunner — .stop semantics", .serialized)
+struct KurrentProjectionRunnerStopTests {
+
+    private struct StopImmediatelyPolicy: KurrentProjection.RetryPolicy, Sendable {
+        func decide(error: any Error, retryCount: Int) -> KurrentProjection.NackAction { .stop }
+    }
+
+    @Test("RetryPolicy returning .stop causes run() to throw RunnerStopped")
+    func stopThrowsRunnerStopped() async throws {
+        let client = KurrentDBClient.makeIntegrationTestClient()
+        let groupName = "test-runner-stop-\(UUID().uuidString.prefix(8))"
+        let category = "RunnerStopTest\(UUID().uuidString.prefix(6))"
+        let stream = "$ce-\(category)"
+
+        try await client.persistentSubscriptions(stream: stream, group: groupName).create { options in
+            options.settings.resolveLink = true
+        }
+        defer { Task { try? await client.persistentSubscriptions(stream: stream, group: groupName).delete() } }
+
+        let aggregateStream = "\(category)-\(UUID().uuidString)"
+        let payload = #"{}"#.data(using: .utf8)!
+        let eventData = try EventData(eventType: "TestEvent", payload: payload)
+        _ = try await client.streams(of: .specified(aggregateStream)).append(events: eventData) { _ in }
+
+        struct AlwaysFails: Error {}
+
+        let runner = KurrentProjection.PersistentSubscriptionRunner(
+            client: client,
+            stream: stream,
+            groupName: groupName,
+            retryPolicy: StopImmediatelyPolicy()
+        )
+        .register(extractInput: { _ -> Bool? in true }, execute: { _ in throw AlwaysFails() })
+
+        await #expect(throws: KurrentProjection.RunnerStopped.self) {
+            try await runner.run()
+        }
+    }
+}
