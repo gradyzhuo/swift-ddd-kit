@@ -147,10 +147,36 @@ public enum KurrentProjection {
                     try await dispatch(record: record)
                     try await subscription.ack(readEvents: result.event)
                 } catch {
-                    // Failure handling (nack via RetryPolicy) — implemented in Task 10.
-                    // TODO(Task 10): replace this log-only placeholder with RetryPolicy + nack flow.
-                    logger.error("dispatch failed for event \(record.id) (type: \(record.eventType)): \(error). Failure handling not yet implemented; event will be re-delivered by KurrentDB.")
+                    try await handleFailure(error: error, result: result, subscription: subscription)
                 }
+            }
+        }
+
+        private func handleFailure(
+            error: any Error,
+            result: PersistentSubscription.EventResult,
+            subscription: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Subscription<PersistentSubscription.EventResult>
+        ) async throws {
+            let action = retryPolicy.decide(error: error, retryCount: Int(result.retryCount))
+            let kurrentAction: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Nack.Action = switch action {
+                case .retry: .retry
+                case .skip:  .skip
+                case .park:  .park
+                case .stop:  .stop
+            }
+            do {
+                try await subscription.nack(
+                    readEvents: [result.event],
+                    action: kurrentAction,
+                    reason: "\(error)"
+                )
+            } catch let nackError {
+                logger.error("nack failed for event \(result.event.record.id): \(nackError)")
+                // Continue — nack failure should not crash the run loop.
+            }
+
+            if case .stop = action {
+                throw RunnerStopped(reason: "RetryPolicy returned .stop after \(result.retryCount) retries: \(error)")
             }
         }
 

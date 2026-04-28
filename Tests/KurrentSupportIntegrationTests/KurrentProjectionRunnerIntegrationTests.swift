@@ -75,3 +75,62 @@ final class LockedBox<Value: Sendable>: @unchecked Sendable {
         return body(&value)
     }
 }
+
+@Suite("KurrentProjection.PersistentSubscriptionRunner — failure handling", .serialized)
+struct KurrentProjectionRunnerFailureTests {
+
+    private struct FailFirstNTimes: KurrentProjection.RetryPolicy, Sendable {
+        // Test policy — surfaces the retry decision via NackAction.
+        // Returns .retry up to 2 times, then .skip.
+        func decide(error: any Error, retryCount: Int) -> KurrentProjection.NackAction {
+            retryCount >= 2 ? .skip : .retry
+        }
+    }
+
+    @Test("Failing projector triggers nack(.retry) until policy returns .skip")
+    func failingProjectorRetriesAndSkips() async throws {
+        let client = KurrentDBClient.makeIntegrationTestClient()
+        let groupName = "test-runner-fail-\(UUID().uuidString.prefix(8))"
+        let category = "RunnerFailTest\(UUID().uuidString.prefix(6))"
+        let stream = "$ce-\(category)"
+
+        try await client.persistentSubscriptions(stream: stream, group: groupName).create { options in
+            options.settings.resolveLink = true
+        }
+        defer { Task { try? await client.persistentSubscriptions(stream: stream, group: groupName).delete() } }
+
+        let aggregateStream = "\(category)-\(UUID().uuidString)"
+        let payload = #"{}"#.data(using: .utf8)!
+        let eventData = try EventData(eventType: "TestEvent", payload: payload)
+        _ = try await client.streams(of: .specified(aggregateStream)).append(events: eventData) { _ in }
+
+        struct AlwaysFails: Error {}
+
+        let callCount = LockedBox(0)
+        let runner = KurrentProjection.PersistentSubscriptionRunner(
+            client: client,
+            stream: stream,
+            groupName: groupName,
+            retryPolicy: FailFirstNTimes()
+        )
+        .register(extractInput: { _ -> Bool? in true }, execute: { _ in
+            callCount.withLock { $0 += 1 }
+            throw AlwaysFails()
+        })
+
+        let task = Task { try await runner.run() }
+
+        // Poll up to 8 seconds for at least 3 retries (initial + 2 retries before policy says skip).
+        let deadline = Date().addingTimeInterval(8.0)
+        while Date() < deadline {
+            if callCount.withLock({ $0 }) >= 3 { break }
+            try await Task.sleep(for: .milliseconds(200))
+        }
+
+        task.cancel()
+        _ = try? await task.value
+
+        let count = callCount.withLock { $0 }
+        #expect(count >= 3, "Expected at least 3 calls (initial + 2 retries), got \(count)")
+    }
+}
