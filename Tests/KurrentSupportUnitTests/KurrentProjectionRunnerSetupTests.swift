@@ -80,12 +80,11 @@ private struct StubProjector: EventSourcingProjector {
 
 extension KurrentProjectionRunnerSetupTests {
 
-    @Test("register high-level overload (StatefulEventSourcingProjector) is chainable")
+    @Test("register high-level overload (projector:store:) is chainable")
     func highLevelRegisterChains() {
         let client = KurrentDBClient(settings: .localhost())
         let store = InMemoryReadModelStore<StubReadModel>()
         let projector = StubProjector(coordinator: StubCoordinator())
-        let stateful = StatefulEventSourcingProjector(projector: projector, store: store)
 
         let runner = KurrentProjection.PersistentSubscriptionRunner(
             client: client,
@@ -93,7 +92,7 @@ extension KurrentProjectionRunnerSetupTests {
             groupName: "stub-group"
         )
 
-        let returned = runner.register(stateful) { _ in StubInput(id: "x") }
+        let returned = runner.register(projector: projector, store: store) { _ in StubInput(id: "x") }
 
         #expect(returned === runner)
         #expect(runner._registrationCountForTesting == 1)

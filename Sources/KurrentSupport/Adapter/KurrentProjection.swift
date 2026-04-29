@@ -40,9 +40,10 @@ import ReadModelPersistence
 /// projector failure, causing KurrentDB to re-deliver the event. Already-successful
 /// projectors will be invoked again on re-delivery.
 ///
-/// `StatefulEventSourcingProjector` satisfies this contract automatically via its stored
-/// revision cursor (re-invocations become no-ops). Users of the low-level closure overload
-/// must ensure their `execute` closure is idempotent.
+/// The high-level `register(projector:store:)` overload satisfies this contract
+/// automatically via the store's revision cursor (re-invocations become no-ops).
+/// Users of the low-level closure overload must ensure their `execute` closure is
+/// idempotent.
 ///
 /// ## Lifecycle
 ///
@@ -129,29 +130,52 @@ public enum KurrentProjection {
             self.logger = logger
         }
 
-        /// Register a `StatefulEventSourcingProjector`. The `extractInput` closure
-        /// is called for each incoming event; return `nil` to skip this projector.
+        /// Register a projector with a long-lived (non-transactional) store.
         ///
-        /// Pass an `eventFilter` to short-circuit dispatch for unrelated event
-        /// types — no `extractInput`, no fetch, no apply, no cursor advance.
+        /// The runner internally wires the (projector, store) pair through
+        /// fetch + apply + save without exposing `StatefulEventSourcingProjector`.
+        /// For transactional semantics (atomic commit/rollback across all
+        /// projectors per event), use `KurrentProjection.TransactionalSubscriptionRunner` instead.
         ///
-        /// - Important: The projector's `execute` must be idempotent. The runner
-        ///   nacks the entire event on any failure, which causes the event to be
-        ///   re-delivered. Already-successful projectors will be invoked again on
-        ///   re-delivery; `StatefulEventSourcingProjector` handles this naturally
-        ///   via its stored revision cursor (subsequent invocations become no-ops).
+        /// - Important: The projector's apply must be idempotent. The runner
+        ///   nacks the entire event on any projector failure, which causes
+        ///   re-delivery; already-successful projectors will be invoked again
+        ///   on re-delivery; the stored revision cursor in `Store` makes those
+        ///   re-invocations no-ops.
         @discardableResult
-        public func register<Projector: EventSourcingProjector, Store: ReadModelStore>(
-            _ stateful: StatefulEventSourcingProjector<Projector, Store>,
+        public func register<Projector: EventSourcingProjector & Sendable, Store: ReadModelStore>(
+            projector: Projector,
+            store: Store,
             eventFilter: (any EventTypeFilter)? = nil,
             extractInput: @Sendable @escaping (RecordedEvent) -> Projector.Input?
         ) -> Self
-            where Store.Model == Projector.ReadModelType,
-                  Projector.Input: Sendable
+        where Store.Model == Projector.ReadModelType,
+              Store.Model.ID == String,
+              Projector.Input: Sendable
         {
-            return register(eventFilter: eventFilter, extractInput: extractInput) { input in
-                _ = try await stateful.execute(input: input)
-            }
+            let registration = Registration(dispatch: { record in
+                guard Self._shouldDispatch(eventType: record.eventType, filter: eventFilter) else { return }
+                guard let input = extractInput(record) else { return }
+
+                // Incremental fold: fetch from stored revision, apply, save.
+                if let stored = try await store.fetch(byId: input.id) {
+                    guard let result = try await projector.coordinator.fetchEvents(
+                        byId: input.id, afterRevision: stored.revision
+                    ) else { return }
+                    if result.events.isEmpty { return }
+                    var readModel = stored.readModel
+                    try projector.apply(readModel: &readModel, events: result.events)
+                    try await store.save(readModel: readModel, revision: result.latestRevision)
+                } else {
+                    guard let result = try await projector.coordinator.fetchEvents(byId: input.id) else { return }
+                    guard !result.events.isEmpty else { return }
+                    guard var readModel = try projector.buildReadModel(input: input) else { return }
+                    try projector.apply(readModel: &readModel, events: result.events)
+                    try await store.save(readModel: readModel, revision: result.latestRevision)
+                }
+            })
+            _registrations.withLock { $0.append(registration) }
+            return self
         }
 
         @discardableResult
@@ -264,5 +288,186 @@ public enum KurrentProjection {
 
     fileprivate struct Registration: Sendable {
         let dispatch: @Sendable (RecordedEvent) async throws -> Void
+    }
+
+    /// Transactional projection runner — every event triggers a single shared
+    /// transaction; all registered projectors' writes commit or roll back
+    /// together. Generic over `TransactionProvider`; `PostgresTransactionProvider`
+    /// is the common case (see ReadModelPersistencePostgres convenience init).
+    ///
+    /// Shares retry/nack/cancellation semantics with `PersistentSubscriptionRunner`;
+    /// the only difference is the per-event transaction scope.
+    public final class TransactionalSubscriptionRunner<Provider: TransactionProvider>: Sendable {
+
+        private let client: KurrentDBClient
+        private let transactionProvider: Provider
+        private let stream: String
+        private let groupName: String
+        private let retryPolicy: any RetryPolicy
+        private let logger: Logger
+
+        // Registrations: closure captures projector + storeFactory + extractInput;
+        // signature is (RecordedEvent, Provider.Transaction) async throws -> Void.
+        private let _registrations = Mutex<[TransactionalRegistration<Provider.Transaction>]>([])
+
+        public init(
+            client: KurrentDBClient,
+            transactionProvider: Provider,
+            stream: String,
+            groupName: String,
+            retryPolicy: any RetryPolicy = MaxRetriesPolicy(max: 5),
+            logger: Logger = Logger(label: "KurrentProjection.TransactionalSubscriptionRunner")
+        ) {
+            self.client = client
+            self.transactionProvider = transactionProvider
+            self.stream = stream
+            self.groupName = groupName
+            self.retryPolicy = retryPolicy
+            self.logger = logger
+        }
+
+        /// Register a projector with a per-event tx-bound store factory.
+        ///
+        /// `storeFactory` is called once per event with the runner's transaction;
+        /// it returns a tx-bound store. The runner internally inlines fetch +
+        /// apply + save (no `StatefulEventSourcingProjector` exposed to callers).
+        ///
+        /// Pass an `eventFilter` to short-circuit dispatch for event types this
+        /// projector doesn't care about — no `extractInput`, no fetch, no apply.
+        @discardableResult
+        public func register<Projector: EventSourcingProjector & Sendable, Store: TransactionalReadModelStore>(
+            projector: Projector,
+            storeFactory: @Sendable @escaping (Provider.Transaction) -> Store,
+            eventFilter: (any EventTypeFilter)? = nil,
+            extractInput: @Sendable @escaping (RecordedEvent) -> Projector.Input?
+        ) -> Self
+        where Store.Model == Projector.ReadModelType,
+              Store.Transaction == Provider.Transaction,
+              Store.Model.ID == String,
+              Projector.Input: Sendable
+        {
+            let registration = TransactionalRegistration<Provider.Transaction>(dispatch: { record, tx in
+                guard Self._shouldDispatchTx(eventType: record.eventType, filter: eventFilter) else { return }
+                guard let input = extractInput(record) else { return }
+                let store = storeFactory(tx)
+
+                // Incremental fold: fetch from stored revision, apply, save.
+                if let stored = try await store.fetch(byId: input.id, in: tx) {
+                    // Incremental path: only events newer than stored revision
+                    guard let result = try await projector.coordinator.fetchEvents(
+                        byId: input.id, afterRevision: stored.revision
+                    ) else { return }
+                    if result.events.isEmpty { return }
+                    var readModel = stored.readModel
+                    try projector.apply(readModel: &readModel, events: result.events)
+                    try await store.save(readModel: readModel, revision: result.latestRevision, in: tx)
+                } else {
+                    // Full replay path
+                    guard let result = try await projector.coordinator.fetchEvents(byId: input.id) else { return }
+                    guard !result.events.isEmpty else { return }
+                    guard var readModel = try projector.buildReadModel(input: input) else { return }
+                    try projector.apply(readModel: &readModel, events: result.events)
+                    try await store.save(readModel: readModel, revision: result.latestRevision, in: tx)
+                }
+            })
+            _registrations.withLock { $0.append(registration) }
+            return self
+        }
+
+        // Test-only — used by unit tests to verify register chaining.
+        // Internal access; not part of the public API.
+        internal var _registrationCountForTesting: Int {
+            _registrations.withLock { $0.count }
+        }
+
+        // Internal — pure filter-check used by the production dispatch closure
+        // and by unit tests. Not part of the public API.
+        internal static func _shouldDispatchTx(
+            eventType: String,
+            filter: (any EventTypeFilter)?
+        ) -> Bool {
+            guard let filter else { return true }
+            return filter.handles(eventType: eventType)
+        }
+
+        /// Subscribe to the persistent subscription and dispatch each event to all
+        /// registered projectors inside a single transaction. Commits on full
+        /// success, rolls back on any failure (then runs through `RetryPolicy`).
+        ///
+        /// Cancellation is observed between events, not mid-dispatch.
+        public func run() async throws {
+            let subscription = try await client
+                .persistentSubscriptions(stream: stream, group: groupName)
+                .subscribe()
+
+            do {
+                for try await result in subscription.events {
+                    if Task.isCancelled { return }
+
+                    let record = result.event.record
+                    do {
+                        try await transactionProvider.withTransaction { tx in
+                            try await self.dispatch(record: record, transaction: tx)
+                        }
+                        try await subscription.ack(readEvents: result.event)
+                    } catch {
+                        try await handleFailure(error: error, result: result, subscription: subscription)
+                    }
+                }
+            } catch is CancellationError {
+                return
+            }
+        }
+
+        /// Dispatch a single recorded event to all registered projectors within
+        /// the supplied transaction. Throws if any projector throws — TaskGroup
+        /// cancels remaining children, the throw bubbles to `withTransaction`
+        /// which rolls back.
+        internal func dispatch(record: RecordedEvent, transaction tx: Provider.Transaction) async throws {
+            let snapshot = _registrations.withLock { $0 }
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for registration in snapshot {
+                    group.addTask {
+                        try await registration.dispatch(record, tx)
+                    }
+                }
+                try await group.waitForAll()
+            }
+        }
+
+        private func handleFailure(
+            error: any Error,
+            result: PersistentSubscription.EventResult,
+            subscription: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Subscription<PersistentSubscription.EventResult>
+        ) async throws {
+            let action = retryPolicy.decide(error: error, retryCount: Int(result.retryCount))
+            let kurrentAction: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Nack.Action = switch action {
+                case .retry: .retry
+                case .skip:  .skip
+                case .park:  .park
+                case .stop:  .stop
+            }
+            do {
+                try await subscription.nack(
+                    readEvents: [result.event],
+                    action: kurrentAction,
+                    reason: "\(error)"
+                )
+            } catch let nackError {
+                logger.error("nack failed for event \(result.event.record.id): \(nackError)")
+                // Continue — nack failure should not crash the run loop.
+            }
+
+            // .stop is honored even if the nack call above failed — the policy's
+            // decision to stop the runner is independent of whether the server
+            // received the nack message.
+            if case .stop = action {
+                throw RunnerStopped(reason: "RetryPolicy returned .stop after \(result.retryCount) retries: \(error)")
+            }
+        }
+    }
+
+    fileprivate struct TransactionalRegistration<Transaction: Sendable>: Sendable {
+        let dispatch: @Sendable (RecordedEvent, Transaction) async throws -> Void
     }
 }

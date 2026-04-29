@@ -372,6 +372,64 @@ through `extractInput` (the original Phase 1 default). See
 `docs/superpowers/specs/2026-04-28-event-type-filter-design.md` and
 `samples/KurrentProjectionDemo/` (third projector `OrderRegistry`).
 
+#### TransactionalSubscriptionRunner — atomic across projectors (Postgres only)
+
+When all your read models live in the same Postgres instance and you want
+all-or-nothing commits per event, use `KurrentProjection.TransactionalSubscriptionRunner`
+instead of `PersistentSubscriptionRunner`. Every event runs all registered
+projectors inside a single shared `PostgresClient.withTransaction` block; on
+success the transaction commits before ack, on any failure the transaction
+rolls back and `RetryPolicy` decides nack action (same as Phase 1).
+
+```swift
+import KurrentSupport
+import EventSourcing
+import ReadModelPersistencePostgres
+import PostgresSupport      // for the convenience init
+
+let runner = KurrentProjection.TransactionalSubscriptionRunner(
+    client: kdbClient,
+    pgClient: pgClient,                            // ← convenience init
+    stream: "$ce-Order",
+    groupName: "order-projection"
+)
+.register(
+    projector: orderSummaryProjector,
+    storeFactory: { _ in PostgresTransactionalReadModelStore<OrderSummary>() }
+) { record in
+    OrderSummaryInput(id: parseId(from: record))
+}
+.register(
+    projector: orderRegistryProjector,
+    storeFactory: { _ in PostgresTransactionalReadModelStore<OrderRegistry>() },
+    eventFilter: OrderRegistryEventFilter()
+) { record in
+    OrderRegistryInput(id: parseId(from: record))
+}
+
+try await runner.run()
+```
+
+#### Which runner to choose
+
+| | `PersistentSubscriptionRunner` | `TransactionalSubscriptionRunner` |
+|---|---|---|
+| Cross-projector consistency | Eventually consistent (each store commits independently; partial state visible during retry) | All-or-nothing per event (single tx commits or rolls back) |
+| Backend constraint | Any `ReadModelStore` (in-memory, Postgres, custom) | Requires a `TransactionProvider`; common case is Postgres-only via `PostgresTransactionProvider` |
+| Per-event overhead | One fetch + one save per registered projector | One transaction begin + N saves + one commit |
+| Failure mode | Already-committed projectors stay committed; retry idempotent via stored cursor | Whole event rolled back; retry redoes everything from scratch |
+| When to choose | Mixed-backend read models (PG + Redis), simple cases, no atomicity requirement | All read models in one PG; cross-projector consistency required |
+
+Both runners share `RetryPolicy`, `EventTypeFilter`, cancellation semantics,
+and `RunnerStopped` error. They differ only in commit semantics. The
+underlying core protocols (`TransactionProvider`, `TransactionalReadModelStore`)
+are abstract — future SQLite or other transactional backends ship as new
+provider/store implementations without touching the runner.
+
+See the runnable example: `samples/KurrentTransactionalProjectionDemo/`. It
+includes a `SIMULATE_FAILURE=once` env knob that injects a one-shot projector
+failure to demonstrate observable rollback (no partial state).
+
 ## Event Migration
 
 When event schemas evolve, `MigrationUtility` handles replaying old events through migration handlers without losing history.
