@@ -123,8 +123,13 @@ let package = Package(
             dependencies: [
                 "KurrentSupport",
                 "EventSourcing",
+                "ReadModelPersistence",
+                "ReadModelPersistencePostgres",
+                "DDDCore",
                 "TestUtility",
                 .product(name: "KurrentDB", package: "swift-kurrentdb"),
+                .product(name: "PostgresNIO", package: "postgres-nio"),
+                .product(name: "Logging", package: "swift-log"),
             ]),
         .target(name: "MigrationUtility",
                 dependencies: [

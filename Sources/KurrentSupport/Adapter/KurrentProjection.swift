@@ -366,6 +366,82 @@ public enum KurrentProjection {
             guard let filter else { return true }
             return filter.handles(eventType: eventType)
         }
+
+        /// Subscribe to the persistent subscription and dispatch each event to all
+        /// registered projectors inside a single transaction. Commits on full
+        /// success, rolls back on any failure (then runs through `RetryPolicy`).
+        ///
+        /// Cancellation is observed between events, not mid-dispatch.
+        public func run() async throws {
+            let subscription = try await client
+                .persistentSubscriptions(stream: stream, group: groupName)
+                .subscribe()
+
+            do {
+                for try await result in subscription.events {
+                    if Task.isCancelled { return }
+
+                    let record = result.event.record
+                    do {
+                        try await transactionProvider.withTransaction { tx in
+                            try await self.dispatch(record: record, transaction: tx)
+                        }
+                        try await subscription.ack(readEvents: result.event)
+                    } catch {
+                        try await handleFailure(error: error, result: result, subscription: subscription)
+                    }
+                }
+            } catch is CancellationError {
+                return
+            }
+        }
+
+        /// Dispatch a single recorded event to all registered projectors within
+        /// the supplied transaction. Throws if any projector throws — TaskGroup
+        /// cancels remaining children, the throw bubbles to `withTransaction`
+        /// which rolls back.
+        internal func dispatch(record: RecordedEvent, transaction tx: Provider.Transaction) async throws {
+            let snapshot = _registrations.withLock { $0 }
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                for registration in snapshot {
+                    group.addTask {
+                        try await registration.dispatch(record, tx)
+                    }
+                }
+                try await group.waitForAll()
+            }
+        }
+
+        private func handleFailure(
+            error: any Error,
+            result: PersistentSubscription.EventResult,
+            subscription: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Subscription<PersistentSubscription.EventResult>
+        ) async throws {
+            let action = retryPolicy.decide(error: error, retryCount: Int(result.retryCount))
+            let kurrentAction: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Nack.Action = switch action {
+                case .retry: .retry
+                case .skip:  .skip
+                case .park:  .park
+                case .stop:  .stop
+            }
+            do {
+                try await subscription.nack(
+                    readEvents: [result.event],
+                    action: kurrentAction,
+                    reason: "\(error)"
+                )
+            } catch let nackError {
+                logger.error("nack failed for event \(result.event.record.id): \(nackError)")
+                // Continue — nack failure should not crash the run loop.
+            }
+
+            // .stop is honored even if the nack call above failed — the policy's
+            // decision to stop the runner is independent of whether the server
+            // received the nack message.
+            if case .stop = action {
+                throw RunnerStopped(reason: "RetryPolicy returned .stop after \(result.retryCount) retries: \(error)")
+            }
+        }
     }
 
     fileprivate struct TransactionalRegistration<Transaction: Sendable>: Sendable {
