@@ -245,20 +245,16 @@ try await withThrowingTaskGroup(of: Void.self) { group in
     )
     print("✓ Appended \(events.count) events\n")
 
-    // Wait for all three projectors to converge.
-    print("── Waiting for projectors to catch up ──")
-    let deadline = Date().addingTimeInterval(8.0)
-    while Date() < deadline {
+    // DEMO-ONLY synchronization: production code never waits like this.
+    // See `DemoConvergence.swift` for why this exists.
+    print("── Waiting for projectors to catch up (demo-only) ──")
+    try await awaitConvergence(timeout: 8.0) {
         let s = try await summaryStore.fetch(byId: id)
         let t = try await timelineStore.fetch(byId: id)
         let r = try await registryStore.fetch(byId: id)
-        if let s, let t, let r,
-           s.readModel.totalAmount == 175,
-           t.readModel.entries.count == 3,
-           !r.readModel.customerId.isEmpty {
-            break
-        }
-        try await Task.sleep(for: .milliseconds(200))
+        return s?.readModel.totalAmount == 175
+            && t?.readModel.entries.count == 3
+            && !(r?.readModel.customerId.isEmpty ?? true)
     }
 
     // Read final state.
