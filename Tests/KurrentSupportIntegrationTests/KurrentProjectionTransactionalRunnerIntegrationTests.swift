@@ -210,3 +210,34 @@ struct KurrentProjectionTransactionalRunnerIntegrationTests {
         }
     }
 }
+
+@Suite("KurrentProjection.TransactionalSubscriptionRunner — convenience init", .serialized)
+struct KurrentProjectionTransactionalRunnerConvenienceTests {
+
+    private static func makePGClient() -> PostgresClient {
+        let cfg = PostgresClient.Configuration(
+            host: ProcessInfo.processInfo.environment["PG_HOST"] ?? "localhost",
+            port: Int(ProcessInfo.processInfo.environment["PG_PORT"] ?? "5432") ?? 5432,
+            username: ProcessInfo.processInfo.environment["PG_USER"] ?? "postgres",
+            password: ProcessInfo.processInfo.environment["PG_PASSWORD"] ?? "postgres",
+            database: ProcessInfo.processInfo.environment["PG_DATABASE"] ?? "postgres",
+            tls: .disable
+        )
+        return PostgresClient(configuration: cfg)
+    }
+
+    @Test("Convenience init produces a runner using PostgresTransactionProvider")
+    func convenienceInitWorks() async throws {
+        let kdb = KurrentDBClient.makeIntegrationTestClient()
+        let pg = Self.makePGClient()
+
+        let runner = KurrentProjection.TransactionalSubscriptionRunner(
+            client: kdb,
+            pgClient: pg,
+            stream: "$ce-Test",
+            groupName: "test-group"
+        )
+        // Compile-time check — `runner` is a TransactionalSubscriptionRunner<PostgresTransactionProvider>
+        let _: KurrentProjection.TransactionalSubscriptionRunner<PostgresTransactionProvider> = runner
+    }
+}

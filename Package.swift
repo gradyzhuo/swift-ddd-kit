@@ -100,7 +100,10 @@ let package = Package(
             dependencies: [
                 "ReadModelPersistence",
                 "EventSourcing",
+                "KurrentSupport",
                 .product(name: "PostgresNIO", package: "postgres-nio"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
             ]),
         .testTarget(
             name: "ReadModelPersistencePostgresIntegrationTests",
