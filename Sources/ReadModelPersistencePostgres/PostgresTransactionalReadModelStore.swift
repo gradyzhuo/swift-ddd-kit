@@ -55,8 +55,6 @@ where Model.ID == String {
                     updated_at = EXCLUDED.updated_at
                 """,
                 logger: Logger(label: "PostgresTransactionalReadModelStore"))
-        } catch let e as ReadModelStoreError {
-            throw e
         } catch {
             throw ReadModelStoreError.saveFailed(id: readModel.id, cause: error)
         }
@@ -76,8 +74,6 @@ where Model.ID == String {
                 return StoredReadModel(readModel: model, revision: UInt64(bitPattern: revBits))
             }
             return nil
-        } catch let e as ReadModelStoreError {
-            throw e
         } catch {
             throw ReadModelStoreError.fetchFailed(id: id, cause: error)
         }
