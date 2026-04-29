@@ -19,10 +19,16 @@ struct OrderTimeline: ReadModel, Codable, Sendable {
     var entries: [String] = []
 }
 
+struct OrderRegistry: ReadModel, Codable, Sendable {
+    let id: String
+    var customerId: String = ""
+}
+
 // MARK: - Projector Inputs
 
 struct OrderSummaryInput: CQRSProjectorInput { let id: String }
 struct OrderTimelineInput: CQRSProjectorInput { let id: String }
+struct OrderRegistryInput: CQRSProjectorInput { let id: String }
 
 // MARK: - Projectors
 //
@@ -82,6 +88,28 @@ struct OrderTimelineProjector: OrderTimelineProjectorProtocol, Sendable {
     }
 }
 
+/// `OrderRegistry` only listens to `OrderCreated`. We pair its `register(...)`
+/// call with the auto-generated `OrderRegistryEventFilter` so the runner skips
+/// dispatching `OrderAmountUpdated` / `OrderCancelled` events to this projector
+/// entirely — no `extractInput`, no fetch, no apply, no cursor advance.
+struct OrderRegistryProjector: OrderRegistryProjectorProtocol, Sendable {
+    typealias ReadModelType = OrderRegistry
+    typealias Input = OrderRegistryInput
+    typealias StorageCoordinator = KurrentStorageCoordinator<OrderRegistryProjector>
+
+    static var categoryRule: StreamCategoryRule { .custom("Order") }
+
+    let coordinator: KurrentStorageCoordinator<OrderRegistryProjector>
+
+    func buildReadModel(input: Input) throws -> OrderRegistry? {
+        OrderRegistry(id: input.id)
+    }
+
+    func when(readModel: inout OrderRegistry, event: OrderCreated) throws {
+        readModel.customerId = event.customerId
+    }
+}
+
 // MARK: - Helper to extract orderId from a RecordedEvent (Order-{id} → {id})
 
 func orderId(from record: RecordedEvent) -> String? {
@@ -134,13 +162,19 @@ do {
     print("ℹ Subscription create skipped (probably already exists): \(error)")
 }
 
-// 2. Build the runner with TWO registered projectors fanning out from the same subscription.
+// 2. Build the runner with THREE registered projectors fanning out from the same
+//    subscription. OrderRegistry uses an `eventFilter` so the runner skips
+//    dispatching OrderAmountUpdated / OrderCancelled events to its projector
+//    entirely — no extractInput, no fetch, no apply, no cursor advance.
 let summaryStore = InMemoryReadModelStore<OrderSummary>()
 let timelineStore = InMemoryReadModelStore<OrderTimeline>()
+let registryStore = InMemoryReadModelStore<OrderRegistry>()
 
 // Generated mappers — `OrderSummaryEventMapper` covers every event listed under
-// OrderSummary in projection-model.yaml. Since both ReadModels list the same
-// events, one mapper instance is enough for all coordinators below.
+// OrderSummary in projection-model.yaml. Since OrderSummary/OrderTimeline list
+// the same events, one mapper instance is enough for those coordinators.
+// OrderRegistry only handles OrderCreated, but the mapper is also fine to share
+// (it tolerates events the projector doesn't react to).
 let mapper = OrderSummaryEventMapper()
 
 let summaryProjector = OrderSummaryProjector(
@@ -149,9 +183,13 @@ let summaryProjector = OrderSummaryProjector(
 let timelineProjector = OrderTimelineProjector(
     coordinator: KurrentStorageCoordinator<OrderTimelineProjector>(client: kdbClient, eventMapper: mapper)
 )
+let registryProjector = OrderRegistryProjector(
+    coordinator: KurrentStorageCoordinator<OrderRegistryProjector>(client: kdbClient, eventMapper: mapper)
+)
 
 let summaryStateful = StatefulEventSourcingProjector(projector: summaryProjector, store: summaryStore)
 let timelineStateful = StatefulEventSourcingProjector(projector: timelineProjector, store: timelineStore)
+let registryStateful = StatefulEventSourcingProjector(projector: registryProjector, store: registryStore)
 
 let runner = KurrentProjection.PersistentSubscriptionRunner(
     client: kdbClient,
@@ -164,8 +202,14 @@ let runner = KurrentProjection.PersistentSubscriptionRunner(
 .register(timelineStateful) { record in
     orderId(from: record).map { OrderTimelineInput(id: $0) }
 }
+.register(
+    registryStateful,
+    eventFilter: OrderRegistryEventFilter()  // ← generated, only OrderCreated
+) { record in
+    orderId(from: record).map { OrderRegistryInput(id: $0) }
+}
 
-print("✓ Runner configured with 2 projectors (OrderSummary + OrderTimeline)\n")
+print("✓ Runner configured with 3 projectors (OrderSummary + OrderTimeline + OrderRegistry — last one filtered to OrderCreated only)\n")
 
 // 3. Run the runner in a background task, publish events, observe convergence,
 //    then cancel for graceful shutdown.
@@ -201,15 +245,17 @@ try await withThrowingTaskGroup(of: Void.self) { group in
     )
     print("✓ Appended \(events.count) events\n")
 
-    // Wait for both projectors to converge (both stores have the latest revision).
+    // Wait for all three projectors to converge.
     print("── Waiting for projectors to catch up ──")
     let deadline = Date().addingTimeInterval(8.0)
     while Date() < deadline {
         let s = try await summaryStore.fetch(byId: id)
         let t = try await timelineStore.fetch(byId: id)
-        if let s, let t,
+        let r = try await registryStore.fetch(byId: id)
+        if let s, let t, let r,
            s.readModel.totalAmount == 175,
-           t.readModel.entries.count == 3 {
+           t.readModel.entries.count == 3,
+           !r.readModel.customerId.isEmpty {
             break
         }
         try await Task.sleep(for: .milliseconds(200))
@@ -218,6 +264,7 @@ try await withThrowingTaskGroup(of: Void.self) { group in
     // Read final state.
     let summary = try await summaryStore.fetch(byId: id)
     let timeline = try await timelineStore.fetch(byId: id)
+    let registry = try await registryStore.fetch(byId: id)
 
     print("\n── Final read models ──")
     if let s = summary?.readModel {
@@ -235,6 +282,12 @@ try await withThrowingTaskGroup(of: Void.self) { group in
         }
     } else {
         print("OrderTimeline: not found (projector did not converge)")
+    }
+    if let r = registry?.readModel {
+        print("\nOrderRegistry[\(r.id)] (filter: only OrderCreated):")
+        print("  customer: \(r.customerId)")
+    } else {
+        print("OrderRegistry: not found (projector did not converge)")
     }
 
     print("\n=== Done ===")

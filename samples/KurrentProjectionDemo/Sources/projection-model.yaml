@@ -11,3 +11,8 @@ OrderTimeline:
     - OrderCreated
     - OrderAmountUpdated
     - OrderCancelled
+
+OrderRegistry:
+  model: readModel
+  events:
+    - OrderCreated
