@@ -39,7 +39,8 @@ enum PluginError: Error {
         //generated files target
         let generatedProjectionHelperSource = generatedTargetDirectory.appending(path: "generated-projection-model.swift")
         let generatedEventMapperSource = generatedTargetDirectory.appending(path: "generated-event-mapper.swift")
-        
+        let generatedEventFilterSource = generatedTargetDirectory.appending(path: "generated-event-filter.swift")
+
         return [
             try .buildCommand(displayName: "ProjectionModel Generating...\(projectionModelSource.url.path())", executable: tool("generate"), arguments: [
                 "presenter",
@@ -66,6 +67,17 @@ enum PluginError: Error {
                 projectionModelSource.url
             ], outputFiles: [
                 generatedEventMapperSource
+            ]),
+            try .buildCommand(displayName: "EventFilter Generating...\(projectionModelSource.url.path())", executable: tool("generate"), arguments: [
+                "event-filter",
+                "--configuration", configSource.url.path(),
+                "--default-aggregate-root-name", targetName,
+                "--output", generatedEventFilterSource.path(),
+                projectionModelSource.url.path()
+            ], inputFiles: [
+                projectionModelSource.url
+            ], outputFiles: [
+                generatedEventFilterSource
             ])
         ]
     }

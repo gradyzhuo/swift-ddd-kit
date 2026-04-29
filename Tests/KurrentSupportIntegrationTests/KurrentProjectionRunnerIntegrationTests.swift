@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import KurrentDB
 import KurrentSupport
+import EventSourcing
 import TestUtility
 import Logging
 
@@ -227,5 +228,77 @@ struct KurrentProjectionRunnerSubscriptionFailureTests {
         await #expect(throws: (any Error).self) {
             try await runner.run()
         }
+    }
+}
+
+@Suite("KurrentProjection.PersistentSubscriptionRunner — eventFilter integration", .serialized)
+struct KurrentProjectionRunnerEventFilterTests {
+
+    private struct OnlyEventA: EventTypeFilter {
+        func handles(eventType: String) -> Bool { eventType == "EventA" }
+    }
+    private struct OnlyEventB: EventTypeFilter {
+        func handles(eventType: String) -> Bool { eventType == "EventB" }
+    }
+
+    @Test("eventFilter pre-filters events by type — only matching projector fires")
+    func filterRoutesToCorrectProjectorOnly() async throws {
+        let client = KurrentDBClient.makeIntegrationTestClient()
+        let groupName = "test-runner-filter-\(UUID().uuidString.prefix(8))"
+        let category = "RunnerFilterTest\(UUID().uuidString.prefix(6))"
+        let stream = "$ce-\(category)"
+
+        try await client.persistentSubscriptions(stream: stream, group: groupName).create { options in
+            options.settings.resolveLink = true
+        }
+        defer { Task { try? await client.persistentSubscriptions(stream: stream, group: groupName).delete() } }
+
+        let aggregateStream = "\(category)-\(UUID().uuidString)"
+        // Append two events of different types
+        for eventType in ["EventA", "EventB"] {
+            let payload = #"{}"#.data(using: .utf8)!
+            let eventData = try EventData(eventType: eventType, payload: payload)
+            _ = try await client.streams(of: .specified(aggregateStream))
+                .append(events: eventData) { _ in }
+        }
+
+        let aCalls = LockedBox(0)
+        let bCalls = LockedBox(0)
+
+        let runner = KurrentProjection.PersistentSubscriptionRunner(
+            client: client,
+            stream: stream,
+            groupName: groupName
+        )
+        .register(
+            eventFilter: OnlyEventA(),
+            extractInput: { _ -> Bool? in true },
+            execute: { _ in aCalls.withLock { $0 += 1 } }
+        )
+        .register(
+            eventFilter: OnlyEventB(),
+            extractInput: { _ -> Bool? in true },
+            execute: { _ in bCalls.withLock { $0 += 1 } }
+        )
+
+        let task = Task { try await runner.run() }
+
+        // Poll up to 4 seconds for both projectors to receive their respective event.
+        let deadline = Date().addingTimeInterval(4.0)
+        while Date() < deadline {
+            if aCalls.withLock({ $0 }) >= 1 && bCalls.withLock({ $0 }) >= 1 { break }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+
+        task.cancel()
+        _ = try? await task.value
+
+        let a = aCalls.withLock { $0 }
+        let b = bCalls.withLock { $0 }
+
+        // Each projector saw exactly one event (its own type).
+        // Without filter, both would have seen 2 events each.
+        #expect(a == 1, "OnlyEventA registration was called \(a) times; expected exactly 1")
+        #expect(b == 1, "OnlyEventB registration was called \(b) times; expected exactly 1")
     }
 }

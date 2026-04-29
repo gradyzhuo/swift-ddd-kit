@@ -1,0 +1,16 @@
+OrderCreated:
+  kind: createdEvent
+  aggregateRootId:
+    alias: orderId
+  properties:
+    customerId: String
+    totalAmount: Double
+
+OrderAmountUpdated:
+  aggregateRootId:
+    alias: orderId
+  properties:
+    newAmount: Double
+
+OrderCancelled:
+  kind: deletedEvent

@@ -42,6 +42,7 @@ struct GenerateCommand: ParsableCommand {
         subcommands: [
             GenerateEventCommand.self,
             GenerateEventMapperCommand.self,
+            GenerateEventFilterCommand.self,
             GenerateModelCommand.self,
             GenerateKurrentDBProjectionCommand.self
         ])

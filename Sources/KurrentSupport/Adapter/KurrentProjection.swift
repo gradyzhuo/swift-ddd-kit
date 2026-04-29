@@ -132,6 +132,9 @@ public enum KurrentProjection {
         /// Register a `StatefulEventSourcingProjector`. The `extractInput` closure
         /// is called for each incoming event; return `nil` to skip this projector.
         ///
+        /// Pass an `eventFilter` to short-circuit dispatch for unrelated event
+        /// types — no `extractInput`, no fetch, no apply, no cursor advance.
+        ///
         /// - Important: The projector's `execute` must be idempotent. The runner
         ///   nacks the entire event on any failure, which causes the event to be
         ///   re-delivered. Already-successful projectors will be invoked again on
@@ -140,22 +143,27 @@ public enum KurrentProjection {
         @discardableResult
         public func register<Projector: EventSourcingProjector, Store: ReadModelStore>(
             _ stateful: StatefulEventSourcingProjector<Projector, Store>,
+            eventFilter: (any EventTypeFilter)? = nil,
             extractInput: @Sendable @escaping (RecordedEvent) -> Projector.Input?
         ) -> Self
             where Store.Model == Projector.ReadModelType,
                   Projector.Input: Sendable
         {
-            return register(extractInput: extractInput) { input in
+            return register(eventFilter: eventFilter, extractInput: extractInput) { input in
                 _ = try await stateful.execute(input: input)
             }
         }
 
         @discardableResult
         public func register<Input: Sendable>(
+            eventFilter: (any EventTypeFilter)? = nil,
             extractInput: @Sendable @escaping (RecordedEvent) -> Input?,
             execute: @Sendable @escaping (Input) async throws -> Void
         ) -> Self {
             let registration = Registration(dispatch: { record in
+                guard Self._shouldDispatch(
+                    eventType: record.eventType, filter: eventFilter
+                ) else { return }
                 guard let input = extractInput(record) else { return }
                 try await execute(input)
             })
@@ -241,6 +249,16 @@ public enum KurrentProjection {
         // and `ForTesting` suffix make the testing intent explicit at call sites.
         internal var _registrationCountForTesting: Int {
             _registrations.withLock { $0.count }
+        }
+
+        // Internal — pure filter-check used by the production dispatch closure
+        // and by unit tests. Not part of the public API.
+        internal static func _shouldDispatch(
+            eventType: String,
+            filter: (any EventTypeFilter)?
+        ) -> Bool {
+            guard let filter else { return true }
+            return filter.handles(eventType: eventType)
         }
     }
 
