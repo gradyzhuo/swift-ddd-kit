@@ -187,23 +187,20 @@ let registryProjector = OrderRegistryProjector(
     coordinator: KurrentStorageCoordinator<OrderRegistryProjector>(client: kdbClient, eventMapper: mapper)
 )
 
-let summaryStateful = StatefulEventSourcingProjector(projector: summaryProjector, store: summaryStore)
-let timelineStateful = StatefulEventSourcingProjector(projector: timelineProjector, store: timelineStore)
-let registryStateful = StatefulEventSourcingProjector(projector: registryProjector, store: registryStore)
-
 let runner = KurrentProjection.PersistentSubscriptionRunner(
     client: kdbClient,
     stream: stream,
     groupName: groupName
 )
-.register(summaryStateful) { record in
+.register(projector: summaryProjector, store: summaryStore) { record in
     orderId(from: record).map { OrderSummaryInput(id: $0) }
 }
-.register(timelineStateful) { record in
+.register(projector: timelineProjector, store: timelineStore) { record in
     orderId(from: record).map { OrderTimelineInput(id: $0) }
 }
 .register(
-    registryStateful,
+    projector: registryProjector,
+    store: registryStore,
     eventFilter: OrderRegistryEventFilter()  // ← generated, only OrderCreated
 ) { record in
     orderId(from: record).map { OrderRegistryInput(id: $0) }

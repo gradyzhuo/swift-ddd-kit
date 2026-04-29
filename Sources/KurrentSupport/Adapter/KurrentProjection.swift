@@ -40,9 +40,10 @@ import ReadModelPersistence
 /// projector failure, causing KurrentDB to re-deliver the event. Already-successful
 /// projectors will be invoked again on re-delivery.
 ///
-/// `StatefulEventSourcingProjector` satisfies this contract automatically via its stored
-/// revision cursor (re-invocations become no-ops). Users of the low-level closure overload
-/// must ensure their `execute` closure is idempotent.
+/// The high-level `register(projector:store:)` overload satisfies this contract
+/// automatically via the store's revision cursor (re-invocations become no-ops).
+/// Users of the low-level closure overload must ensure their `execute` closure is
+/// idempotent.
 ///
 /// ## Lifecycle
 ///
@@ -129,29 +130,53 @@ public enum KurrentProjection {
             self.logger = logger
         }
 
-        /// Register a `StatefulEventSourcingProjector`. The `extractInput` closure
-        /// is called for each incoming event; return `nil` to skip this projector.
+        /// Register a projector with a long-lived (non-transactional) store.
         ///
-        /// Pass an `eventFilter` to short-circuit dispatch for unrelated event
-        /// types — no `extractInput`, no fetch, no apply, no cursor advance.
+        /// The runner internally wires the (projector, store) pair through
+        /// fetch + apply + save without exposing `StatefulEventSourcingProjector`.
+        /// For transactional semantics (atomic commit/rollback across all
+        /// projectors per event), use `KurrentProjection.TransactionalSubscriptionRunner` instead.
         ///
-        /// - Important: The projector's `execute` must be idempotent. The runner
-        ///   nacks the entire event on any failure, which causes the event to be
-        ///   re-delivered. Already-successful projectors will be invoked again on
-        ///   re-delivery; `StatefulEventSourcingProjector` handles this naturally
-        ///   via its stored revision cursor (subsequent invocations become no-ops).
+        /// - Important: The projector's apply must be idempotent. The runner
+        ///   nacks the entire event on any projector failure, which causes
+        ///   re-delivery; already-successful projectors will be invoked again
+        ///   on re-delivery; the stored revision cursor in `Store` makes those
+        ///   re-invocations no-ops.
         @discardableResult
-        public func register<Projector: EventSourcingProjector, Store: ReadModelStore>(
-            _ stateful: StatefulEventSourcingProjector<Projector, Store>,
+        public func register<Projector: EventSourcingProjector & Sendable, Store: ReadModelStore>(
+            projector: Projector,
+            store: Store,
             eventFilter: (any EventTypeFilter)? = nil,
             extractInput: @Sendable @escaping (RecordedEvent) -> Projector.Input?
         ) -> Self
-            where Store.Model == Projector.ReadModelType,
-                  Projector.Input: Sendable
+        where Store.Model == Projector.ReadModelType,
+              Store.Model.ID == String,
+              Projector.Input: Sendable
         {
-            return register(eventFilter: eventFilter, extractInput: extractInput) { input in
-                _ = try await stateful.execute(input: input)
-            }
+            let registration = Registration(dispatch: { record in
+                guard Self._shouldDispatch(eventType: record.eventType, filter: eventFilter) else { return }
+                guard let input = extractInput(record) else { return }
+
+                // Inline fetch + apply + save — replaces what StatefulEventSourcingProjector did.
+                let modelId = input.id
+                if let stored = try await store.fetch(byId: modelId) {
+                    guard let result = try await projector.coordinator.fetchEvents(
+                        byId: input.id, afterRevision: stored.revision
+                    ) else { return }
+                    if result.events.isEmpty { return }
+                    var readModel = stored.readModel
+                    try projector.apply(readModel: &readModel, events: result.events)
+                    try await store.save(readModel: readModel, revision: result.latestRevision)
+                } else {
+                    guard let result = try await projector.coordinator.fetchEvents(byId: input.id) else { return }
+                    guard !result.events.isEmpty else { return }
+                    guard var readModel = try projector.buildReadModel(input: input) else { return }
+                    try projector.apply(readModel: &readModel, events: result.events)
+                    try await store.save(readModel: readModel, revision: result.latestRevision)
+                }
+            })
+            _registrations.withLock { $0.append(registration) }
+            return self
         }
 
         @discardableResult
