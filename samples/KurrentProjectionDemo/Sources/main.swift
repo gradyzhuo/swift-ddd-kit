@@ -40,12 +40,12 @@ struct OrderRegistryInput: CQRSProjectorInput { let id: String }
 struct OrderSummaryProjector: OrderSummaryProjectorProtocol, Sendable {
     typealias ReadModelType = OrderSummary
     typealias Input = OrderSummaryInput
-    typealias Store = KurrentStorageCoordinator<OrderSummaryProjector>
+    typealias Store = KurrentStorageCoordinator<OrderSummaryProjector, CustomMetadata>
 
     // Stream category — must match the `$ce-Order` system stream we subscribe to.
     static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    let store: KurrentStorageCoordinator<OrderSummaryProjector>
+    let store: KurrentStorageCoordinator<OrderSummaryProjector, CustomMetadata>
 
     func buildReadModel(input: Input) throws -> OrderSummary? {
         OrderSummary(id: input.id)
@@ -67,11 +67,11 @@ struct OrderSummaryProjector: OrderSummaryProjectorProtocol, Sendable {
 struct OrderTimelineProjector: OrderTimelineProjectorProtocol, Sendable {
     typealias ReadModelType = OrderTimeline
     typealias Input = OrderTimelineInput
-    typealias Store = KurrentStorageCoordinator<OrderTimelineProjector>
+    typealias Store = KurrentStorageCoordinator<OrderTimelineProjector, CustomMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    let store: KurrentStorageCoordinator<OrderTimelineProjector>
+    let store: KurrentStorageCoordinator<OrderTimelineProjector, CustomMetadata>
 
     func buildReadModel(input: Input) throws -> OrderTimeline? {
         OrderTimeline(id: input.id)
@@ -95,11 +95,11 @@ struct OrderTimelineProjector: OrderTimelineProjectorProtocol, Sendable {
 struct OrderRegistryProjector: OrderRegistryProjectorProtocol, Sendable {
     typealias ReadModelType = OrderRegistry
     typealias Input = OrderRegistryInput
-    typealias Store = KurrentStorageCoordinator<OrderRegistryProjector>
+    typealias Store = KurrentStorageCoordinator<OrderRegistryProjector, CustomMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    let store: KurrentStorageCoordinator<OrderRegistryProjector>
+    let store: KurrentStorageCoordinator<OrderRegistryProjector, CustomMetadata>
 
     func buildReadModel(input: Input) throws -> OrderRegistry? {
         OrderRegistry(id: input.id)
@@ -178,13 +178,13 @@ let registryStore = InMemoryReadModelStore<OrderRegistry>()
 let mapper = OrderSummaryEventMapper()
 
 let summaryProjector = OrderSummaryProjector(
-    store: KurrentStorageCoordinator<OrderSummaryProjector>(client: kdbClient, eventMapper: mapper)
+    store: KurrentStorageCoordinator<OrderSummaryProjector, CustomMetadata>(client: kdbClient, eventMapper: mapper)
 )
 let timelineProjector = OrderTimelineProjector(
-    store: KurrentStorageCoordinator<OrderTimelineProjector>(client: kdbClient, eventMapper: mapper)
+    store: KurrentStorageCoordinator<OrderTimelineProjector, CustomMetadata>(client: kdbClient, eventMapper: mapper)
 )
 let registryProjector = OrderRegistryProjector(
-    store: KurrentStorageCoordinator<OrderRegistryProjector>(client: kdbClient, eventMapper: mapper)
+    store: KurrentStorageCoordinator<OrderRegistryProjector, CustomMetadata>(client: kdbClient, eventMapper: mapper)
 )
 
 let runner = KurrentProjection.PersistentSubscriptionRunner(
@@ -234,11 +234,11 @@ try await withThrowingTaskGroup(of: Void.self) { group in
         OrderAmountUpdated(orderId: id, newAmount: 175),
     ]
 
-    let appendCoordinator = KurrentStorageCoordinator<OrderSummaryProjector>(
+    let appendCoordinator = KurrentStorageCoordinator<OrderSummaryProjector, CustomMetadata>(
         client: kdbClient, eventMapper: mapper
     )
     _ = try await appendCoordinator.append(
-        events: events, byId: id, version: nil, external: nil
+        events: events, byId: id, version: nil, metadata: nil
     )
     print("✓ Appended \(events.count) events\n")
 

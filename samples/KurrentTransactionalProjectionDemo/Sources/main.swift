@@ -73,14 +73,14 @@ struct IntentionalFailure: Error, CustomStringConvertible {
 struct OrderSummaryProjector: OrderSummaryProjectorProtocol, Sendable {
     typealias ReadModelType = OrderSummary
     typealias Input = OrderSummaryInput
-    typealias Store = KurrentStorageCoordinator<OrderSummaryProjector>
+    typealias Store = KurrentStorageCoordinator<OrderSummaryProjector, CustomMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    let store: KurrentStorageCoordinator<OrderSummaryProjector>
+    let store: KurrentStorageCoordinator<OrderSummaryProjector, CustomMetadata>
     let failureGate: FailureGate?
 
-    init(store: KurrentStorageCoordinator<OrderSummaryProjector>, failureGate: FailureGate? = nil) {
+    init(store: KurrentStorageCoordinator<OrderSummaryProjector, CustomMetadata>, failureGate: FailureGate? = nil) {
         self.store = store
         self.failureGate = failureGate
     }
@@ -109,11 +109,11 @@ struct OrderSummaryProjector: OrderSummaryProjectorProtocol, Sendable {
 struct OrderRegistryProjector: OrderRegistryProjectorProtocol, Sendable {
     typealias ReadModelType = OrderRegistry
     typealias Input = OrderRegistryInput
-    typealias Store = KurrentStorageCoordinator<OrderRegistryProjector>
+    typealias Store = KurrentStorageCoordinator<OrderRegistryProjector, CustomMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    let store: KurrentStorageCoordinator<OrderRegistryProjector>
+    let store: KurrentStorageCoordinator<OrderRegistryProjector, CustomMetadata>
 
     func buildReadModel(input: Input) throws -> OrderRegistry? {
         OrderRegistry(id: input.id)
@@ -216,11 +216,11 @@ try await withThrowingTaskGroup(of: Void.self) { group in
     let mapper = OrderSummaryEventMapper()
 
     let orderSummaryProjector = OrderSummaryProjector(
-        store: KurrentStorageCoordinator<OrderSummaryProjector>(client: kdbClient, eventMapper: mapper),
+        store: KurrentStorageCoordinator<OrderSummaryProjector, CustomMetadata>(client: kdbClient, eventMapper: mapper),
         failureGate: failureGate
     )
     let orderRegistryProjector = OrderRegistryProjector(
-        store: KurrentStorageCoordinator<OrderRegistryProjector>(client: kdbClient, eventMapper: mapper)
+        store: KurrentStorageCoordinator<OrderRegistryProjector, CustomMetadata>(client: kdbClient, eventMapper: mapper)
     )
 
     // 4. Construct the Phase 2 transactional runner via the Postgres
@@ -277,11 +277,11 @@ try await withThrowingTaskGroup(of: Void.self) { group in
         OrderAmountUpdated(orderId: id, newAmount: 175),
     ]
 
-    let appendCoordinator = KurrentStorageCoordinator<OrderSummaryProjector>(
+    let appendCoordinator = KurrentStorageCoordinator<OrderSummaryProjector, CustomMetadata>(
         client: kdbClient, eventMapper: mapper
     )
     _ = try await appendCoordinator.append(
-        events: events, byId: id, version: nil, external: nil
+        events: events, byId: id, version: nil, metadata: nil
     )
     print("✓ Appended \(events.count) events\n")
 
