@@ -30,12 +30,7 @@ public final class KurrentStorageCoordinator<
     ) async throws -> UInt64? {
         let streamName = StreamNaming.getStreamName(id: id)
         let encoder = JSONEncoder()
-        let metadataBytes: Data
-        if let metadata {
-            metadataBytes = try encoder.encode(metadata)
-        } else {
-            metadataBytes = Data()
-        }
+        let metadataBytes: Data? = try metadata.map { try encoder.encode($0) }
         let eventDataList = try events.map { event in
             try EventData(
                 id: event.id,
