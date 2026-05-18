@@ -1,4 +1,6 @@
-public struct CustomMetadata: Codable, Sendable {
+import EventSourcing
+
+public struct CustomMetadata: Codable, Sendable, EventMetadata {
     public let className: String
     public var external: [String: String]?
 
