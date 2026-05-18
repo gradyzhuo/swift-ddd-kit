@@ -97,9 +97,10 @@ private struct StubReadModel: ReadModel, Sendable {
 private struct StubInput: CQRSProjectorInput, Sendable { let id: String }
 
 private struct StubCoordinator: EventStore {
+    typealias Metadata = CustomMetadata
     func fetchEvents(byId id: String) async throws -> (events: [any DomainEvent], latestRevision: UInt64)? { nil }
     func fetchEvents(byId id: String, afterRevision revision: UInt64) async throws -> (events: [any DomainEvent], latestRevision: UInt64)? { nil }
-    func append(events: [any DomainEvent], byId id: String, version: UInt64?, external: [String : String]?) async throws -> UInt64? { nil }
+    func append(events: [any DomainEvent], byId id: String, version: UInt64?, metadata: CustomMetadata?) async throws -> UInt64? { nil }
     func purge(byId id: String) async throws {}
 }
 

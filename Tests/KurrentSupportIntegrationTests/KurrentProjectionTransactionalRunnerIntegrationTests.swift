@@ -44,10 +44,10 @@ private struct DemoEventMapper: EventTypeMapper {
 private struct DemoProjector: EventSourcingProjector, Sendable {
     typealias Input = DemoInput
     typealias ReadModelType = DemoModel
-    typealias Store = KurrentStorageCoordinator<DemoProjector>
+    typealias Store = KurrentStorageCoordinator<DemoProjector, CustomMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("TxDemo") }
-    let store: KurrentStorageCoordinator<DemoProjector>
+    let store: KurrentStorageCoordinator<DemoProjector, CustomMetadata>
     let throwOnApply: Bool
 
     func apply(readModel: inout DemoModel, events: [any DomainEvent]) throws {
@@ -109,8 +109,8 @@ struct KurrentProjectionTransactionalRunnerIntegrationTests {
 
             let aggregateId = UUID().uuidString
             let event = DemoEvent(aggregateRootId: aggregateId, customerId: "alice")
-            let coordinator = KurrentStorageCoordinator<DemoProjector>(client: kdb, eventMapper: DemoEventMapper())
-            _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, external: nil)
+            let coordinator = KurrentStorageCoordinator<DemoProjector, CustomMetadata>(client: kdb, eventMapper: DemoEventMapper())
+            _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, metadata: nil)
 
             let projector = DemoProjector(store: coordinator, throwOnApply: false)
             let runner = KurrentProjection.TransactionalSubscriptionRunner(
@@ -168,8 +168,8 @@ struct KurrentProjectionTransactionalRunnerIntegrationTests {
 
             let aggregateId = UUID().uuidString
             let event = DemoEvent(aggregateRootId: aggregateId, customerId: "bob")
-            let coordinator = KurrentStorageCoordinator<DemoProjector>(client: kdb, eventMapper: DemoEventMapper())
-            _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, external: nil)
+            let coordinator = KurrentStorageCoordinator<DemoProjector, CustomMetadata>(client: kdb, eventMapper: DemoEventMapper())
+            _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, metadata: nil)
 
             // Projector that always throws inside apply — every retry should also fail.
             let projector = DemoProjector(store: coordinator, throwOnApply: true)
