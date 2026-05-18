@@ -47,7 +47,7 @@ extension EventSourcingRepository {
     }
 
     public func save(aggregateRoot: AggregateRootType, external: [String:String]?) async throws {
-        let latestRevision: UInt64? = try await store.append(events: aggregateRoot.events, byId: aggregateRoot.id, version: aggregateRoot.version, external: external)
+        let latestRevision: UInt64? = try await store.append(events: aggregateRoot.events, byId: aggregateRoot.id, version: aggregateRoot.version, metadata: nil)
         if let latestRevision {
             aggregateRoot.update(version: latestRevision)
         }
