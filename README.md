@@ -233,12 +233,12 @@ Repositories handle persistence and retrieval through event replay.
 ```swift
 final class OrderRepository: EventSourcingRepository {
     typealias AggregateRootType = Order
-    typealias StorageCoordinator = KurrentStorageCoordinator<Order>
+    typealias Store = KurrentStorageCoordinator<Order, CustomMetadata>
 
-    let coordinator: StorageCoordinator
+    let store: Store
 
     init(client: KurrentDBClient) {
-        coordinator = .init(client: client, eventMapper: OrderEventMapper())
+        store = .init(client: client, eventMapper: OrderEventMapper())
     }
 }
 ```
@@ -340,12 +340,12 @@ struct OrderSummary: ReadModel {
 final class OrderProjector: EventSourcingProjector {
     typealias ReadModelType = OrderSummary
     typealias Input = OrderProjectorInput
-    typealias StorageCoordinator = KurrentStorageCoordinator<Order>
+    typealias Store = KurrentStorageCoordinator<Order, CustomMetadata>
 
-    let coordinator: StorageCoordinator
+    let store: Store
 
     init(client: KurrentDBClient) {
-        coordinator = .init(client: client, eventMapper: OrderEventMapper())
+        store = .init(client: client, eventMapper: OrderEventMapper())
     }
 
     func buildReadModel(input: Input) throws -> OrderSummary? {
@@ -679,7 +679,7 @@ Tiers 1 and 2 can be mixed within a single definition. Hand-written `.js` files 
 |--------|---------|
 | `DDDKit` | Umbrella import |
 | `DDDCore` | Core protocols: `Entity`, `AggregateRoot`, `DomainEvent`, `DomainEventBus` |
-| `EventSourcing` | Abstract patterns: `EventStorageCoordinator`, `EventSourcingRepository`, `EventSourcingProjector` |
+| `EventSourcing` | Abstract patterns: `EventStore`, `EventSourcingRepository`, `EventSourcingProjector` |
 | `KurrentSupport` | KurrentDB adapter: `KurrentStorageCoordinator`, `EventTypeMapper` |
 | `EventBus` | In-memory event bus for local event distribution |
 | `MigrationUtility` | Event schema migration framework |
