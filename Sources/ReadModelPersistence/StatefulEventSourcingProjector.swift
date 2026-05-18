@@ -9,7 +9,7 @@ import EventSourcing
 /// - **Snapshot found**: incremental → apply only events after stored revision → update store
 ///
 /// ```swift
-/// let projector = OrderProjector(coordinator: coordinator)
+/// let projector = OrderProjector(store: eventStore)
 /// let stateful  = StatefulEventSourcingProjector(projector: projector, store: store)
 /// let result    = try await stateful.execute(input: input)
 /// ```
@@ -40,7 +40,7 @@ public struct StatefulEventSourcingProjector<
 
         if let stored {
             // Incremental path — fetch only events after the stored revision.
-            guard let result = try await projector.coordinator.fetchEvents(
+            guard let result = try await projector.store.fetchEvents(
                 byId: input.id, afterRevision: stored.revision
             ) else {
                 return .init(readModel: stored.readModel, message: nil)
@@ -57,7 +57,7 @@ public struct StatefulEventSourcingProjector<
 
         } else {
             // Full replay path — first-time projection.
-            guard let fetchedResult = try await projector.coordinator.fetchEvents(byId: input.id) else {
+            guard let fetchedResult = try await projector.store.fetchEvents(byId: input.id) else {
                 return nil
             }
 

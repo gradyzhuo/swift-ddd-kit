@@ -60,7 +60,7 @@ private struct StubInput: CQRSProjectorInput {
 }
 
 // Minimal in-memory coordinator for tests — never actually called by registration.
-private struct StubCoordinator: EventStorageCoordinator {
+private struct StubCoordinator: EventStore {
     func fetchEvents(byId id: String) async throws -> (events: [any DomainEvent], latestRevision: UInt64)? { nil }
     func fetchEvents(byId id: String, afterRevision revision: UInt64) async throws -> (events: [any DomainEvent], latestRevision: UInt64)? { nil }
     func append(events: [any DomainEvent], byId id: String, version: UInt64?, external: [String : String]?) async throws -> UInt64? { nil }
@@ -70,9 +70,9 @@ private struct StubCoordinator: EventStorageCoordinator {
 private struct StubProjector: EventSourcingProjector {
     typealias Input = StubInput
     typealias ReadModelType = StubReadModel
-    typealias StorageCoordinator = StubCoordinator
+    typealias Store = StubCoordinator
 
-    let coordinator: StubCoordinator
+    let store: StubCoordinator
 
     func apply(readModel: inout StubReadModel, events: [any DomainEvent]) throws {}
     func buildReadModel(input: StubInput) throws -> StubReadModel? { StubReadModel(id: input.id) }
@@ -84,7 +84,7 @@ extension KurrentProjectionRunnerSetupTests {
     func highLevelRegisterChains() {
         let client = KurrentDBClient(settings: .localhost())
         let store = InMemoryReadModelStore<StubReadModel>()
-        let projector = StubProjector(coordinator: StubCoordinator())
+        let projector = StubProjector(store: StubCoordinator())
 
         let runner = KurrentProjection.PersistentSubscriptionRunner(
             client: client,

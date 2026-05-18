@@ -30,11 +30,11 @@ private struct TestInput: CQRSProjectorInput {
 private struct TestProjector: EventSourcingProjector {
     typealias Input = TestInput
     typealias ReadModelType = TestReadModel
-    typealias StorageCoordinator = InMemoryStorageCoordinator
+    typealias Store = InMemoryStorageCoordinator
 
     static var categoryRule: StreamCategoryRule { .custom("Test") }
 
-    let coordinator: InMemoryStorageCoordinator
+    let store: InMemoryStorageCoordinator
 
     func buildReadModel(input: TestInput) throws -> TestReadModel? {
         TestReadModel(id: input.id)
@@ -60,7 +60,7 @@ struct StatefulProjectorTests {
         let coordinator = InMemoryStorageCoordinator()
         let store       = InMemoryReadModelStore<TestReadModel>()
         let stateful    = StatefulEventSourcingProjector(
-            projector: TestProjector(coordinator: coordinator),
+            projector: TestProjector(store: coordinator),
             store: store
         )
 
@@ -88,7 +88,7 @@ struct StatefulProjectorTests {
         let coordinator = InMemoryStorageCoordinator()
         let store       = InMemoryReadModelStore<TestReadModel>()
         let stateful    = StatefulEventSourcingProjector(
-            projector: TestProjector(coordinator: coordinator),
+            projector: TestProjector(store: coordinator),
             store: store
         )
 
@@ -123,7 +123,7 @@ struct StatefulProjectorTests {
         let coordinator = InMemoryStorageCoordinator()
         let store       = InMemoryReadModelStore<TestReadModel>()
         let stateful    = StatefulEventSourcingProjector(
-            projector: TestProjector(coordinator: coordinator),
+            projector: TestProjector(store: coordinator),
             store: store
         )
 
@@ -146,7 +146,7 @@ struct StatefulProjectorTests {
         let coordinator = InMemoryStorageCoordinator()
         let store       = InMemoryReadModelStore<TestReadModel>()
         let stateful    = StatefulEventSourcingProjector(
-            projector: TestProjector(coordinator: coordinator),
+            projector: TestProjector(store: coordinator),
             store: store
         )
 
@@ -206,7 +206,7 @@ struct InMemoryReadModelStoreTests {
 
 // MARK: - InMemoryStorageCoordinator.fetchEvents(afterRevision:) Tests
 
-@Suite("EventStorageCoordinator.fetchEvents(afterRevision:)")
+@Suite("EventStore.fetchEvents(afterRevision:)")
 struct FetchEventsAfterRevisionTests {
 
     @Test("afterRevision 回傳之後的 events")

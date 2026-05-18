@@ -1,10 +1,10 @@
 import DDDCore
 import Foundation
 
-public protocol EventSourcingRepository<StorageCoordinator>: Repository {
-    associatedtype StorageCoordinator: EventStorageCoordinator
+public protocol EventSourcingRepository<Store>: Repository {
+    associatedtype Store: EventStore
 
-    var coordinator: StorageCoordinator { get }
+    var store: Store { get }
     
     func find(byId id: AggregateRootType.ID) async throws -> AggregateRootType?
     func save(aggregateRoot: AggregateRootType, external: [String:String]?) async throws
@@ -17,7 +17,7 @@ extension EventSourcingRepository {
     
     public func find(byId id: AggregateRootType.ID, hiddingDeleted: Bool) async throws -> AggregateRootType? {
         
-        guard let fetchEventsResult = try await coordinator.fetchEvents(byId: id) else {
+        guard let fetchEventsResult = try await store.fetchEvents(byId: id) else {
             return nil
         }
         
@@ -47,7 +47,7 @@ extension EventSourcingRepository {
     }
 
     public func save(aggregateRoot: AggregateRootType, external: [String:String]?) async throws {
-        let latestRevision: UInt64? = try await coordinator.append(events: aggregateRoot.events, byId: aggregateRoot.id, version: aggregateRoot.version, external: external)
+        let latestRevision: UInt64? = try await store.append(events: aggregateRoot.events, byId: aggregateRoot.id, version: aggregateRoot.version, external: external)
         if let latestRevision {
             aggregateRoot.update(version: latestRevision)
         }
@@ -68,6 +68,6 @@ extension EventSourcingRepository {
         guard let _ = try await find(byId: id) else {
             throw DDDError.aggregateNotFound(usecase: "DeleteAggregateRoot", aggregateRootType: AggregateRootType.self, aggregateRootId: "\(id)")
         }
-        try await coordinator.purge(byId: id)
+        try await store.purge(byId: id)
     }
 }

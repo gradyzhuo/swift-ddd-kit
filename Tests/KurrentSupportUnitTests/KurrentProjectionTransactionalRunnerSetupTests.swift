@@ -52,7 +52,7 @@ struct KurrentProjectionTransactionalRunnerSetupTests {
             groupName: "test-group"
         )
 
-        let projector = StubProjector(coordinator: StubCoordinator())
+        let projector = StubProjector(store: StubCoordinator())
 
         let returned = runner
             .register(
@@ -96,7 +96,7 @@ private struct StubReadModel: ReadModel, Sendable {
 
 private struct StubInput: CQRSProjectorInput, Sendable { let id: String }
 
-private struct StubCoordinator: EventStorageCoordinator {
+private struct StubCoordinator: EventStore {
     func fetchEvents(byId id: String) async throws -> (events: [any DomainEvent], latestRevision: UInt64)? { nil }
     func fetchEvents(byId id: String, afterRevision revision: UInt64) async throws -> (events: [any DomainEvent], latestRevision: UInt64)? { nil }
     func append(events: [any DomainEvent], byId id: String, version: UInt64?, external: [String : String]?) async throws -> UInt64? { nil }
@@ -106,9 +106,9 @@ private struct StubCoordinator: EventStorageCoordinator {
 private struct StubProjector: EventSourcingProjector, Sendable {
     typealias Input = StubInput
     typealias ReadModelType = StubReadModel
-    typealias StorageCoordinator = StubCoordinator
+    typealias Store = StubCoordinator
 
-    let coordinator: StubCoordinator
+    let store: StubCoordinator
 
     func apply(readModel: inout StubReadModel, events: [any DomainEvent]) throws {}
     func buildReadModel(input: StubInput) throws -> StubReadModel? { StubReadModel(id: input.id) }

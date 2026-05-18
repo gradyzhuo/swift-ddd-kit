@@ -58,7 +58,7 @@ private final class Item: AggregateRoot {
 
 // MARK: - In-Memory Coordinator
 
-private final class InMemoryCoordinator: EventStorageCoordinator {
+private final class InMemoryCoordinator: EventStore {
     let _store: Mutex<[String: (events: [any DomainEvent], revision: UInt64)]> = .init([:])
     let _appendCallCount: Mutex<Int> = .init(0)
     
@@ -101,10 +101,10 @@ private final class InMemoryCoordinator: EventStorageCoordinator {
 
 private final class ItemRepository: EventSourcingRepository {
     typealias AggregateRootType = Item
-    typealias StorageCoordinator = InMemoryCoordinator
+    typealias Store = InMemoryCoordinator
 
-    let coordinator: InMemoryCoordinator
-    init(coordinator: InMemoryCoordinator) { self.coordinator = coordinator }
+    let store: InMemoryCoordinator
+    init(store: InMemoryCoordinator) { self.store = store }
 }
 
 // MARK: - Repository Tests
@@ -115,7 +115,7 @@ struct EventSourcingRepositoryTests {
     @Test("save 後 events 被寫入 coordinator")
     func saveWritesEventsToCoordinator() async throws {
         let coordinator = InMemoryCoordinator()
-        let repo = ItemRepository(coordinator: coordinator)
+        let repo = ItemRepository(store: coordinator)
         let item = try Item(id: "item-1", name: "apple")
 
         try await repo.save(aggregateRoot: item, external: nil)
@@ -127,7 +127,7 @@ struct EventSourcingRepositoryTests {
     @Test("save 後 metadata.events 被清空")
     func saveClearsUncommittedEvents() async throws {
         let coordinator = InMemoryCoordinator()
-        let repo = ItemRepository(coordinator: coordinator)
+        let repo = ItemRepository(store: coordinator)
         let item = try Item(id: "item-1", name: "apple")
 
         try await repo.save(aggregateRoot: item, external: nil)
@@ -138,7 +138,7 @@ struct EventSourcingRepositoryTests {
     @Test("save 後 version 更新")
     func saveUpdatesVersion() async throws {
         let coordinator = InMemoryCoordinator()
-        let repo = ItemRepository(coordinator: coordinator)
+        let repo = ItemRepository(store: coordinator)
         let item = try Item(id: "item-1", name: "apple")
 
         #expect(item.version == nil)
@@ -148,7 +148,7 @@ struct EventSourcingRepositoryTests {
 
     @Test("find 不存在的 id 回傳 nil")
     func findUnknownIdReturnsNil() async throws {
-        let repo = ItemRepository(coordinator: .init())
+        let repo = ItemRepository(store: .init())
         let result = try await repo.find(byId: "ghost")
         #expect(result == nil)
     }
@@ -156,7 +156,7 @@ struct EventSourcingRepositoryTests {
     @Test("save 後 find 可重建 aggregate")
     func saveAndFindRebuildsAggregate() async throws {
         let coordinator = InMemoryCoordinator()
-        let repo = ItemRepository(coordinator: coordinator)
+        let repo = ItemRepository(store: coordinator)
         let item = try Item(id: "item-1", name: "apple")
 
         try await repo.save(aggregateRoot: item, external: nil)
@@ -169,7 +169,7 @@ struct EventSourcingRepositoryTests {
     @Test("delete 後 find 預設回傳 nil")
     func deleteHidesAggregate() async throws {
         let coordinator = InMemoryCoordinator()
-        let repo = ItemRepository(coordinator: coordinator)
+        let repo = ItemRepository(store: coordinator)
         let item = try Item(id: "item-1", name: "apple")
 
         try await repo.save(aggregateRoot: item, external: nil)
@@ -186,7 +186,7 @@ struct EventSourcingRepositoryTests {
     @Test("purge 後 coordinator 中的資料消失")
     func purgeRemovesFromCoordinator() async throws {
         let coordinator = InMemoryCoordinator()
-        let repo = ItemRepository(coordinator: coordinator)
+        let repo = ItemRepository(store: coordinator)
         let item = try Item(id: "item-1", name: "apple")
 
         try await repo.save(aggregateRoot: item, external: nil)
@@ -197,7 +197,7 @@ struct EventSourcingRepositoryTests {
 
     @Test("delete 不存在的 aggregate 拋錯")
     func deleteNonExistentThrows() async throws {
-        let repo = ItemRepository(coordinator: .init())
+        let repo = ItemRepository(store: .init())
         await #expect(throws: (any Error).self) {
             try await repo.delete(byId: "ghost", external: nil)
         }
@@ -205,7 +205,7 @@ struct EventSourcingRepositoryTests {
 
     @Test("purge 不存在的 aggregate 拋錯")
     func purgeNonExistentThrows() async throws {
-        let repo = ItemRepository(coordinator: .init())
+        let repo = ItemRepository(store: .init())
         await #expect(throws: (any Error).self) {
             try await repo.purge(byId: "ghost")
         }

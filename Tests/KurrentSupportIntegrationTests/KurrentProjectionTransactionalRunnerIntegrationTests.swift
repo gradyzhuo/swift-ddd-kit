@@ -44,10 +44,10 @@ private struct DemoEventMapper: EventTypeMapper {
 private struct DemoProjector: EventSourcingProjector, Sendable {
     typealias Input = DemoInput
     typealias ReadModelType = DemoModel
-    typealias StorageCoordinator = KurrentStorageCoordinator<DemoProjector>
+    typealias Store = KurrentStorageCoordinator<DemoProjector>
 
     static var categoryRule: StreamCategoryRule { .custom("TxDemo") }
-    let coordinator: KurrentStorageCoordinator<DemoProjector>
+    let store: KurrentStorageCoordinator<DemoProjector>
     let throwOnApply: Bool
 
     func apply(readModel: inout DemoModel, events: [any DomainEvent]) throws {
@@ -112,7 +112,7 @@ struct KurrentProjectionTransactionalRunnerIntegrationTests {
             let coordinator = KurrentStorageCoordinator<DemoProjector>(client: kdb, eventMapper: DemoEventMapper())
             _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, external: nil)
 
-            let projector = DemoProjector(coordinator: coordinator, throwOnApply: false)
+            let projector = DemoProjector(store: coordinator, throwOnApply: false)
             let runner = KurrentProjection.TransactionalSubscriptionRunner(
                 client: kdb,
                 transactionProvider: PostgresTransactionProvider(client: pg),
@@ -172,7 +172,7 @@ struct KurrentProjectionTransactionalRunnerIntegrationTests {
             _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, external: nil)
 
             // Projector that always throws inside apply — every retry should also fail.
-            let projector = DemoProjector(coordinator: coordinator, throwOnApply: true)
+            let projector = DemoProjector(store: coordinator, throwOnApply: true)
 
             // Tight retry policy so the test exits quickly via .skip after a couple of retries.
             struct QuickSkip: KurrentProjection.RetryPolicy {

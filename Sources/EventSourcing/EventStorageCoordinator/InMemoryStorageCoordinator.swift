@@ -1,9 +1,9 @@
 import DDDCore
 import Foundation
 
-/// A thread-safe, in-memory implementation of `EventStorageCoordinator`.
+/// A thread-safe, in-memory implementation of `EventStore`.
 /// Suitable for testing, prototyping, or use cases that do not require persistence.
-public actor InMemoryStorageCoordinator: EventStorageCoordinator {
+public actor InMemoryStorageCoordinator: EventStore {
 
     private var store: [String: (events: [any DomainEvent], revision: UInt64)] = [:]
 

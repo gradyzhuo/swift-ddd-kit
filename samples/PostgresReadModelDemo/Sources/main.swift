@@ -30,11 +30,11 @@ struct OrderProjectorInput: CQRSProjectorInput {
 struct OrderProjector: OrderSummaryProjectorProtocol {
     typealias ReadModelType = OrderSummary
     typealias Input = OrderProjectorInput
-    typealias StorageCoordinator = InMemoryStorageCoordinator
+    typealias Store = InMemoryStorageCoordinator
 
     static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    let coordinator: InMemoryStorageCoordinator
+    let store: InMemoryStorageCoordinator
 
     func buildReadModel(input: Input) throws -> OrderSummary? {
         OrderSummary(id: input.id, customerId: "", totalAmount: 0, status: "unknown")
@@ -97,7 +97,7 @@ try await withThrowingTaskGroup(of: Void.self) { group in
 
     let coordinator = InMemoryStorageCoordinator()
     let pgStore     = PostgresJSONReadModelStore<OrderSummary>(client: pgClient)
-    let projector   = OrderProjector(coordinator: coordinator)
+    let projector   = OrderProjector(store: coordinator)
     let stateful    = StatefulEventSourcingProjector(projector: projector, store: pgStore)
 
     let orderId = "order-pg-001"
