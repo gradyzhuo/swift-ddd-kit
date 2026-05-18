@@ -8,13 +8,10 @@ import Foundation
 import DDDCore
 import EventSourcing
 
-extension EventSourcingRepository {
-    public func save(aggregateRoot: AggregateRootType, userId: String) async throws {
-        try await self.save(aggregateRoot: aggregateRoot, external: ["userId": userId])
-    }
-    
-    public func delete(byId id: AggregateRootType.ID, userId: String) async throws {
-        try await self.delete(byId: id, external: ["userId": userId])
-    }
-}
-
+// NOTE: The userId convenience overloads (save(aggregateRoot:userId:) and
+// delete(byId:userId:)) have been removed. The equivalent pattern is now:
+//
+//   let metadata = CustomMetadata(className: ..., external: ["userId": userId])
+//   try await EventMetadataContext<CustomMetadata>.withValue(metadata) {
+//       try await repository.save(aggregateRoot: aggregateRoot)
+//   }
