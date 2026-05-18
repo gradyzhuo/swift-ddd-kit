@@ -263,6 +263,69 @@ try await repository.delete(byId: "order-001")
 try await repository.purge(byId: "order-001")
 ```
 
+### Event Metadata Pattern (Ambient Context)
+
+Application-defined metadata flows from Usecase entry to KurrentDB via Swift's
+TaskLocal. Domain types (`AggregateRoot`, `DomainEvent` schemas) stay free of
+audit / request / tenant concerns.
+
+```swift
+// 1. Application defines its schema (or uses the bundled CustomMetadata)
+struct AuditMetadata: EventMetadata {
+    let operatorId: String
+    let tenantId: String
+}
+
+// 2. Repository binds the schema via Store.Metadata
+final class OrderRepository: EventSourcingRepository {
+    typealias AggregateRootType = Order
+    typealias Store = KurrentStorageCoordinator<OrderStreamNaming, AuditMetadata>
+    let store: Store
+    init(store: Store) { self.store = store }
+}
+
+// 3. Usecase sets the ambient at entry
+struct PlaceOrderUsecase {
+    let repository: OrderRepository
+    func execute(input: Input) async throws -> Output {
+        let meta = AuditMetadata(operatorId: input.operatorId, tenantId: input.tenantId)
+        return try await EventMetadataContext<AuditMetadata>.withValue(meta) {
+            let order = try Order(id: input.orderId, customerId: input.customerId)
+            try await repository.save(aggregateRoot: order)
+            return Output(orderId: order.id)
+        }
+    }
+}
+
+// 4. Read-side reads event.metadata directly (filled by the generated mapper)
+func apply(readModel: inout OrderActivity, events: [any DomainEvent]) {
+    for event in events {
+        if let created = event as? OrderCreated, let meta = created.metadata {
+            readModel.lastOperator = meta.operatorId
+        }
+    }
+}
+```
+
+`CustomMetadata` (in `KurrentSupport`) is the bundled default schema used by
+generator-produced events. Apps can use it as-is or replace with a custom
+`EventMetadata`-conforming struct.
+
+**Limits and gotchas:**
+- `Task.detached` does NOT inherit ambient context. Capture and re-apply if you
+  spawn detached work across a metadata boundary.
+- All events in one `save` share one metadata payload (intentional; per-event
+  metadata variation usually signals an aggregate boundary issue).
+- `Store.Metadata` and `event.Metadata` alignment is by convention, not compile-
+  time. Runtime mismatch yields `event.metadata = nil` rather than a crash.
+- `EventMetadataContext<M>.withValue` takes a `@Sendable` closure. If you write
+  a helper that captures a non-`Sendable` aggregate from outer scope, Swift will
+  reject the capture. Workaround: construct the aggregate inside the closure, or
+  mark your aggregate `@unchecked Sendable`.
+- `RecordedEvent.userId` (a convenience accessor in KurrentSupport) decodes
+  `customMetadata` as `CustomMetadata` and reads `external["userId"]`. It silently
+  returns nil if your `Metadata` type is something other than `CustomMetadata`.
+
 ## CQRS — Projectors and Read Models
 
 For the query side, implement `EventSourcingProjector` to fold events into a read-optimized model.

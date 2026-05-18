@@ -87,6 +87,38 @@ The `generate` executable (`Sources/generate/`) is the shared CLI. `DomainEventG
 5. `repository.save(aggregateRoot:)` — appends uncommitted events from `metadata` to KurrentDB
 6. `repository.find(byId:)` — replays all events from KurrentDB through `when(happened:)` to reconstruct state
 
+### Event Metadata Pattern
+
+Application metadata (audit info, request ids, tenant ids) flows via
+`EventMetadataContext<M: EventMetadata>` — a generic TaskLocal carrier —
+from Usecase entry to `EventStore.append` at the storage boundary.
+`AggregateRoot` and `DomainEvent` schemas never see ambient metadata on the
+write path; the generated mapper fills `event.metadata` on the read path so
+ReadModel / Projector can consume it normally.
+
+Key types:
+- `EventMetadata` (`Sources/EventSourcing/EventMetadata.swift`) — marker
+  protocol, Codable + Sendable. Framework imposes no schema fields.
+- `EventMetadataContext<M>` (`Sources/EventSourcing/EventMetadataContext.swift`)
+  — TaskLocal-backed, dispatched per `M` via a hidden ObjectIdentifier-keyed
+  dict. Public API: `EventMetadataContext<M>.withValue(value) { ... }` /
+  `EventMetadataContext<M>.current`. Internal storage uses a dict because Swift
+  refuses `@TaskLocal` on generic-type static properties.
+- `EventStore.Metadata` — store-level type binding. `KurrentStorageCoordinator`
+  carries `Metadata: EventMetadata` as a second generic param.
+- `CustomMetadata` (`KurrentSupport`) — bundled default schema (className +
+  external dict + operatorId convenience). Generator output uses it by default.
+
+`EventSourcingRepository.save` default impl reads
+`EventMetadataContext<Store.Metadata>.current` and passes typed `metadata` to
+`store.append`. Write-side `event.metadata` is ignored; read-side mapper
+populates it from `record.customMetadata`.
+
+**Gotcha (for users):** `EventMetadataContext.withValue` takes a `@Sendable`
+closure. Wrappers that capture a non-`Sendable` aggregate from outer scope hit
+a Swift 6 capture error — workaround is `@unchecked Sendable` on the aggregate
+or restructuring to construct the aggregate inside the closure.
+
 ## TODO
 
 - **`RestorableAggregateRoot`** — 支援刪除後還原的 aggregate 協定。設計：
