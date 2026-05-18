@@ -37,9 +37,13 @@ package struct EventMapperGenerator {
         case "\(eventName)":
             try {
                 guard var event = try eventData.decode(to: \(eventName).self) else { return nil }
-                // handle metadata
-                let decoder = JSONDecoder()
-                event.metadata = try decoder.decode(\(eventName).Metadata.self, from: eventData.customMetadata)
+                // handle metadata — tolerate empty bytes (no ambient on write) and
+                // decode failure (Store.Metadata ≠ event.Metadata mismatch) by
+                // leaving event.metadata nil
+                if !eventData.customMetadata.isEmpty {
+                    let decoder = JSONDecoder()
+                    event.metadata = try? decoder.decode(\(eventName).Metadata.self, from: eventData.customMetadata)
+                }
                 return event
             }()
 """)
