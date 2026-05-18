@@ -1,5 +1,3 @@
-import Foundation
-
 /// Marker protocol for application-defined event metadata schemas.
 ///
 /// Applications define concrete metadata structs by conforming to this protocol;

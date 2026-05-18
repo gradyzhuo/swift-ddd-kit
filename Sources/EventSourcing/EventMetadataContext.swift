@@ -1,5 +1,4 @@
 // Sources/EventSourcing/EventMetadataContext.swift
-import Foundation
 
 /// Non-generic storage holder for ambient event metadata.
 ///
@@ -42,7 +41,7 @@ public enum EventMetadataContext<M: EventMetadata> {
     @discardableResult
     public static func withValue<R>(
         _ value: M,
-        operation: () async throws -> R
+        operation: @Sendable () async throws -> R
     ) async rethrows -> R {
         var updated = _EventMetadataStorage.all
         updated[ObjectIdentifier(M.self)] = value

@@ -1,5 +1,4 @@
 // Tests/EventSourcingTests/EventMetadataContextTests.swift
-import Foundation
 import Testing
 @testable import EventSourcing
 
