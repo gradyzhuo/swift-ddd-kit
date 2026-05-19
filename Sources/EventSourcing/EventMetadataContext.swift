@@ -41,7 +41,7 @@ public enum EventMetadataContext<M: EventMetadata> {
     @discardableResult
     public static func withValue<R>(
         _ value: M,
-        operation: @Sendable () async throws -> R
+        operation: () async throws -> R
     ) async rethrows -> R {
         var updated = _EventMetadataStorage.all
         updated[ObjectIdentifier(M.self)] = value
