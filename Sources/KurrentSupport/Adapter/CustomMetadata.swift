@@ -1,26 +1,9 @@
 import EventSourcing
 
-public struct CustomMetadata: Codable, Sendable, EventMetadata {
-    public let className: String
-    public var external: [String: String]?
+public struct CustomMetadata: EventMetadata {
+    public let operatorId: String
 
-    public init(className: String, external: [String: String]?) {
-        self.className = className
-        self.external = external ?? [:]
+    public init(operatorId: String) {
+        self.operatorId = operatorId
     }
 }
-
-extension CustomMetadata {
-    public var operatorId: String?{
-        set {
-            var external = external ?? [:]
-            external["operatorId"] = newValue
-            self.external = external
-        }
-        get {
-            guard let external else { return nil }
-            return external["operatorId"] ?? external["userId"]
-        }
-    }
-}
-

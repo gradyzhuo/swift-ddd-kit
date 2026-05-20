@@ -32,7 +32,7 @@ private struct DemoInput: CQRSProjectorInput, Sendable { let id: String }
 
 private struct DemoEventMapper: EventTypeMapper {
     func mapping(eventData: RecordedEvent) throws -> (any DomainEvent)? {
-        switch eventData.mappingClassName {
+        switch eventData.eventType {
         case "DemoEvent":
             return try eventData.decode(to: DemoEvent.self)
         default:

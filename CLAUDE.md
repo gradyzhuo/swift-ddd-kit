@@ -59,7 +59,7 @@ DDDKit (umbrella re-export)
 
 **`EventSourcingRepository`** (EventSourcing) — Builds on coordinator: `find(byId:)`, `save(aggregateRoot:external:)`, `delete(byId:external:)`, `purge(byId:)`. Default implementations handle event replay and soft-delete logic.
 
-**`KurrentStorageCoordinator<T: AggregateRoot>`** (KurrentSupport) — Concrete coordinator wrapping a KurrentDB client. Stream names use `{T.category}-{id}`. Events are stored with `CustomMetadata` containing the Swift type name and optional external key-value pairs.
+**`KurrentStorageCoordinator<StreamNaming: EventStreamNaming, Metadata: EventMetadata>`** (KurrentSupport) — Concrete `EventStore` wrapping a KurrentDB client. Stream names come from `StreamNaming`. The typed `Metadata?` passed to `append` is JSON-encoded into KurrentDB's `customMetadata` field; nil metadata writes no bytes.
 
 **`EventTypeMapper`** (KurrentSupport) — Converts a raw `RecordedEvent` from KurrentDB into a typed `DomainEvent`. Implementations switch on `eventData.eventType`.
 
@@ -106,8 +106,10 @@ Key types:
   refuses `@TaskLocal` on generic-type static properties.
 - `EventStore.Metadata` — store-level type binding. `KurrentStorageCoordinator`
   carries `Metadata: EventMetadata` as a second generic param.
-- `CustomMetadata` (`KurrentSupport`) — bundled default schema (className +
-  external dict + operatorId convenience). Generator output uses it by default.
+- `CustomMetadata` (`KurrentSupport`) — minimal bundled schema with a single
+  `operatorId: String` field; the default `Metadata` type generator output
+  references (`typealias Metadata = CustomMetadata`). Apps typically replace it
+  with their own `EventMetadata`-conforming struct.
 
 `EventSourcingRepository.save` default impl reads
 `EventMetadataContext<Store.Metadata>.current` and passes typed `metadata` to

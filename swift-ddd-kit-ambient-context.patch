@@ -1,0 +1,38 @@
+diff --git a/Sources/EventSourcing/EventMetadataContext.swift b/Sources/EventSourcing/EventMetadataContext.swift
+index c99724c..368689e 100644
+--- a/Sources/EventSourcing/EventMetadataContext.swift
++++ b/Sources/EventSourcing/EventMetadataContext.swift
+@@ -41,7 +41,7 @@ public enum EventMetadataContext<M: EventMetadata> {
+     @discardableResult
+     public static func withValue<R>(
+         _ value: M,
+-        operation: @Sendable () async throws -> R
++        operation: () async throws -> R
+     ) async rethrows -> R {
+         var updated = _EventMetadataStorage.all
+         updated[ObjectIdentifier(M.self)] = value
+diff --git a/Sources/KurrentSupport/Adapter/RecordedEvent.swift b/Sources/KurrentSupport/Adapter/RecordedEvent.swift
+index 718956a..53fa367 100644
+--- a/Sources/KurrentSupport/Adapter/RecordedEvent.swift
++++ b/Sources/KurrentSupport/Adapter/RecordedEvent.swift
+@@ -9,7 +9,10 @@ extension RecordedEvent {
+     /// when:
+     /// - the app uses a different `EventMetadata` schema, OR
+     /// - the event was written with no ambient metadata, OR
+-    /// - the `customMetadata` bytes are not a valid `CustomMetadata` JSON.
++    /// - the `customMetadata` bytes are not a valid `CustomMetadata` JSON, OR
++    /// - `className` is empty (ambient-context write path where metadata is
++    ///   shared across all events in a save batch and `className` is not
++    ///   meaningful as a per-event type discriminator).
+     ///
+     /// The fallback path is the common case for apps that don't use
+     /// `CustomMetadata` — they rely on the KurrentDB-native `eventType`
+@@ -19,7 +22,7 @@ extension RecordedEvent {
+         let decoder = JSONDecoder()
+         do {
+             let customMetadata = try decoder.decode(CustomMetadata.self, from: self.customMetadata)
+-            return customMetadata.className
++            return customMetadata.className.isEmpty ? self.eventType : customMetadata.className
+         } catch {
+             return self.eventType
+         }

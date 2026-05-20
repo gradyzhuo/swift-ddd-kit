@@ -248,16 +248,16 @@ also gains an `associatedtype Metadata: EventMetadata` on `EventStore`.
 
 ### Step 1 — Define your metadata schema (or use the bundled one)
 
-If your existing code passed `["userId": "..."]`-style dicts, the simplest
-migration is to keep using `CustomMetadata` (which already has `external`
-and an `operatorId` convenience):
+The bundled `CustomMetadata` is a minimal schema carrying a single
+`operatorId` field — if your existing code only passed a user id, this is the
+drop-in replacement:
 
 ```swift
 import KurrentSupport
-// CustomMetadata: Codable, Sendable, EventMetadata — already conforms.
+// public struct CustomMetadata: EventMetadata { public let operatorId: String }
 ```
 
-Or define your own:
+If you need more fields, define your own — the framework imposes no schema:
 
 ```swift
 struct AuditMetadata: EventMetadata {
@@ -292,7 +292,7 @@ Same for `InMemoryStorageCoordinator`:
 ```diff
 - try await repository.save(aggregateRoot: order, external: ["userId": userId])
 + try await EventMetadataContext<CustomMetadata>.withValue(
-+     CustomMetadata(className: "Order", external: ["userId": userId])
++     CustomMetadata(operatorId: userId)
 + ) {
 +     try await repository.save(aggregateRoot: order)
 + }
@@ -321,10 +321,6 @@ it via structured concurrency.
 - Multiple events in one `save` share one metadata payload.
 - `Store.Metadata` and `event.Metadata` alignment is by convention; runtime
   mismatch yields `event.metadata = nil` on read, not a crash.
-- `EventMetadataContext<M>.withValue` takes a `@Sendable` closure. If you wrap
-  it in a helper that captures a non-`Sendable` aggregate from outer scope, the
-  capture will fail to compile. Either restructure to construct the aggregate
-  inside the closure, or mark your aggregate `@unchecked Sendable`.
-- `RecordedEvent.userId` (a KurrentSupport convenience accessor) only works for
-  apps that use `CustomMetadata` as their `Metadata` schema. Apps using a custom
-  schema get nil from `record.userId`.
+- Event-type resolution on read uses the KurrentDB-native `eventType` field
+  (populated from `DomainEvent.eventType` at write time). The metadata payload
+  carries no type discriminator — generated mappers switch on `eventData.eventType`.

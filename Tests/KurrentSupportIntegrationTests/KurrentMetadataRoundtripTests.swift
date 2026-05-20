@@ -20,7 +20,7 @@ private struct RoundtripEvent: DomainEvent {
 private struct RoundtripEventMapper: EventTypeMapper {
     init() {}
     func mapping(eventData: RecordedEvent) throws -> (any DomainEvent)? {
-        guard eventData.mappingClassName == "RoundtripEvent" else { return nil }
+        guard eventData.eventType == "RoundtripEvent" else { return nil }
         guard var event = try eventData.decode(to: RoundtripEvent.self) else { return nil }
         if !eventData.customMetadata.isEmpty {
             let decoder = JSONDecoder()
@@ -49,10 +49,7 @@ struct KurrentMetadataRoundtripTests {
         )
 
         let aggregateId = UUID().uuidString
-        let written = CustomMetadata(
-            className: "RoundtripEvent",
-            external: ["operatorId": "alice", "tenantId": "t-1"]
-        )
+        let written = CustomMetadata(operatorId: "alice")
         let event = RoundtripEvent(aggregateRootId: aggregateId, note: "hello")
 
         // Write side — ambient + direct store.append
@@ -75,8 +72,7 @@ struct KurrentMetadataRoundtripTests {
             Issue.record("First event is not RoundtripEvent")
             return
         }
-        #expect(readEvent.metadata?.external?["operatorId"] == "alice")
-        #expect(readEvent.metadata?.external?["tenantId"] == "t-1")
+        #expect(readEvent.metadata?.operatorId == "alice")
         #expect(readEvent.note == "hello")
     }
 

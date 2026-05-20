@@ -307,9 +307,11 @@ func apply(readModel: inout OrderActivity, events: [any DomainEvent]) {
 }
 ```
 
-`CustomMetadata` (in `KurrentSupport`) is the bundled default schema used by
-generator-produced events. Apps can use it as-is or replace with a custom
-`EventMetadata`-conforming struct.
+`CustomMetadata` (in `KurrentSupport`) is a minimal bundled schema carrying a
+single `operatorId` field — it is the default `Metadata` type that
+generator-produced events reference (`typealias Metadata = CustomMetadata`).
+Most applications replace it with their own `EventMetadata`-conforming struct
+(like `AuditMetadata` above).
 
 **Limits and gotchas:**
 - `Task.detached` does NOT inherit ambient context. Capture and re-apply if you
@@ -318,13 +320,9 @@ generator-produced events. Apps can use it as-is or replace with a custom
   metadata variation usually signals an aggregate boundary issue).
 - `Store.Metadata` and `event.Metadata` alignment is by convention, not compile-
   time. Runtime mismatch yields `event.metadata = nil` rather than a crash.
-- `EventMetadataContext<M>.withValue` takes a `@Sendable` closure. If you write
-  a helper that captures a non-`Sendable` aggregate from outer scope, Swift will
-  reject the capture. Workaround: construct the aggregate inside the closure, or
-  mark your aggregate `@unchecked Sendable`.
-- `RecordedEvent.userId` (a convenience accessor in KurrentSupport) decodes
-  `customMetadata` as `CustomMetadata` and reads `external["userId"]`. It silently
-  returns nil if your `Metadata` type is something other than `CustomMetadata`.
+- Event-type resolution on read uses the KurrentDB-native `eventType` field
+  (populated from `DomainEvent.eventType` at write time). The metadata payload
+  carries no type discriminator.
 
 ## CQRS — Projectors and Read Models
 

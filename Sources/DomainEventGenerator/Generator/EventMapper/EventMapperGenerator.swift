@@ -29,7 +29,7 @@ package struct EventMapperGenerator {
 """)
         
         lines.append("""
-        return switch eventData.mappingClassName {
+        return switch eventData.eventType {
 """)
         
         for eventName in eventNames {
