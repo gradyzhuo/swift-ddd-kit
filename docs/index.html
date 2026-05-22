@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>swift-ddd-kit — DDD &amp; Event Sourcing for Swift 6</title>
+<meta name="description" content="swift-ddd-kit — a Domain-Driven Design + Event Sourcing framework for Swift 6, backed by KurrentDB.">
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --ink:#e6e8ee; --muted:#9aa3b2;
+    --line:#2a2f3a; --accent:#5aa9ff; --accent2:#7c5cff;
+    --ok:#3fb950; --warn:#e3b341; --chip:#262b36;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12.5px}
+  .wrap{max-width:1000px;margin:0 auto;padding:34px 22px 110px}
+
+  /* nav */
+  .sitenav{position:sticky;top:0;z-index:50;background:rgba(15,17,21,.92);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .sn-inner{max-width:1000px;margin:0 auto;padding:10px 22px;display:flex;
+    align-items:center;gap:18px;flex-wrap:wrap}
+  .sn-brand{font:700 15px/1 "SF Mono",monospace;color:var(--ink)}
+  .sn-links{display:flex;gap:16px;flex-wrap:wrap;font-size:13.5px;margin-left:auto}
+  .sn-links a{color:var(--muted)}
+  .sn-links a:hover,.sn-links a.active{color:var(--accent);text-decoration:none}
+
+  h1{font-size:34px;margin:0 0 8px;letter-spacing:-.02em}
+  h2{font-size:21px;margin:46px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:0 0 6px}
+  p{margin:10px 0}
+  .tagline{color:var(--muted);font-size:17px;margin:0 0 18px}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+  .badge{background:var(--chip);border:1px solid var(--line);border-radius:999px;
+    padding:3px 11px;font-size:12px;color:var(--muted)}
+  .badge.v{color:var(--ok);border-color:#1d5a2e}
+
+  .hero{background:linear-gradient(135deg,#171a21,#1b1830);
+    border:1px solid var(--line);border-radius:16px;padding:30px 28px;margin:20px 0 10px}
+  .hero p{font-size:15px;color:var(--muted);margin:14px 0 0;max-width:70ch}
+
+  .cta{display:flex;gap:12px;flex-wrap:wrap;margin:22px 0 6px}
+  .btn{display:inline-block;padding:10px 18px;border-radius:9px;font-weight:600;font-size:14px}
+  .btn.primary{background:var(--accent);color:#06121f}
+  .btn.primary:hover{background:#7bbcff;text-decoration:none}
+  .btn.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--ink)}
+  .btn.ghost:hover{border-color:var(--accent);text-decoration:none}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin:14px 0}
+  .mod{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px 16px}
+  .mod .nm{font:600 13px/1 "SF Mono",monospace;color:var(--accent);margin-bottom:5px}
+  .mod p{margin:0;font-size:13px;color:var(--muted)}
+
+  .flow{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin:14px 0}
+  .step{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    padding:13px 15px 13px 46px;position:relative}
+  .step .n{position:absolute;left:12px;top:13px;width:24px;height:24px;border-radius:50%;
+    background:var(--accent2);color:#fff;font:700 12px/24px monospace;text-align:center}
+  .step b{font-size:13.5px} .step p{margin:3px 0 0;font-size:12.5px;color:var(--muted)}
+
+  .linkcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin:14px 0}
+  .lc{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:block}
+  .lc:hover{border-color:var(--accent);text-decoration:none}
+  .lc .ic{font-size:22px} .lc h3{margin:8px 0 4px;color:var(--ink)}
+  .lc p{margin:0;font-size:13px;color:var(--muted)}
+
+  footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:12.5px}
+  .kicker{font:600 12px/1 "SF Mono",monospace;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--accent2);margin:0 0 4px}
+</style>
+</head>
+<body>
+
+<nav class="sitenav"><div class="sn-inner">
+  <a class="sn-brand" href="./index.html">swift-ddd-kit</a>
+  <div class="sn-links">
+    <a href="./index.html" class="active">Home</a>
+    <a href="./changelog.html">Changelog</a>
+    <a href="./migration/swift-ddd-kit-0.x-to-1.0.html">Migration 0.x→1.0</a>
+    <a href="https://github.com/gradyzhuo/swift-ddd-kit">GitHub ↗</a>
+  </div>
+</div></nav>
+
+<div class="wrap">
+
+  <p class="kicker">Swift Package</p>
+  <h1>swift-ddd-kit</h1>
+  <p class="tagline">Domain-Driven Design + Event Sourcing 框架，為 Swift 6 打造。</p>
+
+  <div class="badges">
+    <span class="badge v">latest: 1.0</span>
+    <span class="badge">Swift 6</span>
+    <span class="badge">macOS 15+ / iOS 16+</span>
+    <span class="badge">Event store: KurrentDB</span>
+  </div>
+
+  <div class="hero">
+    <h3 style="font-size:15px;color:var(--accent2);margin:0">What is it</h3>
+    <p>
+      swift-ddd-kit 把 Domain-Driven Design 的戰術模式（Aggregate、Domain Event、Repository、
+      Use Case）與 Event Sourcing 結合成一套 Swift 6 框架，並以
+      <b>KurrentDB</b> 作為事件儲存。它提供分層的 protocol 抽象、build-time 的程式碼生成
+      plugin，以及 CQRS 讀模型投影機制——讓你把注意力放在 domain 邏輯，而不是基礎設施。
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="./changelog.html">查看版本變更 →</a>
+      <a class="btn ghost" href="./migration/swift-ddd-kit-0.x-to-1.0.html">0.x → 1.0 Migration Guide</a>
+      <a class="btn ghost" href="https://github.com/gradyzhuo/swift-ddd-kit">GitHub Repository</a>
+    </div>
+  </div>
+
+  <h2>模組分層</h2>
+  <p>框架由數個 target 組成，<code>DDDKit</code> 是把它們重新導出的 umbrella module：</p>
+  <div class="grid">
+    <div class="mod"><div class="nm">DDDCore</div><p>核心 DDD 協定：Entity、DomainEvent、AggregateRoot、DomainEventBus、Usecase。</p></div>
+    <div class="mod"><div class="nm">EventSourcing</div><p>抽象的 event sourcing 模式：EventStore、EventSourcingRepository、EventSourcingProjector、ReadModel。</p></div>
+    <div class="mod"><div class="nm">KurrentSupport</div><p>KurrentDB 轉接層：KurrentStorageCoordinator、EventTypeMapper。</p></div>
+    <div class="mod"><div class="nm">EventBus</div><p>記憶體內的事件匯流排實作。</p></div>
+    <div class="mod"><div class="nm">MigrationUtility</div><p>事件結構演進 / schema migration 框架。</p></div>
+    <div class="mod"><div class="nm">DomainEventGenerator</div><p>YAML → Swift 的程式碼生成函式庫。</p></div>
+    <div class="mod"><div class="nm">TestUtility</div><p>對 KurrentDB 做整合測試的輔助工具。</p></div>
+  </div>
+
+  <h2>Event Sourcing 流程</h2>
+  <div class="flow">
+    <div class="step"><span class="n">1</span><b>定義事件</b><p>讓事件 conform <code>DomainEvent</code>，或從 <code>event.yaml</code> 生成。</p></div>
+    <div class="step"><span class="n">2</span><b>實作 AggregateRoot</b><p>用 <code>when(happened:)</code> handler 從事件變更狀態。</p></div>
+    <div class="step"><span class="n">3</span><b>實作 EventTypeMapper</b><p>把 KurrentDB 的 <code>RecordedEvent</code> 反序列化回型別化的事件結構。</p></div>
+    <div class="step"><span class="n">4</span><b>實作 Repository</b><p><code>EventSourcingRepository</code> 由 <code>KurrentStorageCoordinator</code> 撐起。</p></div>
+    <div class="step"><span class="n">5</span><b>save</b><p><code>repository.save(aggregateRoot:)</code> 把未提交事件附加到 KurrentDB。</p></div>
+    <div class="step"><span class="n">6</span><b>find</b><p><code>repository.find(byId:)</code> 重播事件、重建 aggregate 狀態。</p></div>
+  </div>
+
+  <h2>文件導覽</h2>
+  <div class="linkcards">
+    <a class="lc" href="./changelog.html">
+      <div class="ic">📋</div><h3>版本變更說明</h3>
+      <p>每個版本的新功能、破壞性變更、修正項目。</p>
+    </a>
+    <a class="lc" href="./migration/swift-ddd-kit-0.x-to-1.0.html">
+      <div class="ic">🧭</div><h3>0.x → 1.0 Migration Guide</h3>
+      <p>給依賴本套件的下游專案——多圖表 + 給 AI agent 的機器可讀遷移清單。</p>
+    </a>
+    <a class="lc" href="https://github.com/gradyzhuo/swift-ddd-kit">
+      <div class="ic">⌥</div><h3>原始碼 &amp; Issues</h3>
+      <p>GitHub repository，含完整 README 與 API 文件。</p>
+    </a>
+  </div>
+
+  <footer>
+    <p>swift-ddd-kit · DDD + Event Sourcing for Swift 6 ·
+       由 <a href="https://github.com/gradyzhuo/swift-ddd-kit">gradyzhuo/swift-ddd-kit</a> 維護。</p>
+    <p>本站由 GitHub Pages 自動部署（來源：<code>docs/</code>）。</p>
+  </footer>
+
+</div>
+</body>
+</html>

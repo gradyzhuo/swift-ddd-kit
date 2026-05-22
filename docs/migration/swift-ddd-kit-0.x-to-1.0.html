@@ -135,9 +135,29 @@
   .hl{color:var(--warn)}
   ul.tite{margin:8px 0;padding-left:20px}
   ul.tite li{margin:4px 0}
+
+  .sitenav{position:sticky;top:0;z-index:50;background:rgba(15,17,21,.92);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .sn-inner{max-width:1080px;margin:0 auto;padding:10px 22px;display:flex;
+    align-items:center;gap:18px;flex-wrap:wrap}
+  .sn-brand{font:700 15px/1 "SF Mono",monospace;color:var(--ink)}
+  .sn-links{display:flex;gap:16px;flex-wrap:wrap;font-size:13.5px;margin-left:auto}
+  .sn-links a{color:var(--muted)}
+  .sn-links a:hover,.sn-links a.active{color:var(--accent);text-decoration:none}
 </style>
 </head>
 <body>
+
+<nav class="sitenav"><div class="sn-inner">
+  <a class="sn-brand" href="../index.html">swift-ddd-kit</a>
+  <div class="sn-links">
+    <a href="../index.html">Home</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="./swift-ddd-kit-0.x-to-1.0.html" class="active">Migration 0.x→1.0</a>
+    <a href="https://github.com/gradyzhuo/swift-ddd-kit">GitHub ↗</a>
+  </div>
+</div></nav>
+
 <div class="wrap">
 
   <p class="kicker">Framework Migration Guide</p>
