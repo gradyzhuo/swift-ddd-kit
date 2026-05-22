@@ -4,12 +4,15 @@ import KurrentDB
 import Foundation
 import Logging
 
-fileprivate struct EventWrapped: Sendable{
+fileprivate struct EventWrapped: Sendable {
     let event: any DomainEvent
     let revision: UInt64
 }
 
-public final class KurrentStorageCoordinator<StreamNaming: EventStreamNaming>: EventStorageCoordinator {
+public final class KurrentStorageCoordinator<
+    StreamNaming: EventStreamNaming,
+    Metadata: EventMetadata
+>: EventStore {
     let logger = Logger(label: "KurrentStorageCoordinator")
     let eventMapper: any EventTypeMapper
     let client: KurrentDBClient
@@ -19,30 +22,34 @@ public final class KurrentStorageCoordinator<StreamNaming: EventStreamNaming>: E
         self.client = client
     }
 
-    public func append(events: [any DDDCore.DomainEvent], byId id: String, version: UInt64?, external: [String:String]?) async throws -> UInt64? {
+    public func append(
+        events: [any DDDCore.DomainEvent],
+        byId id: String,
+        version: UInt64?,
+        metadata: Metadata?
+    ) async throws -> UInt64? {
         let streamName = StreamNaming.getStreamName(id: id)
-        let events = try events.map {
-            let customMetadata = CustomMetadata(
-                className: "\(type(of: $0))",
-                external: external
+        let encoder = JSONEncoder()
+        let metadataBytes: Data? = try metadata.map { try encoder.encode($0) }
+        let eventDataList = try events.map { event in
+            try EventData(
+                id: event.id,
+                eventType: event.eventType,
+                model: event,
+                customMetadata: metadataBytes
             )
-            let encoder = JSONEncoder()
-            return try EventData(id: $0.id, eventType: $0.eventType, model: $0, customMetadata: encoder.encode(customMetadata))
         }
         let stream = client.streams(specified: streamName)
-        let response = try await stream.append(events: events){
-            $0.expectedRevision = version.map{ .at(UInt64($0)) } ?? .any
+        let response = try await stream.append(events: eventDataList) {
+            $0.expectedRevision = version.map { .at(UInt64($0)) } ?? .any
         }
-
-        return response.currentRevision.flatMap {
-            .init($0)
-        }
+        return response.currentRevision.flatMap { UInt64($0) }
     }
 
-    public func fetchEvents(byId id: String) async throws -> (events: [any DomainEvent], latestRevision: UInt64)? {
-        
+    public func fetchEvents(byId id: String) async throws
+        -> (events: [any DomainEvent], latestRevision: UInt64)? {
         let streamName = StreamNaming.getStreamName(id: id)
-        do{
+        do {
             let stream = client.streams(specified: streamName)
             let recordEvents = try await stream.read {
                 $0.direction = .forward
@@ -53,39 +60,40 @@ public final class KurrentStorageCoordinator<StreamNaming: EventStreamNaming>: E
             }.reduce(.init()) { partialResult, event in
                 return partialResult + [event]
             }
-            
+
             let eventWrappers: [EventWrapped] = recordEvents.reduce(into: .init()) {
-                do{
+                do {
                     guard let event = try self.eventMapper.mapping(eventData: $1) else {
                         return
                     }
                     $0.append(.init(event: event, revision: $1.revision))
-                }catch {
+                } catch {
                     logger.warning("skipped event cause error happened. error: \(error)")
                     return
                 }
             }
-            
+
             guard let latestRevision = eventWrappers.last?.revision else {
                 return nil
             }
-            
+
             let events = eventWrappers.map(\.event)
             let sortedEvents = events.sorted {
                 $0.occurred < $1.occurred
             }
-            
+
             return (events: sortedEvents, latestRevision: latestRevision)
-        } catch KurrentError.resourceNotFound(let reason){
+        } catch KurrentError.resourceNotFound(let reason) {
             logger.warning("Skip an error happened in esdb, with reason: \(reason)")
             return nil
-        }catch{
+        } catch {
             logger.error("The error happened when fetching events: \(error)")
             throw error
         }
     }
-    
-    public func fetchEvents(byId id: String, afterRevision revision: UInt64) async throws -> (events: [any DomainEvent], latestRevision: UInt64)? {
+
+    public func fetchEvents(byId id: String, afterRevision revision: UInt64) async throws
+        -> (events: [any DomainEvent], latestRevision: UInt64)? {
         let streamName = StreamNaming.getStreamName(id: id)
         do {
             let stream = client.streams(specified: streamName)
@@ -133,5 +141,4 @@ public final class KurrentStorageCoordinator<StreamNaming: EventStreamNaming>: E
         let streamName = StreamNaming.getStreamName(id: id)
         try await self.client.streams(specified: streamName).delete()
     }
-    
 }

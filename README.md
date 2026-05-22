@@ -233,12 +233,12 @@ Repositories handle persistence and retrieval through event replay.
 ```swift
 final class OrderRepository: EventSourcingRepository {
     typealias AggregateRootType = Order
-    typealias StorageCoordinator = KurrentStorageCoordinator<Order>
+    typealias Store = KurrentStorageCoordinator<Order, CustomMetadata>
 
-    let coordinator: StorageCoordinator
+    let store: Store
 
     init(client: KurrentDBClient) {
-        coordinator = .init(client: client, eventMapper: OrderEventMapper())
+        store = .init(client: client, eventMapper: OrderEventMapper())
     }
 }
 ```
@@ -263,6 +263,67 @@ try await repository.delete(byId: "order-001")
 try await repository.purge(byId: "order-001")
 ```
 
+### Event Metadata Pattern (Ambient Context)
+
+Application-defined metadata flows from Usecase entry to KurrentDB via Swift's
+TaskLocal. Domain types (`AggregateRoot`, `DomainEvent` schemas) stay free of
+audit / request / tenant concerns.
+
+```swift
+// 1. Application defines its schema (or uses the bundled CustomMetadata)
+struct AuditMetadata: EventMetadata {
+    let operatorId: String
+    let tenantId: String
+}
+
+// 2. Repository binds the schema via Store.Metadata
+final class OrderRepository: EventSourcingRepository {
+    typealias AggregateRootType = Order
+    typealias Store = KurrentStorageCoordinator<OrderStreamNaming, AuditMetadata>
+    let store: Store
+    init(store: Store) { self.store = store }
+}
+
+// 3. Usecase sets the ambient at entry
+struct PlaceOrderUsecase {
+    let repository: OrderRepository
+    func execute(input: Input) async throws -> Output {
+        let meta = AuditMetadata(operatorId: input.operatorId, tenantId: input.tenantId)
+        return try await EventMetadataContext<AuditMetadata>.withValue(meta) {
+            let order = try Order(id: input.orderId, customerId: input.customerId)
+            try await repository.save(aggregateRoot: order)
+            return Output(orderId: order.id)
+        }
+    }
+}
+
+// 4. Read-side reads event.metadata directly (filled by the generated mapper)
+func apply(readModel: inout OrderActivity, events: [any DomainEvent]) {
+    for event in events {
+        if let created = event as? OrderCreated, let meta = created.metadata {
+            readModel.lastOperator = meta.operatorId
+        }
+    }
+}
+```
+
+`CustomMetadata` (in `KurrentSupport`) is a minimal bundled schema carrying a
+single `operatorId` field — it is the default `Metadata` type that
+generator-produced events reference (`typealias Metadata = CustomMetadata`).
+Most applications replace it with their own `EventMetadata`-conforming struct
+(like `AuditMetadata` above).
+
+**Limits and gotchas:**
+- `Task.detached` does NOT inherit ambient context. Capture and re-apply if you
+  spawn detached work across a metadata boundary.
+- All events in one `save` share one metadata payload (intentional; per-event
+  metadata variation usually signals an aggregate boundary issue).
+- `Store.Metadata` and `event.Metadata` alignment is by convention, not compile-
+  time. Runtime mismatch yields `event.metadata = nil` rather than a crash.
+- Event-type resolution on read uses the KurrentDB-native `eventType` field
+  (populated from `DomainEvent.eventType` at write time). The metadata payload
+  carries no type discriminator.
+
 ## CQRS — Projectors and Read Models
 
 For the query side, implement `EventSourcingProjector` to fold events into a read-optimized model.
@@ -277,12 +338,12 @@ struct OrderSummary: ReadModel {
 final class OrderProjector: EventSourcingProjector {
     typealias ReadModelType = OrderSummary
     typealias Input = OrderProjectorInput
-    typealias StorageCoordinator = KurrentStorageCoordinator<Order>
+    typealias Store = KurrentStorageCoordinator<Order, CustomMetadata>
 
-    let coordinator: StorageCoordinator
+    let store: Store
 
     init(client: KurrentDBClient) {
-        coordinator = .init(client: client, eventMapper: OrderEventMapper())
+        store = .init(client: client, eventMapper: OrderEventMapper())
     }
 
     func buildReadModel(input: Input) throws -> OrderSummary? {
@@ -616,7 +677,7 @@ Tiers 1 and 2 can be mixed within a single definition. Hand-written `.js` files 
 |--------|---------|
 | `DDDKit` | Umbrella import |
 | `DDDCore` | Core protocols: `Entity`, `AggregateRoot`, `DomainEvent`, `DomainEventBus` |
-| `EventSourcing` | Abstract patterns: `EventStorageCoordinator`, `EventSourcingRepository`, `EventSourcingProjector` |
+| `EventSourcing` | Abstract patterns: `EventStore`, `EventSourcingRepository`, `EventSourcingProjector` |
 | `KurrentSupport` | KurrentDB adapter: `KurrentStorageCoordinator`, `EventTypeMapper` |
 | `EventBus` | In-memory event bus for local event distribution |
 | `MigrationUtility` | Event schema migration framework |

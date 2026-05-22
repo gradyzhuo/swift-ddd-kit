@@ -59,7 +59,7 @@ DDDKit (umbrella re-export)
 
 **`EventSourcingRepository`** (EventSourcing) — Builds on coordinator: `find(byId:)`, `save(aggregateRoot:external:)`, `delete(byId:external:)`, `purge(byId:)`. Default implementations handle event replay and soft-delete logic.
 
-**`KurrentStorageCoordinator<T: AggregateRoot>`** (KurrentSupport) — Concrete coordinator wrapping a KurrentDB client. Stream names use `{T.category}-{id}`. Events are stored with `CustomMetadata` containing the Swift type name and optional external key-value pairs.
+**`KurrentStorageCoordinator<StreamNaming: EventStreamNaming, Metadata: EventMetadata>`** (KurrentSupport) — Concrete `EventStore` wrapping a KurrentDB client. Stream names come from `StreamNaming`. The typed `Metadata?` passed to `append` is JSON-encoded into KurrentDB's `customMetadata` field; nil metadata writes no bytes.
 
 **`EventTypeMapper`** (KurrentSupport) — Converts a raw `RecordedEvent` from KurrentDB into a typed `DomainEvent`. Implementations switch on `eventData.eventType`.
 
@@ -86,6 +86,40 @@ The `generate` executable (`Sources/generate/`) is the shared CLI. `DomainEventG
 4. Implement `EventSourcingRepository` backed by `KurrentStorageCoordinator`
 5. `repository.save(aggregateRoot:)` — appends uncommitted events from `metadata` to KurrentDB
 6. `repository.find(byId:)` — replays all events from KurrentDB through `when(happened:)` to reconstruct state
+
+### Event Metadata Pattern
+
+Application metadata (audit info, request ids, tenant ids) flows via
+`EventMetadataContext<M: EventMetadata>` — a generic TaskLocal carrier —
+from Usecase entry to `EventStore.append` at the storage boundary.
+`AggregateRoot` and `DomainEvent` schemas never see ambient metadata on the
+write path; the generated mapper fills `event.metadata` on the read path so
+ReadModel / Projector can consume it normally.
+
+Key types:
+- `EventMetadata` (`Sources/EventSourcing/EventMetadata.swift`) — marker
+  protocol, Codable + Sendable. Framework imposes no schema fields.
+- `EventMetadataContext<M>` (`Sources/EventSourcing/EventMetadataContext.swift`)
+  — TaskLocal-backed, dispatched per `M` via a hidden ObjectIdentifier-keyed
+  dict. Public API: `EventMetadataContext<M>.withValue(value) { ... }` /
+  `EventMetadataContext<M>.current`. Internal storage uses a dict because Swift
+  refuses `@TaskLocal` on generic-type static properties.
+- `EventStore.Metadata` — store-level type binding. `KurrentStorageCoordinator`
+  carries `Metadata: EventMetadata` as a second generic param.
+- `CustomMetadata` (`KurrentSupport`) — minimal bundled schema with a single
+  `operatorId: String` field; the default `Metadata` type generator output
+  references (`typealias Metadata = CustomMetadata`). Apps typically replace it
+  with their own `EventMetadata`-conforming struct.
+
+`EventSourcingRepository.save` default impl reads
+`EventMetadataContext<Store.Metadata>.current` and passes typed `metadata` to
+`store.append`. Write-side `event.metadata` is ignored; read-side mapper
+populates it from `record.customMetadata`.
+
+**Gotcha (for users):** `EventMetadataContext.withValue` takes a `@Sendable`
+closure. Wrappers that capture a non-`Sendable` aggregate from outer scope hit
+a Swift 6 capture error — workaround is `@unchecked Sendable` on the aggregate
+or restructuring to construct the aggregate inside the closure.
 
 ## TODO
 

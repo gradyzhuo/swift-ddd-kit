@@ -5,9 +5,9 @@ import Logging
 public protocol EventSourcingProjector: EventStreamNaming {
     associatedtype Input: CQRSProjectorInput
     associatedtype ReadModelType: ReadModel
-    associatedtype StorageCoordinator: EventStorageCoordinator
-    
-    var coordinator: StorageCoordinator { get }
+    associatedtype Store: EventStore
+
+    var store: Store { get }
     
     func apply(readModel: inout ReadModelType, events: [any DomainEvent]) throws
     func buildReadModel(input: Input) throws -> ReadModelType?
@@ -37,7 +37,7 @@ extension EventSourcingProjector {
     }
     
     public func execute(input: Input) async throws -> CQRSProjectorOutput<ReadModelType>?{
-        guard let fetechedResult = try await coordinator.fetchEvents(byId: input.id) else {
+        guard let fetechedResult = try await store.fetchEvents(byId: input.id) else {
             return nil
         }
         

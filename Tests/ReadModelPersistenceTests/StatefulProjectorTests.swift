@@ -4,6 +4,10 @@ import Foundation
 @testable import EventSourcing
 @testable import ReadModelPersistence
 
+private struct TestMetadata: EventMetadata {
+    var extra: String? = nil
+}
+
 // MARK: - Test Fixtures
 
 private struct CountIncremented: DomainEvent {
@@ -30,11 +34,11 @@ private struct TestInput: CQRSProjectorInput {
 private struct TestProjector: EventSourcingProjector {
     typealias Input = TestInput
     typealias ReadModelType = TestReadModel
-    typealias StorageCoordinator = InMemoryStorageCoordinator
+    typealias Store = InMemoryStorageCoordinator<TestMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("Test") }
 
-    let coordinator: InMemoryStorageCoordinator
+    let store: InMemoryStorageCoordinator<TestMetadata>
 
     func buildReadModel(input: TestInput) throws -> TestReadModel? {
         TestReadModel(id: input.id)
@@ -57,10 +61,10 @@ struct StatefulProjectorTests {
 
     @Test("首次 execute 全量重播並快取")
     func firstExecuteFullReplayAndCaches() async throws {
-        let coordinator = InMemoryStorageCoordinator()
+        let coordinator = InMemoryStorageCoordinator<TestMetadata>()
         let store       = InMemoryReadModelStore<TestReadModel>()
         let stateful    = StatefulEventSourcingProjector(
-            projector: TestProjector(coordinator: coordinator),
+            projector: TestProjector(store: coordinator),
             store: store
         )
 
@@ -69,7 +73,7 @@ struct StatefulProjectorTests {
                 CountIncremented(aggregateRootId: "a1", value: 10),
                 CountIncremented(aggregateRootId: "a1", value: 20),
             ],
-            byId: "a1", version: nil, external: nil
+            byId: "a1", version: nil, metadata: nil
         )
 
         let result = try await stateful.execute(input: TestInput(id: "a1"))
@@ -85,10 +89,10 @@ struct StatefulProjectorTests {
 
     @Test("增量更新只 apply 新 events")
     func incrementalUpdateAppliesOnlyNewEvents() async throws {
-        let coordinator = InMemoryStorageCoordinator()
+        let coordinator = InMemoryStorageCoordinator<TestMetadata>()
         let store       = InMemoryReadModelStore<TestReadModel>()
         let stateful    = StatefulEventSourcingProjector(
-            projector: TestProjector(coordinator: coordinator),
+            projector: TestProjector(store: coordinator),
             store: store
         )
 
@@ -97,7 +101,7 @@ struct StatefulProjectorTests {
                 CountIncremented(aggregateRootId: "a1", value: 10),
                 CountIncremented(aggregateRootId: "a1", value: 20),
             ],
-            byId: "a1", version: nil, external: nil
+            byId: "a1", version: nil, metadata: nil
         )
 
         // First execute — full replay
@@ -105,7 +109,7 @@ struct StatefulProjectorTests {
 
         _ = try await coordinator.append(
             events: [CountIncremented(aggregateRootId: "a1", value: 5)],
-            byId: "a1", version: 2, external: nil
+            byId: "a1", version: 2, metadata: nil
         )
 
         // Second execute — incremental
@@ -120,16 +124,16 @@ struct StatefulProjectorTests {
 
     @Test("無新 events 回傳快取不重新 apply")
     func noNewEventsReturnsCachedModel() async throws {
-        let coordinator = InMemoryStorageCoordinator()
+        let coordinator = InMemoryStorageCoordinator<TestMetadata>()
         let store       = InMemoryReadModelStore<TestReadModel>()
         let stateful    = StatefulEventSourcingProjector(
-            projector: TestProjector(coordinator: coordinator),
+            projector: TestProjector(store: coordinator),
             store: store
         )
 
         _ = try await coordinator.append(
             events: [CountIncremented(aggregateRootId: "a1", value: 10)],
-            byId: "a1", version: nil, external: nil
+            byId: "a1", version: nil, metadata: nil
         )
 
         _ = try await stateful.execute(input: TestInput(id: "a1"))
@@ -143,10 +147,10 @@ struct StatefulProjectorTests {
 
     @Test("不存在的 id 回傳 nil")
     func unknownIdReturnsNil() async throws {
-        let coordinator = InMemoryStorageCoordinator()
+        let coordinator = InMemoryStorageCoordinator<TestMetadata>()
         let store       = InMemoryReadModelStore<TestReadModel>()
         let stateful    = StatefulEventSourcingProjector(
-            projector: TestProjector(coordinator: coordinator),
+            projector: TestProjector(store: coordinator),
             store: store
         )
 
@@ -206,12 +210,12 @@ struct InMemoryReadModelStoreTests {
 
 // MARK: - InMemoryStorageCoordinator.fetchEvents(afterRevision:) Tests
 
-@Suite("EventStorageCoordinator.fetchEvents(afterRevision:)")
+@Suite("EventStore.fetchEvents(afterRevision:)")
 struct FetchEventsAfterRevisionTests {
 
     @Test("afterRevision 回傳之後的 events")
     func returnsEventsAfterRevision() async throws {
-        let coordinator = InMemoryStorageCoordinator()
+        let coordinator = InMemoryStorageCoordinator<TestMetadata>()
 
         _ = try await coordinator.append(
             events: [
@@ -219,7 +223,7 @@ struct FetchEventsAfterRevisionTests {
                 CountIncremented(aggregateRootId: "a1", value: 2),
                 CountIncremented(aggregateRootId: "a1", value: 3),
             ],
-            byId: "a1", version: nil, external: nil
+            byId: "a1", version: nil, metadata: nil
         )
 
         let result = try await coordinator.fetchEvents(byId: "a1", afterRevision: 2)
@@ -231,11 +235,11 @@ struct FetchEventsAfterRevisionTests {
 
     @Test("afterRevision 等於 latestRevision 回傳空 events")
     func returnsEmptyWhenUpToDate() async throws {
-        let coordinator = InMemoryStorageCoordinator()
+        let coordinator = InMemoryStorageCoordinator<TestMetadata>()
 
         _ = try await coordinator.append(
             events: [CountIncremented(aggregateRootId: "a1", value: 1)],
-            byId: "a1", version: nil, external: nil
+            byId: "a1", version: nil, metadata: nil
         )
 
         let result = try await coordinator.fetchEvents(byId: "a1", afterRevision: 1)
@@ -246,7 +250,7 @@ struct FetchEventsAfterRevisionTests {
 
     @Test("不存在的 id 回傳 nil")
     func returnsNilForUnknownId() async throws {
-        let coordinator = InMemoryStorageCoordinator()
+        let coordinator = InMemoryStorageCoordinator<TestMetadata>()
         let result = try await coordinator.fetchEvents(byId: "ghost", afterRevision: 0)
         #expect(result == nil)
     }

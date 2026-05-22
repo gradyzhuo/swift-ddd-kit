@@ -1,6 +1,7 @@
 import Foundation
 import DDDCore
 import EventSourcing
+import KurrentSupport
 import ReadModelPersistence
 import ReadModelPersistencePostgres
 import PostgresNIO
@@ -30,11 +31,11 @@ struct OrderProjectorInput: CQRSProjectorInput {
 struct OrderProjector: OrderSummaryProjectorProtocol {
     typealias ReadModelType = OrderSummary
     typealias Input = OrderProjectorInput
-    typealias StorageCoordinator = InMemoryStorageCoordinator
+    typealias Store = InMemoryStorageCoordinator<CustomMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    let coordinator: InMemoryStorageCoordinator
+    let store: InMemoryStorageCoordinator<CustomMetadata>
 
     func buildReadModel(input: Input) throws -> OrderSummary? {
         OrderSummary(id: input.id, customerId: "", totalAmount: 0, status: "unknown")
@@ -95,9 +96,9 @@ try await withThrowingTaskGroup(of: Void.self) { group in
     // ── Ensure table exists (idempotent) ────────────────────────────────────
     try await PostgresReadModelMigration.createTable(on: pgClient)
 
-    let coordinator = InMemoryStorageCoordinator()
+    let coordinator = InMemoryStorageCoordinator<CustomMetadata>()
     let pgStore     = PostgresJSONReadModelStore<OrderSummary>(client: pgClient)
-    let projector   = OrderProjector(coordinator: coordinator)
+    let projector   = OrderProjector(store: coordinator)
     let stateful    = StatefulEventSourcingProjector(projector: projector, store: pgStore)
 
     let orderId = "order-pg-001"
@@ -112,7 +113,7 @@ try await withThrowingTaskGroup(of: Void.self) { group in
     print("── Step 1: OrderCreated")
     _ = try await coordinator.append(
         events: [OrderCreated(orderId: orderId, customerId: "customer-42", totalAmount: 1000)],
-        byId: orderId, version: nil, external: nil)
+        byId: orderId, version: nil, metadata: nil)
     printModel("→ ReadModel (full replay → saved to Postgres)",
                try await stateful.execute(input: input))
 
@@ -120,7 +121,7 @@ try await withThrowingTaskGroup(of: Void.self) { group in
     print("── Step 2: OrderAmountUpdated")
     _ = try await coordinator.append(
         events: [OrderAmountUpdated(orderId: orderId, newAmount: 1500)],
-        byId: orderId, version: nil, external: nil)
+        byId: orderId, version: nil, metadata: nil)
     printModel("→ ReadModel (incremental → updated in Postgres)",
                try await stateful.execute(input: input))
 
@@ -128,7 +129,7 @@ try await withThrowingTaskGroup(of: Void.self) { group in
     print("── Step 3: OrderCancelled")
     _ = try await coordinator.append(
         events: [OrderCancelled(aggregateRootId: orderId)],
-        byId: orderId, version: nil, external: nil)
+        byId: orderId, version: nil, metadata: nil)
     printModel("→ ReadModel (incremental → updated in Postgres)",
                try await stateful.execute(input: input))
 

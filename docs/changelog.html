@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Changelog — swift-ddd-kit</title>
+<meta name="description" content="Version changelog for swift-ddd-kit — new features, breaking changes, and fixes per release.">
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --ink:#e6e8ee; --muted:#9aa3b2;
+    --line:#2a2f3a; --accent:#5aa9ff; --accent2:#7c5cff;
+    --add:#3fb950; --addbg:#10331c; --del:#f85149; --delbg:#3a1416;
+    --warn:#e3b341; --warnbg:#3a2f12; --ok:#3fb950; --chip:#262b36;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+    background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12.5px}
+  .wrap{max-width:1000px;margin:0 auto;padding:34px 22px 110px}
+
+  .sitenav{position:sticky;top:0;z-index:50;background:rgba(15,17,21,.92);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .sn-inner{max-width:1000px;margin:0 auto;padding:10px 22px;display:flex;
+    align-items:center;gap:18px;flex-wrap:wrap}
+  .sn-brand{font:700 15px/1 "SF Mono",monospace;color:var(--ink)}
+  .sn-links{display:flex;gap:16px;flex-wrap:wrap;font-size:13.5px;margin-left:auto}
+  .sn-links a{color:var(--muted)}
+  .sn-links a:hover,.sn-links a.active{color:var(--accent);text-decoration:none}
+
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.01em}
+  h2{font-size:20px;margin:34px 0 12px}
+  h3{font-size:15px;margin:20px 0 8px;color:var(--accent2)}
+  p{margin:10px 0}
+  .sub{color:var(--muted);margin:0 0 8px}
+  .kicker{font:600 12px/1 "SF Mono",monospace;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--accent2);margin:0 0 4px}
+
+  /* changelog entry */
+  .entry{border-left:2px solid var(--line);margin:24px 0 0;padding:0 0 0 26px;position:relative}
+  .entry::before{content:"";position:absolute;left:-7px;top:4px;width:12px;height:12px;
+    border-radius:50%;background:var(--accent);border:3px solid var(--bg)}
+  .entry.minor::before{background:var(--muted)}
+  .verhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .verno{font:700 24px/1 "SF Mono",monospace;color:var(--ink)}
+  .verno.dim{color:var(--muted);font-size:19px}
+  .codename{color:var(--accent2);font-size:14px}
+  .meta{color:var(--muted);font-size:12.5px}
+  .pill{display:inline-block;font:600 11px/1 "SF Mono",monospace;padding:4px 9px;
+    border-radius:999px;letter-spacing:.03em}
+  .pill.brk{background:var(--delbg);color:#ff9b95;border:1px solid #5a2222}
+  .pill.cur{background:var(--addbg);color:#79e08a;border:1px solid #1d5a2e}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px 18px;margin:12px 0}
+  .sect{margin:14px 0}
+  .sect .lbl{font:600 12px/1 "SF Mono",monospace;letter-spacing:.04em;
+    text-transform:uppercase;margin:0 0 6px}
+  .lbl.new{color:var(--add)} .lbl.brk{color:var(--del)} .lbl.keep{color:var(--muted)}
+  ul.list{margin:6px 0;padding-left:20px} ul.list li{margin:5px 0}
+
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);font-size:11.5px;letter-spacing:.03em;color:var(--muted);
+    text-transform:uppercase}
+  tr:nth-child(even) td{background:#14171e}
+  td.old{color:#ff9b95} td.new{color:#79e08a}
+
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);
+    border-radius:0 9px 9px 0;padding:12px 16px;margin:14px 0}
+  .callout b{display:block;margin-bottom:3px}
+  .callout.go{border-color:var(--accent2);background:#1b1830}
+  .btn{display:inline-block;padding:9px 16px;border-radius:9px;font-weight:600;
+    font-size:13.5px;background:var(--accent);color:#06121f;margin-top:6px}
+  .btn:hover{background:#7bbcff;text-decoration:none}
+
+  footer{margin-top:56px;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:12.5px}
+</style>
+</head>
+<body>
+
+<nav class="sitenav"><div class="sn-inner">
+  <a class="sn-brand" href="./index.html">swift-ddd-kit</a>
+  <div class="sn-links">
+    <a href="./index.html">Home</a>
+    <a href="./changelog.html" class="active">Changelog</a>
+    <a href="./migration/swift-ddd-kit-0.x-to-1.0.html">Migration 0.x→1.0</a>
+    <a href="https://github.com/gradyzhuo/swift-ddd-kit">GitHub ↗</a>
+  </div>
+</div></nav>
+
+<div class="wrap">
+
+  <p class="kicker">Release Notes</p>
+  <h1>版本變更說明 · Changelog</h1>
+  <p class="sub">swift-ddd-kit 各版本的新功能、破壞性變更與修正。</p>
+
+  <!-- ============ 1.0.0 ============ -->
+  <div class="entry">
+    <div class="verhead">
+      <span class="verno">1.0.0</span>
+      <span class="codename">“Ambient Context &amp; Pluggable Metadata”</span>
+      <span class="pill brk">BREAKING</span>
+    </div>
+    <p class="meta">狀態:branch <code>feature/ambient-context-pluggable-metadata</code> ·
+       <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/6">PR #6</a></p>
+
+    <p>1.0 把 event metadata 從固定的 <code>external: [String:String]?</code> 字串字典通道，
+       全面改成<b>型別安全的 ambient context 機制</b>。Domain 層
+       （<code>AggregateRoot</code> / <code>DomainEvent</code> / <code>Usecase</code>）<b>完全不受影響</b>。</p>
+
+    <!-- new -->
+    <div class="sect">
+      <p class="lbl new">🚀 新增</p>
+      <div class="card">
+        <ul class="list">
+          <li><b><code>EventMetadata</code></b> — 新的 marker protocol（<code>Codable &amp; Sendable</code>，
+              不規範任何欄位）。應用層自訂 metadata schema 時 conform 它。</li>
+          <li><b><code>EventMetadataContext&lt;M&gt;</code></b> — <code>TaskLocal</code>-backed 的 ambient
+              carrier。在 Usecase 入口用 <code>withValue(_:operation:)</code> 設一次，巢狀的
+              <code>repository.save</code> 透過 structured concurrency 自動繼承。</li>
+          <li><b>型別化 metadata 通道</b> — <code>EventStore</code> 新增
+              <code>associatedtype Metadata: EventMetadata</code>；<code>append</code> 收型別化的
+              <code>metadata: Metadata?</code>。</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- breaking -->
+    <div class="sect">
+      <p class="lbl brk">⚠️ 破壞性變更</p>
+      <div class="card">
+        <table>
+          <thead><tr><th style="width:32%">項目</th><th>0.x</th><th>1.0</th></tr></thead>
+          <tbody>
+            <tr><td>儲存抽象 protocol</td><td class="old"><code>EventStorageCoordinator</code></td><td class="new"><code>EventStore</code></td></tr>
+            <tr><td>Repository/Projector 型別參數</td><td class="old"><code>associatedtype StorageCoordinator</code></td><td class="new"><code>associatedtype Store</code></td></tr>
+            <tr><td>Repository/Projector 儲存屬性</td><td class="old"><code>var coordinator</code></td><td class="new"><code>var store</code></td></tr>
+            <tr><td>append metadata 通道</td><td class="old"><code>external: [String:String]?</code></td><td class="new"><code>metadata: Metadata?</code></td></tr>
+            <tr><td>Kurrent 儲存實作泛型</td><td class="old"><code>KurrentStorageCoordinator&lt;S&gt;</code></td><td class="new"><code>KurrentStorageCoordinator&lt;S, Metadata&gt;</code></td></tr>
+            <tr><td>In-memory 儲存實作泛型</td><td class="old"><code>InMemoryStorageCoordinator</code></td><td class="new"><code>InMemoryStorageCoordinator&lt;Metadata&gt;</code></td></tr>
+            <tr><td>save / delete</td><td class="old"><code>save(aggregateRoot:external:)</code></td><td class="new"><code>save(aggregateRoot:)</code> + ambient</td></tr>
+            <tr><td>userId 便利方法</td><td class="old"><code>save(…userId:)</code> / <code>delete(…userId:)</code></td><td class="new">已移除</td></tr>
+            <tr><td>事件型別判斷</td><td class="old"><code>RecordedEvent.mappingClassName</code></td><td class="new"><code>RecordedEvent.eventType</code></td></tr>
+            <tr><td><code>RecordedEvent.userId</code></td><td class="old">便利 accessor</td><td class="new">已移除</td></tr>
+            <tr><td><code>CustomMetadata</code> 結構</td><td class="old"><code>{ className, external }</code></td><td class="new"><code>{ operatorId }</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- unchanged -->
+    <div class="sect">
+      <p class="lbl keep">✓ 不受影響</p>
+      <div class="card">
+        <ul class="list">
+          <li><code>DomainEvent</code> protocol — 仍有 <code>associatedtype Metadata</code> 與 <code>var metadata</code>。</li>
+          <li><code>AggregateRoot</code> / <code>Usecase</code> / <code>DomainEventBus</code> / <code>ReadModel</code> — 介面未動。</li>
+          <li><code>EventSourcingProjector.apply(readModel:events:)</code> — 簽章不變。</li>
+          <li><code>EventStore.fetchEvents</code> — 仍回傳 <code>(events:, latestRevision:)</code> tuple。</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout go">
+      <b>升級你的專案？</b>
+      若有專案依賴 swift-ddd-kit，完整的逐項遷移步驟、多圖表說明，以及給 AI agent 的
+      機器可讀遷移清單（JSON manifest）都在專屬的 Migration Guide。
+      <br>
+      <a class="btn" href="./migration/swift-ddd-kit-0.x-to-1.0.html">開啟 0.x → 1.0 Migration Guide →</a>
+    </div>
+
+    <details style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:12px 0">
+      <summary style="cursor:pointer;font-weight:600">為什麼做這次重構?</summary>
+      <p style="margin-top:8px">0.x 用 <code>external: [String:String]?</code> 字串字典把 audit metadata
+      帶到儲存層,造成三個問題:(1) Domain 抽象被基礎設施 metadata 汙染;(2) schema 被鎖死成
+      dict,無型別安全的擴充空間;(3) 跟既有的 <code>DomainEvent.Metadata</code> 機制重複。
+      1.0 用 ambient context + pluggable schema 一次解決——詳見 Migration Guide 的「為什麼要改」。</p>
+    </details>
+  </div>
+
+  <!-- ============ 0.x ============ -->
+  <div class="entry minor">
+    <div class="verhead">
+      <span class="verno dim">0.x</span>
+      <span class="codename">initial line</span>
+    </div>
+    <p style="color:var(--muted)">
+      1.0 之前的開發版本線。採 <code>EventStorageCoordinator</code> 為儲存抽象、
+      以 <code>external: [String:String]?</code> 字典作為 metadata 通道。後續所有提交與功能
+      請參考 GitHub 的
+      <a href="https://github.com/gradyzhuo/swift-ddd-kit/commits/main">commit 歷史</a>。
+    </p>
+  </div>
+
+  <footer>
+    <p>swift-ddd-kit Changelog · 詳細逐步遷移亦見 repo 內 <code>MIGRATION.md</code>。</p>
+    <p>設計文件:<code>docs/superpowers/specs/2026-05-15-ambient-context-and-pluggable-metadata-design.md</code>。</p>
+  </footer>
+
+</div>
+</body>
+</html>

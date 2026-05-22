@@ -159,7 +159,7 @@ public enum KurrentProjection {
 
                 // Incremental fold: fetch from stored revision, apply, save.
                 if let stored = try await store.fetch(byId: input.id) {
-                    guard let result = try await projector.coordinator.fetchEvents(
+                    guard let result = try await projector.store.fetchEvents(
                         byId: input.id, afterRevision: stored.revision
                     ) else { return }
                     if result.events.isEmpty { return }
@@ -167,7 +167,7 @@ public enum KurrentProjection {
                     try projector.apply(readModel: &readModel, events: result.events)
                     try await store.save(readModel: readModel, revision: result.latestRevision)
                 } else {
-                    guard let result = try await projector.coordinator.fetchEvents(byId: input.id) else { return }
+                    guard let result = try await projector.store.fetchEvents(byId: input.id) else { return }
                     guard !result.events.isEmpty else { return }
                     guard var readModel = try projector.buildReadModel(input: input) else { return }
                     try projector.apply(readModel: &readModel, events: result.events)
@@ -354,7 +354,7 @@ public enum KurrentProjection {
                 // Incremental fold: fetch from stored revision, apply, save.
                 if let stored = try await store.fetch(byId: input.id, in: tx) {
                     // Incremental path: only events newer than stored revision
-                    guard let result = try await projector.coordinator.fetchEvents(
+                    guard let result = try await projector.store.fetchEvents(
                         byId: input.id, afterRevision: stored.revision
                     ) else { return }
                     if result.events.isEmpty { return }
@@ -363,7 +363,7 @@ public enum KurrentProjection {
                     try await store.save(readModel: readModel, revision: result.latestRevision, in: tx)
                 } else {
                     // Full replay path
-                    guard let result = try await projector.coordinator.fetchEvents(byId: input.id) else { return }
+                    guard let result = try await projector.store.fetchEvents(byId: input.id) else { return }
                     guard !result.events.isEmpty else { return }
                     guard var readModel = try projector.buildReadModel(input: input) else { return }
                     try projector.apply(readModel: &readModel, events: result.events)

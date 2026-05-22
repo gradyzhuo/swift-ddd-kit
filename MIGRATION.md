@@ -237,3 +237,90 @@ let coordinator = InMemoryStorageCoordinator()
 | `ProjectionModelGeneratorPlugin` | `ModelGeneratorPlugin` |
 
 > **注意**：替換 `Input` / `Output` 時請小心避免誤改到 `CQRSProjectorInput` 等已替換的名稱，建議用正則或手動確認。
+
+
+## 2026-05 — Ambient Context Replaces `external: [String:String]?`
+
+`EventSourcingRepository.save(aggregateRoot:external:)` and
+`EventStore.append(...,external:)` lose the `external` parameter. Metadata
+now flows via `EventMetadataContext<M>` from Usecase entry. The protocol
+also gains an `associatedtype Metadata: EventMetadata` on `EventStore`.
+
+### Step 1 — Define your metadata schema (or use the bundled one)
+
+The bundled `CustomMetadata` is a minimal schema carrying a single
+`operatorId` field — if your existing code only passed a user id, this is the
+drop-in replacement:
+
+```swift
+import KurrentSupport
+// public struct CustomMetadata: EventMetadata { public let operatorId: String }
+```
+
+If you need more fields, define your own — the framework imposes no schema:
+
+```swift
+struct AuditMetadata: EventMetadata {
+    let operatorId: String
+    let tenantId: String
+}
+```
+
+### Step 2 — Update Repository conformances
+
+Add `Metadata` to your store's generic parameters:
+
+```diff
+- typealias Store = KurrentStorageCoordinator<OrderStreamNaming>
++ typealias Store = KurrentStorageCoordinator<OrderStreamNaming, CustomMetadata>
+```
+
+```diff
+- let store: KurrentStorageCoordinator<OrderStreamNaming>
++ let store: KurrentStorageCoordinator<OrderStreamNaming, CustomMetadata>
+```
+
+Same for `InMemoryStorageCoordinator`:
+
+```diff
+- typealias Store = InMemoryStorageCoordinator
++ typealias Store = InMemoryStorageCoordinator<CustomMetadata>
+```
+
+### Step 3 — Update call sites
+
+```diff
+- try await repository.save(aggregateRoot: order, external: ["userId": userId])
++ try await EventMetadataContext<CustomMetadata>.withValue(
++     CustomMetadata(operatorId: userId)
++ ) {
++     try await repository.save(aggregateRoot: order)
++ }
+```
+
+For `delete`, same removal of `external:`:
+
+```diff
+- try await repository.delete(byId: id, external: nil)
++ try await repository.delete(byId: id)
+```
+
+The convenience overloads `save(aggregateRoot:userId:)` and `delete(byId:userId:)`
+previously on `KurrentSupport`'s repository extension have been **removed**. Use
+`EventMetadataContext<CustomMetadata>.withValue(...)` at the Usecase entry instead.
+
+### Step 4 — Adopt ambient at Usecase entry (recommended)
+
+The intended use is to set `EventMetadataContext` once at the Usecase entry,
+so the rest of the body (and any nested repository / aggregate work) inherits
+it via structured concurrency.
+
+### Behavioural notes
+
+- `Task.detached` does NOT inherit TaskLocal — capture and re-apply if needed.
+- Multiple events in one `save` share one metadata payload.
+- `Store.Metadata` and `event.Metadata` alignment is by convention; runtime
+  mismatch yields `event.metadata = nil` on read, not a crash.
+- Event-type resolution on read uses the KurrentDB-native `eventType` field
+  (populated from `DomainEvent.eventType` at write time). The metadata payload
+  carries no type discriminator — generated mappers switch on `eventData.eventType`.

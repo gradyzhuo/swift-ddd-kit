@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>swift-ddd-kit 0.x → 1.0 Migration Guide</title>
+<meta name="description" content="Migration guide for projects depending on swift-ddd-kit, upgrading from 0.x to 1.0 — EventStore rename, typed pluggable metadata, ambient context.">
+<meta name="x-migration-target" content="swift-ddd-kit">
+<meta name="x-migration-from" content="0.x">
+<meta name="x-migration-to" content="1.0">
+<meta name="x-document-kind" content="migration-guide">
+<meta name="x-audience" content="human,ai-agent">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --ink:#e6e8ee; --muted:#9aa3b2;
+    --line:#2a2f3a; --accent:#5aa9ff; --accent2:#7c5cff;
+    --add:#3fb950; --addbg:#10331c; --del:#f85149; --delbg:#3a1416;
+    --warn:#e3b341; --warnbg:#3a2f12; --ok:#3fb950;
+    --code:#11141a; --kw:#ff7b9c; --str:#9ece6a; --typ:#7dcfff; --com:#5c6370;
+    --chip:#262b36;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 22px 120px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre,.mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.01em}
+  h2{font-size:22px;margin:48px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:17px;margin:26px 0 10px}
+  p{margin:10px 0}
+  .sub{color:var(--muted);font-size:15px;margin:0 0 18px}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 8px}
+  .badge{background:var(--chip);border:1px solid var(--line);border-radius:999px;
+    padding:3px 11px;font-size:12px;color:var(--muted)}
+  .badge.v{color:var(--accent);border-color:#2b4a6e}
+  .badge.brk{color:var(--del);border-color:#5a2222}
+  .hero{background:linear-gradient(135deg,#171a21,#1b1830);
+    border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0 8px}
+  .hero .ver{font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+  .arrowline{display:flex;align-items:center;gap:14px;margin:8px 0 4px;flex-wrap:wrap}
+  .vchip{font:600 20px/1 "SF Mono",monospace;padding:8px 14px;border-radius:9px}
+  .vchip.old{background:var(--delbg);color:#ff9b95;border:1px solid #5a2222}
+  .vchip.new{background:var(--addbg);color:#79e08a;border:1px solid #1d5a2e}
+  .vchip .t{font-size:11px;display:block;color:var(--muted);font-weight:400;margin-bottom:2px}
+  .arrow{font-size:24px;color:var(--accent2)}
+
+  nav.toc{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px 18px;margin:22px 0}
+  nav.toc b{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  nav.toc ol{margin:8px 0 0;padding-left:20px;columns:2;column-gap:28px}
+  nav.toc li{margin:3px 0}
+
+  section{margin-top:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;margin:14px 0}
+  .card.tight{padding:12px 16px}
+
+  .tag{display:inline-block;font:600 11px/1 "SF Mono",monospace;padding:4px 8px;
+    border-radius:6px;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle}
+  .tag.rename{background:#1b2c44;color:#7db8ff}
+  .tag.sig{background:#3a2f12;color:var(--warn)}
+  .tag.removed{background:var(--delbg);color:#ff9b95}
+  .tag.new{background:var(--addbg);color:#79e08a}
+  .tag.same{background:#23262e;color:var(--muted)}
+  .tag.auto{background:#16302a;color:#5fd6a8}
+  .tag.manual{background:#3a2412;color:#e0a060}
+
+  .chgid{font:600 12px/1 "SF Mono",monospace;color:var(--accent2);
+    background:#211d33;border:1px solid #352c52;border-radius:6px;padding:4px 8px}
+
+  pre{background:var(--code);border:1px solid var(--line);border-radius:9px;
+    padding:13px 15px;overflow-x:auto;font-size:13px;line-height:1.55;margin:8px 0}
+  pre.diff .a{display:block;background:var(--delbg);color:#ffb3ae;margin:0 -15px;padding:0 15px}
+  pre.diff .d{display:block;background:var(--addbg);color:#9ff0a8;margin:0 -15px;padding:0 15px}
+  pre.diff .x{display:block;color:var(--muted)}
+  .cmt{color:var(--com)}
+  .kw{color:var(--kw)} .ty{color:var(--typ)} .st{color:var(--str)}
+
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}
+  @media(max-width:720px){.ba{grid-template-columns:1fr}}
+  .ba .col h4{margin:0 0 5px;font:600 12px/1 "SF Mono",monospace;letter-spacing:.04em}
+  .ba .before h4{color:#ff9b95} .ba .after h4{color:#79e08a}
+  .ba pre{margin:0;height:100%}
+
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);font-size:12px;letter-spacing:.03em;color:var(--muted);
+    text-transform:uppercase}
+  td code{background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12.5px}
+  tr:nth-child(even) td{background:#14171e}
+
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);
+    border-radius:0 9px 9px 0;padding:11px 15px;margin:12px 0}
+  .callout.warn{border-color:var(--warn);background:var(--warnbg)}
+  .callout.danger{border-color:var(--del);background:#2a1416}
+  .callout.ok{border-color:var(--ok);background:#10261a}
+  .callout b{display:block;margin-bottom:3px}
+
+  .mermaid{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:18px;margin:14px 0;text-align:center}
+
+  .steps{counter-reset:s;list-style:none;padding:0;margin:14px 0}
+  .steps li{position:relative;padding:12px 14px 12px 50px;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;margin:9px 0}
+  .steps li::before{counter-increment:s;content:counter(s);position:absolute;
+    left:12px;top:12px;width:26px;height:26px;border-radius:50%;
+    background:var(--accent2);color:#fff;font:700 13px/26px monospace;text-align:center}
+  .steps li b{color:var(--ink)}
+  .steps code{background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+
+  .ai{background:linear-gradient(135deg,#141826,#1a1530);
+    border:1px solid #352c52;border-radius:14px;padding:18px 20px;margin:16px 0}
+  .ai h2{border:0;margin:0 0 4px;color:#b8a8ff}
+  .ai .lead{color:var(--muted);font-size:13.5px;margin:0 0 12px}
+  .ai pre{background:#0c0e15;border-color:#2a2440;max-height:none}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0;font-size:12.5px;color:var(--muted)}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:12.5px}
+  .kicker{font:600 12px/1 "SF Mono",monospace;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--accent2);margin:0 0 4px}
+  details{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:10px 14px;margin:10px 0}
+  summary{cursor:pointer;font-weight:600}
+  .hl{color:var(--warn)}
+  ul.tite{margin:8px 0;padding-left:20px}
+  ul.tite li{margin:4px 0}
+
+  .sitenav{position:sticky;top:0;z-index:50;background:rgba(15,17,21,.92);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .sn-inner{max-width:1080px;margin:0 auto;padding:10px 22px;display:flex;
+    align-items:center;gap:18px;flex-wrap:wrap}
+  .sn-brand{font:700 15px/1 "SF Mono",monospace;color:var(--ink)}
+  .sn-links{display:flex;gap:16px;flex-wrap:wrap;font-size:13.5px;margin-left:auto}
+  .sn-links a{color:var(--muted)}
+  .sn-links a:hover,.sn-links a.active{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+
+<nav class="sitenav"><div class="sn-inner">
+  <a class="sn-brand" href="../index.html">swift-ddd-kit</a>
+  <div class="sn-links">
+    <a href="../index.html">Home</a>
+    <a href="../changelog.html">Changelog</a>
+    <a href="./swift-ddd-kit-0.x-to-1.0.html" class="active">Migration 0.x→1.0</a>
+    <a href="https://github.com/gradyzhuo/swift-ddd-kit">GitHub ↗</a>
+  </div>
+</div></nav>
+
+<div class="wrap">
+
+  <p class="kicker">Framework Migration Guide</p>
+  <h1>swift-ddd-kit &nbsp;0.x → 1.0</h1>
+  <p class="sub">Ambient Context &amp; Pluggable Metadata — 給「依賴 swift-ddd-kit 的下游專案」的升級指南</p>
+
+  <div class="badges">
+    <span class="badge v">target: swift-ddd-kit</span>
+    <span class="badge">Swift 6 / macOS 15+ / iOS 16+</span>
+    <span class="badge brk">⚠ breaking release</span>
+    <span class="badge">audience: human + AI agent</span>
+  </div>
+
+  <div class="hero">
+    <div class="ver">version transition</div>
+    <div class="arrowline">
+      <div class="vchip old"><span class="t">FROM</span>0.x</div>
+      <div class="arrow">→</div>
+      <div class="vchip new"><span class="t">TO</span>1.0</div>
+      <div style="flex:1"></div>
+    </div>
+    <p style="margin:10px 0 0;color:var(--muted);font-size:13.5px">
+      1.0 把 event metadata 從固定的 <code>external: [String:String]?</code> 字串字典通道,
+      改成<b>型別安全的 ambient context 機制</b>。下游專案(如 <code>P_A</code>)需要做
+      <b>命名替換</b>、<b>泛型參數補上</b>、以及把 <b>save/delete 的 metadata 傳遞方式</b>改寫。
+      Domain 層(<code>AggregateRoot</code> / <code>DomainEvent</code> / <code>Usecase</code>)<b>不受影響</b>。
+    </p>
+  </div>
+
+  <nav class="toc">
+    <b>目錄</b>
+    <ol>
+      <li><a href="#tldr">TL;DR — 一分鐘看懂</a></li>
+      <li><a href="#ai-manifest">AI Migration Manifest（機器可讀）</a></li>
+      <li><a href="#why">為什麼要改</a></li>
+      <li><a href="#flow">新舊資料流對照</a></li>
+      <li><a href="#catalog">變更總表</a></li>
+      <li><a href="#changes">逐項變更說明</a></li>
+      <li><a href="#decision">下游專案：我受影響嗎？</a></li>
+      <li><a href="#checklist">Migration 步驟清單</a></li>
+      <li><a href="#gotchas">陷阱與注意事項</a></li>
+    </ol>
+  </nav>
+
+  <!-- ================= TL;DR ================= -->
+  <section id="tldr">
+    <h2>TL;DR — 一分鐘看懂</h2>
+    <div class="card">
+      <table>
+        <thead><tr><th style="width:34%">這個東西</th><th>0.x</th><th>1.0</th></tr></thead>
+        <tbody>
+          <tr><td>儲存抽象 protocol</td><td><code>EventStorageCoordinator</code></td><td><code>EventStore</code></td></tr>
+          <tr><td>Repository/Projector 的儲存型別參數</td><td><code>associatedtype StorageCoordinator</code></td><td><code>associatedtype Store</code></td></tr>
+          <tr><td>Repository/Projector 的儲存屬性</td><td><code>var coordinator</code></td><td><code>var store</code></td></tr>
+          <tr><td>append 的 metadata 通道</td><td><code>external: [String:String]?</code></td><td><code>metadata: Metadata?</code>（型別化）</td></tr>
+          <tr><td>Kurrent 儲存實作泛型</td><td><code>KurrentStorageCoordinator&lt;StreamNaming&gt;</code></td><td><code>KurrentStorageCoordinator&lt;StreamNaming, Metadata&gt;</code></td></tr>
+          <tr><td>In-memory 儲存實作泛型</td><td><code>InMemoryStorageCoordinator</code></td><td><code>InMemoryStorageCoordinator&lt;Metadata&gt;</code></td></tr>
+          <tr><td>save / delete metadata 參數</td><td><code>save(aggregateRoot:, external:)</code></td><td><code>save(aggregateRoot:)</code> + ambient context</td></tr>
+          <tr><td>userId 便利方法</td><td><code>save(…userId:)</code> / <code>delete(…userId:)</code></td><td class="hl">已移除</td></tr>
+          <tr><td><code>CustomMetadata</code> 結構</td><td><code>{ className, external }</code></td><td><code>{ operatorId }</code></td></tr>
+          <tr><td>事件型別判斷</td><td><code>RecordedEvent.mappingClassName</code></td><td><code>RecordedEvent.eventType</code></td></tr>
+          <tr><td><code>DomainEvent</code> protocol</td><td colspan="2" style="color:var(--ok)">✓ 不變（仍有 <code>associatedtype Metadata</code> + <code>var metadata</code>）</td></tr>
+          <tr><td><code>AggregateRoot</code> / <code>Usecase</code></td><td colspan="2" style="color:var(--ok)">✓ 不變</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= AI MANIFEST ================= -->
+  <section id="ai-manifest" class="ai">
+    <h2>🤖 AI Migration Manifest（機器可讀）</h2>
+    <p class="lead">
+      若你是 AI agent,正在把一個依賴 <code>swift-ddd-kit</code> 的專案從 0.x 升到 1.0 —
+      直接消化下方 JSON。每條規則含 <code>kind</code>(變更類型)、<code>mechanical</code>
+      (能否純文字取代)、<code>before</code>/<code>after</code>、<code>action</code>(對下游要做什麼)。
+      套用順序:先做 <code>mechanical:true</code> 的 rename,再處理 <code>signature-change</code> /
+      <code>removed</code>。<code>scope</code> 標示要掃描的程式碼位置。
+    </p>
+<pre id="migration-rules" data-format="swift-ddd-kit-migration/v1">{
+  "schema": "swift-ddd-kit-migration/v1",
+  "package": "swift-ddd-kit",
+  "from": "0.x",
+  "to": "1.0",
+  "domainLayerImpact": "none",
+  "applyOrder": ["rename", "signature-change", "removed", "new"],
+  "rules": [
+    {
+      "id": "R1",
+      "kind": "rename",
+      "mechanical": true,
+      "scope": "any type reference to the storage protocol",
+      "before": "EventStorageCoordinator",
+      "after": "EventStore",
+      "note": "Only the PROTOCOL was renamed. Concrete classes InMemoryStorageCoordinator and KurrentStorageCoordinator keep their names (see R5/R6).",
+      "action": "Replace every reference to the protocol name `EventStorageCoordinator` with `EventStore` — in `: EventStorageCoordinator` conformances, `any EventStorageCoordinator` existentials, and generic constraints."
+    },
+    {
+      "id": "R2",
+      "kind": "rename",
+      "mechanical": true,
+      "scope": "types conforming to EventSourcingRepository or EventSourcingProjector",
+      "before": "typealias StorageCoordinator = SomeStore",
+      "after": "typealias Store = SomeStore",
+      "action": "Rename the `StorageCoordinator` associated-type witness to `Store` in every Repository and Projector conformer."
+    },
+    {
+      "id": "R3",
+      "kind": "rename",
+      "mechanical": true,
+      "scope": "types conforming to EventSourcingRepository or EventSourcingProjector",
+      "before": "var coordinator: SomeStore  /  self.coordinator  /  x.coordinator",
+      "after": "var store: SomeStore  /  self.store  /  x.store",
+      "action": "Rename the `coordinator` stored property to `store`, and every read of `.coordinator` on a repository/projector to `.store`. Also rename the matching `init(coordinator:)` label to `init(store:)`."
+    },
+    {
+      "id": "S1",
+      "kind": "signature-change",
+      "mechanical": false,
+      "scope": "every use of KurrentStorageCoordinator as a type or constructor",
+      "before": "KurrentStorageCoordinator<MyStreamNaming>",
+      "after": "KurrentStorageCoordinator<MyStreamNaming, MyMetadata>",
+      "action": "Add a second generic argument: the metadata schema type. Use `CustomMetadata` for the bundled default, or your own `EventMetadata`-conforming struct. Applies to `typealias Store = …`, property types, and `KurrentStorageCoordinator<…>(client:eventMapper:)` constructor calls."
+    },
+    {
+      "id": "S2",
+      "kind": "signature-change",
+      "mechanical": false,
+      "scope": "every use of InMemoryStorageCoordinator as a type or constructor",
+      "before": "InMemoryStorageCoordinator  /  InMemoryStorageCoordinator()",
+      "after": "InMemoryStorageCoordinator<MyMetadata>  /  InMemoryStorageCoordinator<MyMetadata>()",
+      "action": "Add the metadata schema as a generic argument everywhere InMemoryStorageCoordinator is named — typealias, property type, and constructor."
+    },
+    {
+      "id": "S3",
+      "kind": "signature-change",
+      "mechanical": false,
+      "scope": "custom hand-written types conforming to EventStore (the renamed protocol)",
+      "before": "func append(events:, byId:, version:, external: [String:String]?) async throws -> UInt64?",
+      "after": "associatedtype Metadata: EventMetadata\n    func append(events:, byId:, version:, metadata: Metadata?) async throws -> UInt64?",
+      "action": "If the project defines its own EventStore implementation: add `associatedtype Metadata: EventMetadata` (or a `typealias`), and change `append`'s last parameter from `external: [String:String]?` to `metadata: Metadata?`. `fetchEvents` and `purge` signatures are unchanged."
+    },
+    {
+      "id": "S4",
+      "kind": "signature-change",
+      "mechanical": false,
+      "scope": "every call site of repository.save(aggregateRoot:external:)",
+      "before": "try await repository.save(aggregateRoot: x, external: [\"userId\": uid])",
+      "after": "try await EventMetadataContext<CustomMetadata>.withValue(CustomMetadata(operatorId: uid)) {\n    try await repository.save(aggregateRoot: x)\n}",
+      "action": "Remove the `external:` argument from save. If metadata was being passed, wrap the call in `EventMetadataContext<M>.withValue(metadata) { … }`. If `external` was nil/unused, just delete the argument.",
+      "note": "M must equal the Store.Metadata of that repository's store."
+    },
+    {
+      "id": "S5",
+      "kind": "signature-change",
+      "mechanical": false,
+      "scope": "every call site of repository.delete(byId:external:)",
+      "before": "try await repository.delete(byId: id, external: …)",
+      "after": "try await repository.delete(byId: id)   // optionally wrapped in EventMetadataContext.withValue",
+      "action": "Remove the `external:` argument from delete. delete internally calls save, so wrap in EventMetadataContext.withValue if a delete-time metadata payload is needed."
+    },
+    {
+      "id": "D1",
+      "kind": "removed",
+      "mechanical": false,
+      "scope": "call sites of the userId convenience overloads",
+      "before": "try await repository.save(aggregateRoot: x, userId: uid)",
+      "after": "try await EventMetadataContext<CustomMetadata>.withValue(CustomMetadata(operatorId: uid)) {\n    try await repository.save(aggregateRoot: x)\n}",
+      "action": "The `save(aggregateRoot:userId:)` and `delete(byId:userId:)` convenience overloads (KurrentSupport) are DELETED. Replace with an explicit EventMetadataContext.withValue scope."
+    },
+    {
+      "id": "D2",
+      "kind": "removed",
+      "mechanical": false,
+      "scope": "call sites of repository.delete(byId:userId:)",
+      "before": "try await repository.delete(byId: id, userId: uid)",
+      "after": "try await EventMetadataContext<CustomMetadata>.withValue(CustomMetadata(operatorId: uid)) {\n    try await repository.delete(byId: id)\n}",
+      "action": "Same as D1 for the delete overload."
+    },
+    {
+      "id": "D3",
+      "kind": "removed",
+      "mechanical": true,
+      "scope": "hand-written EventTypeMapper implementations",
+      "before": "switch eventData.mappingClassName { … }",
+      "after": "switch eventData.eventType { … }",
+      "action": "`RecordedEvent.mappingClassName` is removed. Replace with the KurrentDB-native `eventData.eventType` (populated from `DomainEvent.eventType` at write time, so case labels still match the Swift type name)."
+    },
+    {
+      "id": "D4",
+      "kind": "removed",
+      "mechanical": false,
+      "scope": "any read of RecordedEvent.userId",
+      "before": "let uid = recordedEvent.userId",
+      "after": "// decode metadata into your schema, or read event.metadata after mapping",
+      "action": "`RecordedEvent.userId` is removed. To recover the operator: after the mapper fills `event.metadata`, read `event.metadata?.operatorId` (when using CustomMetadata), or decode `recordedEvent.customMetadata` into your own EventMetadata type."
+    },
+    {
+      "id": "D5",
+      "kind": "removed",
+      "mechanical": false,
+      "scope": "construction and field access of CustomMetadata",
+      "before": "CustomMetadata(className: \"X\", external: [\"userId\": uid])  /  meta.className  /  meta.external",
+      "after": "CustomMetadata(operatorId: uid)  /  meta.operatorId",
+      "action": "CustomMetadata is rewritten to a single-field struct `{ public let operatorId: String }`. The `className` and `external` fields and the old initializer are GONE. If you relied on `external` for arbitrary key/values, define your own `EventMetadata` struct instead (see N1)."
+    },
+    {
+      "id": "N1",
+      "kind": "new",
+      "mechanical": false,
+      "scope": "projects that need metadata fields beyond operatorId",
+      "after": "struct AuditMetadata: EventMetadata {\n    let operatorId: String\n    let tenantId: String\n    let correlationId: String\n}",
+      "action": "`EventMetadata` is a new marker protocol (`Codable & Sendable`, no required fields). Define your own metadata schema by conforming to it. This becomes your `Store.Metadata` and the `M` in `EventMetadataContext<M>`."
+    },
+    {
+      "id": "N2",
+      "kind": "new",
+      "mechanical": false,
+      "scope": "Usecase entry points that previously passed external/userId",
+      "after": "try await EventMetadataContext<M>.withValue(metadata) { /* repository work */ }",
+      "action": "`EventMetadataContext<M>` is the new ambient carrier. Set it ONCE at the Usecase entry; nested repository.save calls read it automatically via structured concurrency. API: static `withValue(_:operation:)` and static `current`."
+    },
+    {
+      "id": "U1",
+      "kind": "unchanged",
+      "scope": "DomainEvent protocol and all event structs",
+      "note": "DomainEvent still declares `associatedtype Metadata: Codable` and `var metadata: Metadata? { get set }`. Generated event structs still emit `typealias Metadata = CustomMetadata`. No change needed to event definitions — but note CustomMetadata's shape changed (see D5)."
+    },
+    {
+      "id": "U2",
+      "kind": "unchanged",
+      "scope": "AggregateRoot, Usecase, DomainEventBus, ReadModel, EventSourcingProjector.apply",
+      "note": "Domain layer is untouched. `apply(readModel:events:)` signature unchanged. No migration needed for aggregates, use cases, or projectors' projection logic."
+    },
+    {
+      "id": "U3",
+      "kind": "unchanged",
+      "scope": "EventStore.fetchEvents return shape",
+      "note": "fetchEvents still returns `(events: [any DomainEvent], latestRevision: UInt64)?`. No streaming change."
+    }
+  ],
+  "downstreamProcedure": [
+    "Bump the swift-ddd-kit dependency requirement to 1.0 in Package.swift.",
+    "Apply R1: rename protocol references EventStorageCoordinator -> EventStore.",
+    "Apply R2 + R3: in every EventSourcingRepository / EventSourcingProjector conformer, rename `StorageCoordinator` typealias -> `Store`, `coordinator` property -> `store`, `init(coordinator:)` -> `init(store:)`.",
+    "Decide the metadata schema: keep `CustomMetadata` (now { operatorId }) or define your own EventMetadata struct (N1).",
+    "Apply S1 + S2: add the metadata generic argument to every KurrentStorageCoordinator / InMemoryStorageCoordinator usage.",
+    "Apply S3 if the project has a custom EventStore implementation.",
+    "Apply S4 + S5 + D1 + D2: rewrite every save/delete call site — drop external/userId args, wrap in EventMetadataContext.withValue where metadata is needed.",
+    "Apply D3: in hand-written mappers, switch eventData.mappingClassName -> eventData.eventType.",
+    "Apply D4 + D5: fix CustomMetadata construction/field access and any RecordedEvent.userId reads.",
+    "If generated mappers/events are committed to the repo, regenerate them (or rebuild so the SwiftPM plugin regenerates).",
+    "Build; resolve remaining compiler errors; run the test suite."
+  ]
+}</pre>
+  </section>
+
+  <!-- ================= WHY ================= -->
+  <section id="why">
+    <h2>為什麼要改</h2>
+    <p>0.x 透過一個固定的 <code>external: [String:String]?</code> 字串字典,把 audit metadata
+       (operatorId、userId…)從應用層帶到儲存層。這個設計有三個問題:</p>
+    <div class="card tight">
+      <ul class="tite">
+        <li><b>Domain 抽象被汙染</b> — <code>Repository</code> 是 domain 概念,<code>external</code> dict 是基礎設施概念。每個 Usecase 都被迫顯式傳遞它,跟 business invariant 無關。</li>
+        <li><b>Schema 被鎖死成 dict</b> — <code>[String:String]?</code> 限制所有使用者只能用字串字典;<code>tenantId</code>、<code>correlationId</code>、<code>requestId</code> 等需求沒有型別安全的擴充空間。</li>
+        <li><b>跟既有的 <code>DomainEvent.Metadata</code> 機制重複</b> — 框架本來就有 per-event 的 <code>metadata</code>,但 write-side 的 <code>external</code> 跟它沒接起來。</li>
+      </ul>
+    </div>
+    <p>1.0 用兩個機制取代它 —— <b>Ambient Context</b>(透過 Swift <code>TaskLocal</code> 從 Usecase 入口往下傳)
+       與 <b>Pluggable Metadata</b>(應用層自訂 <code>EventMetadata</code> 結構,框架不規範欄位)。</p>
+  </section>
+
+  <!-- ================= FLOW ================= -->
+  <section id="flow">
+    <h2>新舊資料流對照</h2>
+    <p>同一件事(把帶 metadata 的事件寫進儲存)在兩個版本的流向:</p>
+
+    <div class="mermaid">
+flowchart LR
+  subgraph OLD["0.x — external dict 通道"]
+    direction TB
+    A1[Usecase] -->|"external: [String:String]?"| A2[Repository.save]
+    A2 -->|"external dict"| A3[EventStorageCoordinator.append]
+    A3 --> A4[(KurrentDB)]
+  end
+  subgraph NEW["1.0 — ambient context"]
+    direction TB
+    B1[Usecase] -->|"EventMetadataContext.withValue(meta)"| B2["@TaskLocal 槽"]
+    B1 --> B3[Repository.save]
+    B2 -.讀取.-> B3
+    B3 -->|"typed Metadata?"| B4[EventStore.append]
+    B4 --> B5[(KurrentDB)]
+  end
+    </div>
+
+    <p>關鍵差異:1.0 的 <code>Repository.save</code> <b>不再有 metadata 參數</b> —— 它從 ambient
+       <code>TaskLocal</code> 自動讀取。Domain 層的呼叫鏈完全不碰 metadata。</p>
+
+    <h3>Write / Read 完整時序</h3>
+    <div class="mermaid">
+sequenceDiagram
+  participant UC as Usecase
+  participant CTX as EventMetadataContext&lt;M&gt;
+  participant REPO as EventSourcingRepository
+  participant STORE as EventStore (Kurrent/InMemory)
+  participant DB as KurrentDB
+  participant MAP as EventTypeMapper
+
+  Note over UC,DB: 寫入路徑
+  UC->>CTX: withValue(metadata) { ... }
+  UC->>REPO: save(aggregateRoot:)
+  REPO->>CTX: 讀 current（typed M?）
+  CTX-->>REPO: metadata
+  REPO->>STORE: append(events:, metadata: M?)
+  STORE->>DB: 寫入 events + customMetadata bytes
+
+  Note over DB,UC: 讀取路徑
+  REPO->>STORE: fetchEvents(byId:)
+  STORE->>DB: 讀 RecordedEvent
+  DB-->>STORE: events + customMetadata
+  STORE->>MAP: mapping(eventData:)
+  MAP->>MAP: decode payload + 填 event.metadata
+  MAP-->>REPO: [any DomainEvent]（metadata 已填好）
+  REPO-->>UC: 重建後的 AggregateRoot
+    </div>
+  </section>
+
+  <!-- ================= CATALOG ================= -->
+  <section id="catalog">
+    <h2>變更總表</h2>
+    <div class="legend">
+      <span><span class="dot" style="background:#7db8ff"></span> rename 純命名</span>
+      <span><span class="dot" style="background:#e3b341"></span> signature 簽章變更</span>
+      <span><span class="dot" style="background:#f85149"></span> removed 移除</span>
+      <span><span class="dot" style="background:#3fb950"></span> new 新增</span>
+      <span><span class="dot" style="background:#9aa3b2"></span> unchanged 不變</span>
+    </div>
+    <table>
+      <thead><tr><th>ID</th><th>類型</th><th>變更</th><th>自動化</th></tr></thead>
+      <tbody>
+        <tr><td><span class="chgid">R1</span></td><td><span class="tag rename">rename</span></td><td>protocol <code>EventStorageCoordinator</code> → <code>EventStore</code></td><td><span class="tag auto">auto</span></td></tr>
+        <tr><td><span class="chgid">R2</span></td><td><span class="tag rename">rename</span></td><td><code>associatedtype StorageCoordinator</code> → <code>Store</code></td><td><span class="tag auto">auto</span></td></tr>
+        <tr><td><span class="chgid">R3</span></td><td><span class="tag rename">rename</span></td><td><code>var coordinator</code> → <code>var store</code>（含 init label）</td><td><span class="tag auto">auto</span></td></tr>
+        <tr><td><span class="chgid">S1</span></td><td><span class="tag sig">signature</span></td><td><code>KurrentStorageCoordinator&lt;S&gt;</code> → <code>&lt;S, Metadata&gt;</code></td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">S2</span></td><td><span class="tag sig">signature</span></td><td><code>InMemoryStorageCoordinator</code> → <code>&lt;Metadata&gt;</code></td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">S3</span></td><td><span class="tag sig">signature</span></td><td>自訂 <code>EventStore</code>:加 <code>associatedtype Metadata</code> + 改 <code>append</code></td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">S4</span></td><td><span class="tag sig">signature</span></td><td><code>save(aggregateRoot:external:)</code> → 去掉 <code>external</code></td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">S5</span></td><td><span class="tag sig">signature</span></td><td><code>delete(byId:external:)</code> → 去掉 <code>external</code></td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">D1</span></td><td><span class="tag removed">removed</span></td><td><code>save(aggregateRoot:userId:)</code> 便利方法移除</td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">D2</span></td><td><span class="tag removed">removed</span></td><td><code>delete(byId:userId:)</code> 便利方法移除</td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">D3</span></td><td><span class="tag removed">removed</span></td><td><code>RecordedEvent.mappingClassName</code> 移除 → 用 <code>eventType</code></td><td><span class="tag auto">auto</span></td></tr>
+        <tr><td><span class="chgid">D4</span></td><td><span class="tag removed">removed</span></td><td><code>RecordedEvent.userId</code> 移除</td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">D5</span></td><td><span class="tag removed">removed</span></td><td><code>CustomMetadata</code> 改成 <code>{ operatorId }</code></td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">N1</span></td><td><span class="tag new">new</span></td><td><code>EventMetadata</code> marker protocol</td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">N2</span></td><td><span class="tag new">new</span></td><td><code>EventMetadataContext&lt;M&gt;</code> ambient carrier</td><td><span class="tag manual">手動</span></td></tr>
+        <tr><td><span class="chgid">U1-3</span></td><td><span class="tag same">unchanged</span></td><td><code>DomainEvent</code> / <code>AggregateRoot</code> / <code>Usecase</code> / <code>fetchEvents</code></td><td>—</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ================= CHANGES DETAIL ================= -->
+  <section id="changes">
+    <h2>逐項變更說明</h2>
+
+    <!-- R1-R3 -->
+    <div class="card">
+      <h3><span class="chgid">R1 / R2 / R3</span> &nbsp;<span class="tag rename">rename</span> &nbsp;命名重構</h3>
+      <p>儲存抽象的詞彙從「coordinator」改成「store」。<b>只有 protocol 改名</b> ——
+         具體類別 <code>InMemoryStorageCoordinator</code> / <code>KurrentStorageCoordinator</code>
+         的名字<b>保留不變</b>(它們只是多了泛型參數,見 S1/S2)。</p>
+      <div class="ba">
+        <div class="col before"><h4>0.x</h4>
+<pre><span class="kw">final class</span> <span class="ty">OrderRepository</span>: <span class="ty">EventSourcingRepository</span> {
+    <span class="kw">typealias</span> <span class="ty">AggregateRootType</span> = <span class="ty">Order</span>
+    <span class="kw">typealias</span> <span class="ty">StorageCoordinator</span> =
+        <span class="ty">KurrentStorageCoordinator</span>&lt;<span class="ty">OrderStream</span>&gt;
+
+    <span class="kw">let</span> coordinator: <span class="ty">StorageCoordinator</span>
+    <span class="kw">init</span>(coordinator: <span class="ty">StorageCoordinator</span>) {
+        <span class="kw">self</span>.coordinator = coordinator
+    }
+}</pre>
+        </div>
+        <div class="col after"><h4>1.0</h4>
+<pre><span class="kw">final class</span> <span class="ty">OrderRepository</span>: <span class="ty">EventSourcingRepository</span> {
+    <span class="kw">typealias</span> <span class="ty">AggregateRootType</span> = <span class="ty">Order</span>
+    <span class="kw">typealias</span> <span class="ty">Store</span> =
+        <span class="ty">KurrentStorageCoordinator</span>&lt;<span class="ty">OrderStream</span>, <span class="ty">CustomMetadata</span>&gt;
+
+    <span class="kw">let</span> store: <span class="ty">Store</span>
+    <span class="kw">init</span>(store: <span class="ty">Store</span>) {
+        <span class="kw">self</span>.store = store
+    }
+}</pre>
+        </div>
+      </div>
+      <div class="callout"><b>掃描範圍</b>
+        每一個 <code>EventSourcingRepository</code> 或 <code>EventSourcingProjector</code> 的 conformer。
+        Projector 同樣有 <code>StorageCoordinator</code> → <code>Store</code> 與 <code>coordinator</code> → <code>store</code>。</div>
+    </div>
+
+    <!-- S1 S2 -->
+    <div class="card">
+      <h3><span class="chgid">S1 / S2</span> &nbsp;<span class="tag sig">signature</span> &nbsp;儲存實作補上 Metadata 泛型參數</h3>
+      <p>1.0 的 <code>EventStore</code> protocol 多了 <code>associatedtype Metadata: EventMetadata</code>。
+         兩個內建實作因此各多一個泛型參數。</p>
+      <pre class="diff"><span class="x">// KurrentStorageCoordinator</span>
+<span class="a">- KurrentStorageCoordinator&lt;OrderStream&gt;</span>
+<span class="d">+ KurrentStorageCoordinator&lt;OrderStream, CustomMetadata&gt;</span>
+<span class="x"></span>
+<span class="x">// InMemoryStorageCoordinator</span>
+<span class="a">- InMemoryStorageCoordinator()</span>
+<span class="d">+ InMemoryStorageCoordinator&lt;CustomMetadata&gt;()</span></pre>
+      <p>第二個型別參數就是這個 store 綁定的 metadata schema。用內建的 <code>CustomMetadata</code>,
+         或自己定義(見 N1)。每個出現 store 型別的地方都要補:<code>typealias</code>、屬性宣告、建構子呼叫。</p>
+    </div>
+
+    <!-- S3 -->
+    <div class="card">
+      <h3><span class="chgid">S3</span> &nbsp;<span class="tag sig">signature</span> &nbsp;自訂 EventStore 實作</h3>
+      <p>只有當下游專案<b>自己寫了 <code>EventStore</code> 實作</b>(非內建兩種)才需要。</p>
+      <div class="ba">
+        <div class="col before"><h4>0.x</h4>
+<pre><span class="kw">struct</span> <span class="ty">MyStore</span>: <span class="ty">EventStorageCoordinator</span> {
+  <span class="kw">func</span> append(
+    events: [<span class="kw">any</span> <span class="ty">DomainEvent</span>],
+    byId id: <span class="ty">String</span>, version: <span class="ty">UInt64</span>?,
+    external: [<span class="ty">String</span>:<span class="ty">String</span>]?
+  ) <span class="kw">async throws</span> -&gt; <span class="ty">UInt64</span>? { … }
+}</pre>
+        </div>
+        <div class="col after"><h4>1.0</h4>
+<pre><span class="kw">struct</span> <span class="ty">MyStore</span>: <span class="ty">EventStore</span> {
+  <span class="kw">typealias</span> <span class="ty">Metadata</span> = <span class="ty">CustomMetadata</span>
+  <span class="kw">func</span> append(
+    events: [<span class="kw">any</span> <span class="ty">DomainEvent</span>],
+    byId id: <span class="ty">String</span>, version: <span class="ty">UInt64</span>?,
+    metadata: <span class="ty">Metadata</span>?
+  ) <span class="kw">async throws</span> -&gt; <span class="ty">UInt64</span>? { … }
+}</pre>
+        </div>
+      </div>
+      <p><code>fetchEvents</code>、<code>purge</code> 簽章不變。</p>
+    </div>
+
+    <!-- S4 S5 D1 D2 -->
+    <div class="card">
+      <h3><span class="chgid">S4 / S5 / D1 / D2</span> &nbsp;<span class="tag sig">signature</span><span class="tag removed" style="margin-left:6px">removed</span> &nbsp;save / delete 的 metadata 傳遞</h3>
+      <p>四種舊寫法,全部收斂到「在 Usecase 入口用 <code>EventMetadataContext.withValue</code> 設一次」:</p>
+      <pre class="diff"><span class="x">// 舊:external dict（S4）</span>
+<span class="a">- try await repo.save(aggregateRoot: order, external: ["userId": uid])</span>
+<span class="x">// 舊:userId 便利方法（D1，已移除）</span>
+<span class="a">- try await repo.save(aggregateRoot: order, userId: uid)</span>
+<span class="x"></span>
+<span class="x">// 新:1.0 統一寫法</span>
+<span class="d">+ try await EventMetadataContext&lt;CustomMetadata&gt;.withValue(</span>
+<span class="d">+     CustomMetadata(operatorId: uid)</span>
+<span class="d">+ ) {</span>
+<span class="d">+     try await repo.save(aggregateRoot: order)</span>
+<span class="d">+ }</span></pre>
+      <p>若舊呼叫的 <code>external</code> 是 <code>nil</code> 或根本沒用到 metadata,直接刪掉參數即可:
+         <code>repo.save(aggregateRoot: order)</code> / <code>repo.delete(byId: id)</code>。</p>
+      <div class="callout ok"><b>推薦做法</b>
+        在 Usecase 的 <code>execute</code> 入口設一次 ambient,函式主體內所有巢狀的
+        <code>repository.save</code> 都會透過 structured concurrency 自動繼承,不需逐一傳遞。</div>
+    </div>
+
+    <!-- D3 D4 -->
+    <div class="card">
+      <h3><span class="chgid">D3 / D4</span> &nbsp;<span class="tag removed">removed</span> &nbsp;RecordedEvent extension 移除</h3>
+      <p><code>RecordedEvent.swift</code> 整檔刪除 —— 它的兩個 extension 都依賴已被移除的欄位。</p>
+      <table>
+        <thead><tr><th>0.x</th><th>1.0 替代</th></tr></thead>
+        <tbody>
+          <tr><td><code>eventData.mappingClassName</code></td>
+              <td><code>eventData.eventType</code> —— KurrentDB 原生欄位,寫入時由 <code>DomainEvent.eventType</code> 填入,case label 仍對得上 Swift 型別名。</td></tr>
+          <tr><td><code>recordedEvent.userId</code></td>
+              <td>無直接替代。Mapper 解碼後 <code>event.metadata?.operatorId</code>,或自行 decode <code>recordedEvent.customMetadata</code> 成你的 metadata 型別。</td></tr>
+        </tbody>
+      </table>
+      <p>手寫的 <code>EventTypeMapper</code> 若 <code>switch eventData.mappingClassName</code>,改成 <code>switch eventData.eventType</code> 即可(純文字取代)。用 codegen plugin 產生的 mapper 會自動更新。</p>
+    </div>
+
+    <!-- D5 -->
+    <div class="card">
+      <h3><span class="chgid">D5</span> &nbsp;<span class="tag removed">removed</span> &nbsp;CustomMetadata 簡化</h3>
+      <p>0.x 的 <code>CustomMetadata</code> 同時揹著基礎設施欄位(<code>className</code>)和無型別字典
+         (<code>external</code>)—— 正是這次重構要消滅的「schema 鎖死成 dict」形狀。1.0 把它縮成
+         一個有意義的單欄位結構。</p>
+      <div class="ba">
+        <div class="col before"><h4>0.x</h4>
+<pre><span class="kw">public struct</span> <span class="ty">CustomMetadata</span>: <span class="ty">Codable</span>, <span class="ty">Sendable</span> {
+  <span class="kw">public let</span> className: <span class="ty">String</span>
+  <span class="kw">public var</span> external: [<span class="ty">String</span>:<span class="ty">String</span>]?
+  <span class="kw">public init</span>(className: <span class="ty">String</span>,
+              external: [<span class="ty">String</span>:<span class="ty">String</span>]?)
+}
+<span class="cmt">// + operatorId computed extension</span></pre>
+        </div>
+        <div class="col after"><h4>1.0</h4>
+<pre><span class="kw">public struct</span> <span class="ty">CustomMetadata</span>: <span class="ty">EventMetadata</span> {
+  <span class="kw">public let</span> operatorId: <span class="ty">String</span>
+
+  <span class="kw">public init</span>(operatorId: <span class="ty">String</span>) {
+    <span class="kw">self</span>.operatorId = operatorId
+  }
+}</pre>
+        </div>
+      </div>
+      <div class="callout warn"><b>若你之前靠 <code>external</code> 塞任意 key/value</b>
+        <code>CustomMetadata</code> 不再支援。定義你自己的 <code>EventMetadata</code> 結構(N1),
+        把那些欄位變成<b>型別化</b>的 property —— 這正是這次升級的目的。</div>
+    </div>
+
+    <!-- N1 N2 -->
+    <div class="card">
+      <h3><span class="chgid">N1 / N2</span> &nbsp;<span class="tag new">new</span> &nbsp;EventMetadata 與 EventMetadataContext</h3>
+      <p><b>N1 — <code>EventMetadata</code></b> 是新的 marker protocol(<code>Codable &amp; Sendable</code>,
+         無任何必要欄位)。下游專案自訂 metadata schema:</p>
+<pre><span class="kw">struct</span> <span class="ty">AuditMetadata</span>: <span class="ty">EventMetadata</span> {
+    <span class="kw">let</span> operatorId: <span class="ty">String</span>
+    <span class="kw">let</span> tenantId: <span class="ty">String</span>
+    <span class="kw">let</span> correlationId: <span class="ty">String</span>
+}</pre>
+      <p><b>N2 — <code>EventMetadataContext&lt;M&gt;</code></b> 是 <code>TaskLocal</code>-backed 的 ambient carrier。
+         每個 metadata 型別 <code>M</code> 有獨立的儲存槽。API 只有兩個:</p>
+<pre><span class="cmt">// 設定（在 Usecase 入口）</span>
+<span class="kw">try await</span> <span class="ty">EventMetadataContext</span>&lt;<span class="ty">AuditMetadata</span>&gt;.withValue(meta) {
+    <span class="cmt">// 此 scope 內（含巢狀 async）repository.save 自動讀到 meta</span>
+}
+
+<span class="cmt">// 讀取（框架內部 / 進階用途）</span>
+<span class="kw">let</span> meta = <span class="ty">EventMetadataContext</span>&lt;<span class="ty">AuditMetadata</span>&gt;.current  <span class="cmt">// M?</span></pre>
+      <p>完整的應用層樣板:</p>
+<pre><span class="cmt">// 1. Repository 透過 Store.Metadata 綁定 schema</span>
+<span class="kw">final class</span> <span class="ty">OrderRepository</span>: <span class="ty">EventSourcingRepository</span> {
+    <span class="kw">typealias</span> <span class="ty">AggregateRootType</span> = <span class="ty">Order</span>
+    <span class="kw">typealias</span> <span class="ty">Store</span> = <span class="ty">KurrentStorageCoordinator</span>&lt;<span class="ty">OrderStream</span>, <span class="ty">AuditMetadata</span>&gt;
+    <span class="kw">let</span> store: <span class="ty">Store</span>
+    <span class="kw">init</span>(store: <span class="ty">Store</span>) { <span class="kw">self</span>.store = store }
+}
+
+<span class="cmt">// 2. Usecase 在入口設 ambient,domain 邏輯完全不碰 metadata</span>
+<span class="kw">struct</span> <span class="ty">PlaceOrderUsecase</span> {
+    <span class="kw">let</span> repository: <span class="ty">OrderRepository</span>
+    <span class="kw">func</span> execute(input: <span class="ty">Input</span>) <span class="kw">async throws</span> -&gt; <span class="ty">Output</span> {
+        <span class="kw">let</span> meta = <span class="ty">AuditMetadata</span>(operatorId: input.operatorId,
+                                  tenantId: input.tenantId,
+                                  correlationId: input.requestId)
+        <span class="kw">return try await</span> <span class="ty">EventMetadataContext</span>&lt;<span class="ty">AuditMetadata</span>&gt;.withValue(meta) {
+            <span class="kw">let</span> order = <span class="kw">try</span> <span class="ty">Order</span>(id: input.orderId, …)
+            <span class="kw">try await</span> repository.save(aggregateRoot: order)
+            <span class="kw">return</span> <span class="ty">Output</span>(orderId: order.id)
+        }
+    }
+}</pre>
+    </div>
+
+    <!-- U -->
+    <div class="card">
+      <h3><span class="chgid">U1 / U2 / U3</span> &nbsp;<span class="tag same">unchanged</span> &nbsp;不受影響的部分</h3>
+      <ul class="tite">
+        <li><b><code>DomainEvent</code> protocol</b> — 仍是 <code>associatedtype Metadata: Codable</code> + <code>var metadata: Metadata?</code>。事件定義不用改;但注意 <code>CustomMetadata</code> 的形狀變了(D5)。</li>
+        <li><b><code>AggregateRoot</code> / <code>Usecase</code> / <code>DomainEventBus</code> / <code>ReadModel</code></b> — 介面完全沒動。</li>
+        <li><b><code>EventSourcingProjector.apply(readModel:events:)</code></b> — 簽章不變。Projector 的投影邏輯不用改。</li>
+        <li><b><code>EventStore.fetchEvents</code></b> — 仍回傳 <code>(events: [any DomainEvent], latestRevision: UInt64)?</code> tuple,沒有改成 stream。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= DECISION ================= -->
+  <section id="decision">
+    <h2>下游專案：我受影響嗎？</h2>
+    <p>把這張流程圖套到 <code>P_A</code>(或任何依賴 swift-ddd-kit 的專案):</p>
+    <div class="mermaid">
+flowchart TD
+  START([P_A 依賴 swift-ddd-kit]) --> Q1{有用<br/>EventSourcingRepository<br/>或 Projector?}
+  Q1 -->|否| SAFE[幾乎不受影響<br/>只需 bump 版本後重建]
+  Q1 -->|是| R[必做 R1/R2/R3<br/>命名重構]
+  R --> S[必做 S1/S2<br/>補 Metadata 泛型參數]
+  S --> Q2{有呼叫<br/>save/delete 帶<br/>external 或 userId?}
+  Q2 -->|是| FIX[必做 S4/S5/D1/D2<br/>改用 EventMetadataContext]
+  Q2 -->|否| Q3
+  FIX --> Q3{有手寫<br/>EventTypeMapper?}
+  Q3 -->|是| MAP[必做 D3<br/>mappingClassName → eventType]
+  Q3 -->|否| Q4
+  MAP --> Q4{有用 CustomMetadata<br/>的 className/external<br/>或 RecordedEvent.userId?}
+  Q4 -->|是| META[必做 D4/D5<br/>改 schema / 改欄位存取]
+  Q4 -->|否| Q5
+  META --> Q5{有自訂<br/>EventStore 實作?}
+  Q5 -->|是| CUSTOM[必做 S3]
+  Q5 -->|否| DONE
+  CUSTOM --> DONE([重建 + 跑測試])
+  SAFE --> DONE
+    </div>
+  </section>
+
+  <!-- ================= CHECKLIST ================= -->
+  <section id="checklist">
+    <h2>Migration 步驟清單</h2>
+    <p>建議照順序執行 —— 先做純命名(編譯器會把後面的問題指出來),再處理簽章。</p>
+    <ol class="steps">
+      <li><b>Bump 依賴</b> — <code>Package.swift</code> 把 <code>swift-ddd-kit</code> 需求改成 <code>from: "1.0.0"</code>。</li>
+      <li><b>R1 命名</b> — 全專案搜尋 protocol 引用 <code>EventStorageCoordinator</code> → <code>EventStore</code>(<code>: EventStorageCoordinator</code>、<code>any EventStorageCoordinator</code>、泛型約束)。</li>
+      <li><b>R2 + R3 命名</b> — 每個 Repository / Projector conformer:<code>typealias StorageCoordinator</code> → <code>Store</code>;<code>var coordinator</code> → <code>var store</code>;<code>self.coordinator</code> / <code>.coordinator</code> → <code>.store</code>;<code>init(coordinator:)</code> → <code>init(store:)</code>。</li>
+      <li><b>選定 metadata schema</b> — 沿用 <code>CustomMetadata</code>(現在是 <code>{ operatorId }</code>),或定義自己的 <code>EventMetadata</code> 結構(N1)。</li>
+      <li><b>S1 + S2 泛型</b> — 所有 <code>KurrentStorageCoordinator&lt;S&gt;</code> 補成 <code>&lt;S, M&gt;</code>;所有 <code>InMemoryStorageCoordinator</code> 補成 <code>&lt;M&gt;</code>(typealias、屬性、建構子)。</li>
+      <li><b>S3(若適用)</b> — 自訂的 <code>EventStore</code> 實作:加 <code>associatedtype Metadata</code>,<code>append</code> 的 <code>external:</code> 改 <code>metadata:</code>。</li>
+      <li><b>S4 + S5 + D1 + D2 呼叫端</b> — 每個 <code>save</code> / <code>delete</code> 呼叫:拿掉 <code>external:</code> / <code>userId:</code> 參數;需要 metadata 的用 <code>EventMetadataContext&lt;M&gt;.withValue { … }</code> 包起來,最好設在 Usecase 入口。</li>
+      <li><b>D3 mapper</b> — 手寫 mapper 的 <code>switch eventData.mappingClassName</code> → <code>switch eventData.eventType</code>。</li>
+      <li><b>D4 + D5 metadata 存取</b> — 修正 <code>CustomMetadata(className:external:)</code> 建構與 <code>.className</code>/<code>.external</code> 存取;處理 <code>RecordedEvent.userId</code> 的讀取。</li>
+      <li><b>重新生成 codegen</b> — 若 generated mapper / event 有 commit 進 repo,重新生成(或重建讓 SwiftPM plugin 自動產生)。</li>
+      <li><b>編譯 + 測試</b> — <code>swift build</code> 解掉剩餘錯誤,跑測試套件確認行為。</li>
+    </ol>
+  </section>
+
+  <!-- ================= GOTCHAS ================= -->
+  <section id="gotchas">
+    <h2>陷阱與注意事項</h2>
+
+    <div class="callout warn">
+      <b>Task.detached 不會繼承 ambient context</b>
+      <code>EventMetadataContext</code> 走 Swift <code>TaskLocal</code> 語意:結構化並行
+      (<code>async let</code>、<code>TaskGroup</code>)會繼承;<code>Task.detached { }</code> <b>不會</b>。
+      若在 metadata 邊界內 spawn detached task,要手動 capture 後在裡面重新 <code>withValue</code>。
+    </div>
+
+    <div class="callout warn">
+      <b>一次 save 內的所有 event 共用同一份 metadata</b>
+      這是刻意設計。若你需要「同次 save、不同 event 不同 metadata」,通常代表 aggregate 邊界劃錯。
+    </div>
+
+    <div class="callout">
+      <b>Store.Metadata 與 event.Metadata 靠 convention 對齊</b>
+      框架不在編譯期強制兩者相同。執行期不一致時,read path 的 mapper decode 失敗會讓
+      <code>event.metadata = nil</code>(不會 crash)。codegen 產出的 event 預設
+      <code>typealias Metadata = CustomMetadata</code> —— 若 store 綁的是別的型別,記得讓 event 一致。
+    </div>
+
+    <div class="callout">
+      <b>事件型別判斷改用 KurrentDB 原生 eventType</b>
+      1.0 移除了把型別名塞進 metadata payload 的做法。read 路徑改用 <code>eventData.eventType</code>
+      (寫入時由 <code>DomainEvent.eventType</code> 填入,預設等於 Swift 型別名)。metadata payload
+      不再揹型別判別資訊。
+    </div>
+
+    <details>
+      <summary>為什麼 EventMetadataContext 內部是個 dict,而不是直接 <code>@TaskLocal var current: M?</code>?</summary>
+      <p style="margin-top:8px">Swift 不允許在泛型型別上宣告 <code>@TaskLocal</code> static stored property
+      (編譯錯誤:<i>static stored properties not supported in generic types</i>)。
+      所以實作上用一個非泛型的 <code>TaskLocal</code> 字典,以 <code>ObjectIdentifier(M.self)</code>
+      為 key,再用泛型的 <code>EventMetadataContext&lt;M&gt;</code> 包一層型別安全的讀寫 API。
+      對下游使用者透明 —— 你只會看到 <code>withValue</code> / <code>current</code>。</p>
+    </details>
+  </section>
+
+  <footer>
+    <p>swift-ddd-kit 0.x → 1.0 Migration Guide ·
+       對應 PR <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/6">#6</a>
+       (branch <code>feature/ambient-context-pluggable-metadata</code>)。</p>
+    <p>設計文件:<code>docs/superpowers/specs/2026-05-15-ambient-context-and-pluggable-metadata-design.md</code> ·
+       逐步遷移文字版:<code>MIGRATION.md</code>。</p>
+    <p>本文件同時供人類與 AI agent 閱讀 —— AI 工具請優先消化
+       <a href="#ai-manifest">AI Migration Manifest</a> 的 JSON 區塊。</p>
+  </footer>
+
+</div>
+<script>
+  mermaid.initialize({
+    startOnLoad:true,
+    theme:'dark',
+    themeVariables:{
+      background:'#171a21', primaryColor:'#1e222b', primaryTextColor:'#e6e8ee',
+      primaryBorderColor:'#2a2f3a', lineColor:'#5aa9ff', secondaryColor:'#211d33',
+      tertiaryColor:'#11141a', fontSize:'13px'
+    },
+    flowchart:{curve:'basis'}
+  });
+</script>
+</body>
+</html>
