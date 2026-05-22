@@ -29,7 +29,7 @@ swift run generate projection --input Sources/MyTarget/projection-model.yaml
 
 ## Architecture Overview
 
-DDDKit is a Domain-Driven Design + Event Sourcing framework for Swift 6, targeting macOS 15+ and iOS 16+. It uses KurrentDB as the event store.
+DDDKit is a Domain-Driven Design + Event Sourcing framework for Swift 6, targeting Ubuntu (Linux) and macOS 15+. It uses KurrentDB as the event store.
 
 ### Layer Structure
 

@@ -128,7 +128,7 @@ Feedback and contributions are welcome. See open [issues](https://github.com/gra
 ## Requirements
 
 - Swift 6.0+
-- macOS 15+ / iOS 16+
+- Ubuntu (Linux) / macOS 15+
 - [KurrentDB](https://github.com/gradyzhuo/swift-kurrentdb) (for event persistence)
 
 ## Installation
