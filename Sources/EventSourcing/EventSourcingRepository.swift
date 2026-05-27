@@ -34,9 +34,11 @@ extension EventSourcingRepository {
         //濾掉 AggregateRootType 是 AggregateRootType.DeletedEventType 的 Event
         let aggregateRoot = try AggregateRootType(events: events.filter{ !($0 is AggregateRootType.DeletedEventType) })
 
-        if let deletedEvent {
+        if let _ = deletedEvent {
+            // markDelete() internally calls apply(new DeletedEvent) which sets metadata.deleted = true.
+            // Do NOT call apply(originalDeletedEvent) again afterwards — that would throw
+            // aggregateOperationNotAllowed because metadata.deleted is already true.
             try aggregateRoot?.markDelete()
-            try aggregateRoot?.apply(event: deletedEvent)
         }
 
         aggregateRoot?.update(version: fetchEventsResult.latestRevision)
