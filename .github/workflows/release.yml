@@ -102,16 +102,28 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      # Idempotent: re-running this workflow against a tag that already has a
+      # release (e.g. a manual workflow_dispatch retry) uploads/replaces assets
+      # instead of failing on "release already exists".
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --repo "${{ github.repository }}" \
-            --title "${{ github.ref_name }}" \
-            --generate-notes \
-            artifacts/dddkit-macos-universal/*.tar.gz \
-            artifacts/dddkit-linux-amd64/* \
-            artifacts/dddkit-linux-arm64/*
+          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "${{ github.ref_name }}" \
+              --repo "${{ github.repository }}" \
+              --clobber \
+              artifacts/dddkit-macos-universal/*.tar.gz \
+              artifacts/dddkit-linux-amd64/* \
+              artifacts/dddkit-linux-arm64/*
+          else
+            gh release create "${{ github.ref_name }}" \
+              --repo "${{ github.repository }}" \
+              --title "${{ github.ref_name }}" \
+              --generate-notes \
+              artifacts/dddkit-macos-universal/*.tar.gz \
+              artifacts/dddkit-linux-amd64/* \
+              artifacts/dddkit-linux-arm64/*
+          fi
 
   update-apt-repo:
     needs: build-linux
@@ -132,11 +144,22 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y reprepro gnupg
           echo "${{ secrets.APT_SIGNING_KEY }}" | gpg --batch --import
+      # Idempotent: reprepro refuses to re-include a package at a version/arch
+      # it already has (correctly — dpkg-deb output isn't byte-reproducible
+      # across separate builds, so a retry's .deb differs from the original
+      # even though the source is identical). Skip anything already published
+      # instead of failing a re-run (e.g. a manual workflow_dispatch retry).
       - name: Add .debs to the apt repo
         run: |
           cd docs/apt
           for deb in ../../artifacts/*.deb; do
-            reprepro includedeb stable "$deb"
+            pkg_version=$(dpkg-deb -f "$deb" Version)
+            pkg_arch=$(dpkg-deb -f "$deb" Architecture)
+            if reprepro list stable dddkit 2>/dev/null | grep -qF "|${pkg_arch}: dddkit ${pkg_version}"; then
+              echo "dddkit ${pkg_version} (${pkg_arch}) already published — skipping"
+            else
+              reprepro includedeb stable "$deb"
+            fi
           done
       - name: Commit updated repo
         id: commit
