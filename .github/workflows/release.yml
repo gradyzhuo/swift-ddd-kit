@@ -1,0 +1,216 @@
+name: Release dddkit
+
+# Builds and publishes the `dddkit` CLI on a tagged release:
+#   - GitHub Release with macOS (universal) + Linux (amd64/arm64) tarballs and .debs
+#   - signed APT repository under docs/apt/ (published via the existing pages.yml)
+#   - gradyzhuo/homebrew-tap formula bump
+#
+# `swift build --product dddkit` only builds DDDKitCLI's own dependency closure
+# (ArgumentParser) — it does not build the rest of the package's much heavier
+# grpc/NIO/KurrentDB graph, so these jobs are fast despite the full manifest
+# needing to be resolved.
+#
+# Tags in this repo are bare semver (e.g. "1.0.1", no "v" prefix) — match that.
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    strategy:
+      matrix:
+        include:
+          - os: macos-15-intel
+            arch: x86_64
+          - os: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift build -c release --product dddkit
+      - run: |
+          mkdir -p dist
+          cp .build/release/dddkit dist/dddkit
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dddkit-macos-${{ matrix.arch }}
+          path: dist/dddkit
+
+  macos-universal:
+    needs: build-macos
+    runs-on: macos-15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dddkit-macos-x86_64
+          path: x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: dddkit-macos-arm64
+          path: arm64
+      - run: |
+          chmod +x x86_64/dddkit arm64/dddkit
+          lipo -create -output dddkit x86_64/dddkit arm64/dddkit
+          chmod +x dddkit
+          tar czf dddkit-${{ github.ref_name }}-macos-universal.tar.gz dddkit
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dddkit-macos-universal
+          path: dddkit-${{ github.ref_name }}-macos-universal.tar.gz
+
+  build-linux:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      # Build on the host runner, mounted into the official Swift image, mirroring
+      # the build-linux-distros job in swift-build-testing.yml (proven to work here) —
+      # avoids relying on git being present inside the swift:* container.
+      - name: Build inside swift:6.2-bookworm
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace \
+            swift:6.2-bookworm \
+            bash -c "swift build -c release --product dddkit --static-swift-stdlib"
+      - name: Package tarball + .deb
+        run: |
+          mkdir -p dist
+          cp .build/release/dddkit dist/dddkit
+          tar czf dist/dddkit-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz -C dist dddkit
+          ./packaging/apt/build-deb.sh "${{ github.ref_name }}" "${{ matrix.arch }}" dist/dddkit dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dddkit-linux-${{ matrix.arch }}
+          path: |
+            dist/dddkit-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz
+            dist/dddkit_${{ github.ref_name }}_${{ matrix.arch }}.deb
+
+  github-release:
+    needs: [macos-universal, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/dddkit-macos-universal/*.tar.gz \
+            artifacts/dddkit-linux-amd64/* \
+            artifacts/dddkit-linux-arm64/*
+
+  update-apt-repo:
+    needs: build-linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dddkit-linux-*
+          path: artifacts
+          merge-multiple: true
+      - name: Install reprepro, import signing key
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y reprepro gnupg
+          echo "${{ secrets.APT_SIGNING_KEY }}" | gpg --batch --import
+      - name: Add .debs to the apt repo
+        run: |
+          cd docs/apt
+          for deb in ../../artifacts/*.deb; do
+            reprepro includedeb stable "$deb"
+          done
+      - name: Commit updated repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/apt
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "apt: publish dddkit ${{ github.ref_name }}"
+          fi
+          git push origin HEAD:main
+
+  update-homebrew-tap:
+    needs: github-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tap token is configured
+        id: check
+        run: |
+          if [ -z "${{ secrets.HOMEBREW_TAP_TOKEN }}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping tap update. See docs/apt/README.md / release plan for the one-time setup."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Compute sha256 of macOS universal asset
+        if: steps.check.outputs.skip == 'false'
+        id: sha
+        run: |
+          URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dddkit-${{ github.ref_name }}-macos-universal.tar.gz"
+          curl -sL "$URL" -o asset.tar.gz
+          echo "sha256=$(sha256sum asset.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Checkout homebrew-tap
+        if: steps.check.outputs.skip == 'false'
+        uses: actions/checkout@v4
+        with:
+          repository: gradyzhuo/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Update formula
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          VERSION="${{ github.ref_name }}"
+          SHA="${{ steps.sha.outputs.sha256 }}"
+          URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/dddkit-${VERSION}-macos-universal.tar.gz"
+          mkdir -p tap/Formula
+          cat > tap/Formula/dddkit.rb <<EOF
+          class Dddkit < Formula
+            desc "Scaffold swift-ddd-kit DDD/Event-Sourcing starter projects"
+            homepage "https://github.com/gradyzhuo/swift-ddd-kit"
+            url "$URL"
+            sha256 "$SHA"
+            version "$VERSION"
+
+            def install
+              bin.install "dddkit"
+            end
+
+            test do
+              system "#{bin}/dddkit", "--help"
+            end
+          end
+          EOF
+      - name: Commit and push
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/dddkit.rb
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "dddkit ${{ github.ref_name }}"
+          fi
+          git push

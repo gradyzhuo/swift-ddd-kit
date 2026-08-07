@@ -1,0 +1,7 @@
+Origin: swift-ddd-kit
+Label: dddkit
+Codename: stable
+Architectures: amd64 arm64
+Components: main
+Description: APT repository for dddkit, the swift-ddd-kit project scaffolding CLI
+SignWith: 2E806D1016B999A6C4DD48314CDACD16629FE7DA
