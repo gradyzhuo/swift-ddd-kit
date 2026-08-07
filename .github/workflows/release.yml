@@ -139,16 +139,27 @@ jobs:
             reprepro includedeb stable "$deb"
           done
       - name: Commit updated repo
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add docs/apt
           if git diff --cached --quiet; then
             echo "nothing to commit"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
           else
             git commit -m "apt: publish dddkit ${{ github.ref_name }}"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
           fi
           git push origin HEAD:main
+      # Pushes made with the default GITHUB_TOKEN don't trigger other workflows
+      # (GitHub's anti-recursion rule), so pages.yml won't fire on its own even
+      # though this push touches docs/**. Dispatch it explicitly instead.
+      - name: Trigger GitHub Pages redeploy
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo "${{ github.repository }}" --ref main
 
   update-homebrew-tap:
     needs: github-release
