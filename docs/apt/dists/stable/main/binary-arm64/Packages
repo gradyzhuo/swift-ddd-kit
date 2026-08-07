@@ -1,15 +1,15 @@
 Package: dddkit
-Version: 1.1.0
+Version: 1.1.1
 Architecture: arm64
 Maintainer: Grady Zhuo <gradyzhuo@gmail.com>
 Homepage: https://github.com/gradyzhuo/swift-ddd-kit
 Priority: optional
 Section: devel
-Filename: pool/main/d/dddkit/dddkit_1.1.0_arm64.deb
+Filename: pool/main/d/dddkit/dddkit_1.1.1_arm64.deb
 Size: 5228782
-SHA256: 7a610af4eb194dd714949ddcde9b04a79a555076b97e0cb5d8314ceaef18f5d0
-SHA1: b7bb466108bc910b58019476dcc691403c98701c
-MD5sum: 5d5477f6dde027475f84d068eeaa30c0
+SHA256: 2cca85ff83f0d6ab31f682ce33e481dfa67816ffc78470d338e2e5f9f52aa9cd
+SHA1: 2f417ddce93b62d8acb7063d99f875e9485a973f
+MD5sum: 10b76edeacd89b6f07acd0da84b8eff4
 Description: Scaffold swift-ddd-kit DDD/Event-Sourcing starter projects
  dddkit generates a runnable Domain-Driven Design + Event Sourcing starter
  project wired to swift-ddd-kit and KurrentDB: an aggregate root, Create/
