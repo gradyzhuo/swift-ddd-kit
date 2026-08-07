@@ -41,7 +41,11 @@ public final class KurrentStorageCoordinator<
         }
         let stream = client.streams(specified: streamName)
         let response = try await stream.append(events: eventDataList) {
-            $0.expectedRevision = version.map { .at(UInt64($0)) } ?? .any
+            // A `nil` version means the aggregate has never been persisted —
+            // expect `.noStream` so a concurrent/duplicate create collides
+            // with the existing stream instead of silently succeeding under
+            // `.any` (which skips the concurrency check altogether).
+            $0.expectedRevision = version.map { .at(UInt64($0)) } ?? .noStream
         }
         return response.currentRevision.flatMap { UInt64($0) }
     }
