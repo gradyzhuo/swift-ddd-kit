@@ -17,6 +17,19 @@ on:
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to build/publish, e.g. 1.1.0 (must already exist — this does not create a tag)'
+        required: true
+        type: string
+
+# On a tag push, VERSION is the tag itself. On a manual workflow_dispatch,
+# `--ref` only selects which workflow *definition* to run — it is NOT the
+# version being published (a plain `--ref 1.1.0` re-run would otherwise reuse
+# the release.yml *as it existed at that old tag*, silently reverting fixes
+# made since). VERSION is what every job actually builds/publishes.
+env:
+  VERSION: ${{ github.event.inputs.version || github.ref_name }}
 
 jobs:
   build-macos:
@@ -30,6 +43,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
       - run: swift build -c release --product dddkit
       - run: |
           mkdir -p dist
@@ -55,11 +70,11 @@ jobs:
           chmod +x x86_64/dddkit arm64/dddkit
           lipo -create -output dddkit x86_64/dddkit arm64/dddkit
           chmod +x dddkit
-          tar czf dddkit-${{ github.ref_name }}-macos-universal.tar.gz dddkit
+          tar czf dddkit-${{ env.VERSION }}-macos-universal.tar.gz dddkit
       - uses: actions/upload-artifact@v4
         with:
           name: dddkit-macos-universal
-          path: dddkit-${{ github.ref_name }}-macos-universal.tar.gz
+          path: dddkit-${{ env.VERSION }}-macos-universal.tar.gz
 
   build-linux:
     strategy:
@@ -72,6 +87,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.VERSION }}
       # Build on the host runner, mounted into the official Swift image, mirroring
       # the build-linux-distros job in swift-build-testing.yml (proven to work here) —
       # avoids relying on git being present inside the swift:* container.
@@ -84,14 +101,14 @@ jobs:
         run: |
           mkdir -p dist
           cp .build/release/dddkit dist/dddkit
-          tar czf dist/dddkit-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz -C dist dddkit
-          ./packaging/apt/build-deb.sh "${{ github.ref_name }}" "${{ matrix.arch }}" dist/dddkit dist
+          tar czf dist/dddkit-${{ env.VERSION }}-linux-${{ matrix.arch }}.tar.gz -C dist dddkit
+          ./packaging/apt/build-deb.sh "${{ env.VERSION }}" "${{ matrix.arch }}" dist/dddkit dist
       - uses: actions/upload-artifact@v4
         with:
           name: dddkit-linux-${{ matrix.arch }}
           path: |
-            dist/dddkit-${{ github.ref_name }}-linux-${{ matrix.arch }}.tar.gz
-            dist/dddkit_${{ github.ref_name }}_${{ matrix.arch }}.deb
+            dist/dddkit-${{ env.VERSION }}-linux-${{ matrix.arch }}.tar.gz
+            dist/dddkit_${{ env.VERSION }}_${{ matrix.arch }}.deb
 
   github-release:
     needs: [macos-universal, build-linux]
@@ -108,17 +125,17 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload "${{ github.ref_name }}" \
+          if gh release view "${{ env.VERSION }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "${{ env.VERSION }}" \
               --repo "${{ github.repository }}" \
               --clobber \
               artifacts/dddkit-macos-universal/*.tar.gz \
               artifacts/dddkit-linux-amd64/* \
               artifacts/dddkit-linux-arm64/*
           else
-            gh release create "${{ github.ref_name }}" \
+            gh release create "${{ env.VERSION }}" \
               --repo "${{ github.repository }}" \
-              --title "${{ github.ref_name }}" \
+              --title "${{ env.VERSION }}" \
               --generate-notes \
               artifacts/dddkit-macos-universal/*.tar.gz \
               artifacts/dddkit-linux-amd64/* \
@@ -171,7 +188,7 @@ jobs:
             echo "nothing to commit"
             echo "pushed=false" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "apt: publish dddkit ${{ github.ref_name }}"
+            git commit -m "apt: publish dddkit ${{ env.VERSION }}"
             echo "pushed=true" >> "$GITHUB_OUTPUT"
           fi
           git push origin HEAD:main
@@ -201,7 +218,7 @@ jobs:
         if: steps.check.outputs.skip == 'false'
         id: sha
         run: |
-          URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/dddkit-${{ github.ref_name }}-macos-universal.tar.gz"
+          URL="https://github.com/${{ github.repository }}/releases/download/${{ env.VERSION }}/dddkit-${{ env.VERSION }}-macos-universal.tar.gz"
           curl -sL "$URL" -o asset.tar.gz
           echo "sha256=$(sha256sum asset.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Checkout homebrew-tap
@@ -214,7 +231,7 @@ jobs:
       - name: Update formula
         if: steps.check.outputs.skip == 'false'
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.VERSION }}"
           SHA="${{ steps.sha.outputs.sha256 }}"
           URL="https://github.com/${{ github.repository }}/releases/download/${VERSION}/dddkit-${VERSION}-macos-universal.tar.gz"
           mkdir -p tap/Formula
@@ -245,6 +262,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "nothing to commit"
           else
-            git commit -m "dddkit ${{ github.ref_name }}"
+            git commit -m "dddkit ${{ env.VERSION }}"
           fi
           git push
