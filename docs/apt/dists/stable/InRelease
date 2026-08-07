@@ -1,0 +1,47 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Origin: swift-ddd-kit
+Label: dddkit
+Codename: stable
+Date: Fri, 07 Aug 2026 00:15:48 UTC
+Architectures: amd64 arm64
+Components: main
+Description: APT repository for dddkit, the swift-ddd-kit project scaffolding CLI
+MD5Sum:
+ 542e6e2be8effe700c37c06bba67f7b2 774 main/binary-amd64/Packages
+ c9e3c846ffc141405fff1fc7fb632b20 505 main/binary-amd64/Packages.gz
+ 12e94e5a1198391583fba079870e50c1 154 main/binary-amd64/Release
+ 20d92a1e0a306b88d73cc3620ee3b925 774 main/binary-arm64/Packages
+ 52da0b4fd80f2a81abe8083916af325c 505 main/binary-arm64/Packages.gz
+ fccf2a3ed42e9bed6b17426252086886 154 main/binary-arm64/Release
+SHA1:
+ 7db57d0e602e333dce4ce4df1097cb31e06b9d8f 774 main/binary-amd64/Packages
+ f77f553e46519ff604ea556c56697c34dda9e357 505 main/binary-amd64/Packages.gz
+ 2961d811fefbcb4e997ab9ad213dbd0003141d5f 154 main/binary-amd64/Release
+ ae7487c171c3cdd3329a92d21f257c1b29b5f30e 774 main/binary-arm64/Packages
+ 0742becf40d2bae512ea8ff971ee0a851ccb3dcf 505 main/binary-arm64/Packages.gz
+ 381ba2677046c24ae176f3495132e2358f818e26 154 main/binary-arm64/Release
+SHA256:
+ 5f4e8dc483dc72e9e300b0e1ef6b7db4d23df9b8f12d58113e15e9db857d4a6a 774 main/binary-amd64/Packages
+ 01d41292f3c48da0f2750081f22c9d52d8765fce8e30ef85e0515c88906727c8 505 main/binary-amd64/Packages.gz
+ 6e7c8225f94e12a2bd0c3e9ad3d34e95b2dd7e00315df69f704a8c5fa630220d 154 main/binary-amd64/Release
+ 3ac133047a2a2d28356cd913297c6da3ff0277cb1cd69d5c1120fac429689229 774 main/binary-arm64/Packages
+ 728c31ed722096a6177f7620df5d205916955ba504ec74f0bee72cbb206c0842 505 main/binary-arm64/Packages.gz
+ 61a257f5806796a17e1c17c4a16cc01199967475d057f6b107a6559a51e7bd58 154 main/binary-arm64/Release
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEELoBtEBa5mabE3UgxTNrNFmKf59oFAmp1I7QACgkQTNrNFmKf
+59rXEw//VA8DreuX6YSHjrpA115h2ITTCTa9wN5oQslYViA7DWDtp+t0Et7TLXtd
+lLNkTQtb4cfMHuqOLUm3fUMjm2iPlErB7gv3Vqm1umWXVSYpC21gVIlBLFfheX9v
+BYO/PkvFSaRK9waeGFQqGOXeWUUZhOtsufHIMCZy9mZE9XqKqXezHBV5wUocyX2g
+POX6S7Fxi2D2qlxUSl76rw185VMhE2FHT2jPQ2ypq4nTcx5h1ZkT9Tox8up1lXVZ
+MMOKyi4z0y74dCFsRwT+bJ1JAicG6nM7MbKuYE+PKtdBesgpiS0DeyeCBOxKGokI
+Oc3YZxPBk1ajav4PLNLsn+y6HtqyEc20JJDvCirs9PkGxXtiGipaN0xNAx4e7eDy
+wnTWjUFWtqrKgs1BUBUUY4CIStIynSC0sw/ZHZZAYfCVXT/4LlPx1LPyWY+tGgsC
+OXyrE4D4vaDepdxvENH+KN1q2TRI+bh5Q7456qGtx4X2IndPaiccjlIyUzBbXJD1
+k9KlO0CZcpkte+oSBWFtANvT3rO7M66x4wVqINrEmxhzCoM5Radu0yjM9GApEUyv
+6PniPT7KGjCb4WJfjswzfc5nsldyHnNoZgX+ccNnzc/4C46u9OCncekiB55As2ES
+NaEUHX7qU/9Vg3nn2ig8djbiJgmDtDM1o1nOiGJXmlhRZfTD5AQ=
+=mGI+
+-----END PGP SIGNATURE-----

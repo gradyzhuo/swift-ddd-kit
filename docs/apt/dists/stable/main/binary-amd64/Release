@@ -1,0 +1,5 @@
+Component: main
+Origin: swift-ddd-kit
+Label: dddkit
+Architecture: amd64
+Description: APT repository for dddkit, the swift-ddd-kit project scaffolding CLI
