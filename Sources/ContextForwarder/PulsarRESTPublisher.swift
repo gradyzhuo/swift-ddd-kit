@@ -1,0 +1,80 @@
+import AsyncHTTPClient
+import Foundation
+import NIOCore
+
+/// Publishes PL events to Pulsar over the broker's REST produce endpoint —
+/// upstream contexts need ZERO Pulsar client dependency. Topics must exist;
+/// call `ensureTopic()` once at startup.
+public struct PulsarRESTPublisher: PublishedLanguagePublisher {
+
+    public struct Configuration: Sendable {
+        public let baseURL: String     // e.g. http://localhost:8081
+        public let tenant: String
+        public let namespace: String
+        public let topic: String
+
+        public init(baseURL: String, tenant: String = "public", namespace: String = "default", topic: String) {
+            self.baseURL = baseURL
+            self.tenant = tenant
+            self.namespace = namespace
+            self.topic = topic
+        }
+
+        var producePath: String { "\(baseURL)/topics/persistent/\(tenant)/\(namespace)/\(topic)" }
+        var adminPath: String { "\(baseURL)/admin/v2/persistent/\(tenant)/\(namespace)/\(topic)" }
+    }
+
+    public enum PublishError: Error {
+        case unexpectedStatus(UInt, body: String)
+        case encodingFailed
+    }
+
+    private let httpClient: HTTPClient
+    private let configuration: Configuration
+
+    public init(httpClient: HTTPClient, configuration: Configuration) {
+        self.httpClient = httpClient
+        self.configuration = configuration
+    }
+
+    /// Idempotent topic creation (non-partitioned). 204 = created, 409 = exists.
+    public func ensureTopic() async throws {
+        var request = HTTPClientRequest(url: configuration.adminPath)
+        request.method = .PUT
+        let response = try await httpClient.execute(request, timeout: .seconds(10))
+        guard response.status.code == 204 || response.status.code == 409 else {
+            let body = try await response.body.collect(upTo: 4096)
+            throw PublishError.unexpectedStatus(response.status.code, body: String(buffer: body))
+        }
+        // Drain the (empty) success body so AsyncHTTPClient can reuse the connection.
+        _ = try await response.body.collect(upTo: 4096)
+    }
+
+    public func publish(_ event: PublishedLanguageEvent) async throws {
+        let payloadJSON = try PublishedLanguageEvent.wireEncoder.encode(event)
+        guard let payloadString = String(data: payloadJSON, encoding: .utf8) else {
+            throw PublishError.encodingFailed
+        }
+        let envelope: [String: Any] = [
+            "messages": [[
+                "payload": payloadString,
+                "key": event.eventId,
+                "properties": ["eventType": event.eventType],
+            ]]
+        ]
+        let body = try JSONSerialization.data(withJSONObject: envelope)
+
+        var request = HTTPClientRequest(url: configuration.producePath)
+        request.method = .POST
+        request.headers.add(name: "Content-Type", value: "application/json")
+        request.body = .bytes(ByteBuffer(data: body))
+
+        let response = try await httpClient.execute(request, timeout: .seconds(10))
+        guard (200..<300).contains(response.status.code) else {
+            let responseBody = try await response.body.collect(upTo: 4096)
+            throw PublishError.unexpectedStatus(response.status.code, body: String(buffer: responseBody))
+        }
+        // Drain the success body so AsyncHTTPClient can reuse the connection.
+        _ = try await response.body.collect(upTo: 4096)
+    }
+}

@@ -14,6 +14,9 @@ let package = Package(
             name: "DDDKit",
             targets: ["DDDKit"]),
         .library(
+            name: "ContextForwarder",
+            targets: ["ContextForwarder"]),
+        .library(
             name: "TestUtility",
             targets: ["TestUtility"]),
         .library(
@@ -46,6 +49,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.3.0"),
+        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.19.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.5.4"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3"),
@@ -193,6 +197,25 @@ let package = Package(
                 dependencies: [
                     .product(name: "Yams", package: "yams")
                 ]),
+        .target(
+            name: "ContextForwarder",
+            dependencies: [
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            path: "Sources/ContextForwarder"
+        ),
+        .testTarget(
+            name: "ContextForwarderTests",
+            dependencies: ["ContextForwarder"],
+            path: "Tests/ContextForwarderTests"
+        ),
+        .testTarget(
+            name: "ContextForwarderIntegrationTests",
+            dependencies: ["ContextForwarder"],
+            path: "Tests/ContextForwarderIntegrationTests"
+        ),
         .executableTarget(name: "generate",
                           dependencies: [
                             "DomainEventGenerator",
