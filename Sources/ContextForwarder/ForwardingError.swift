@@ -19,9 +19,12 @@ public enum ForwardingDisposition: Equatable, Sendable {
 
     /// Transient unless the error explicitly says otherwise.
     public init(for error: any Error) {
-        if error is ForwardingError {
+        switch error {
+        case ForwardingError.permanent:
             self = .park
-        } else {
+        default:
+            // Transient is the safe default: an unrecognized failure gets
+            // redelivered rather than silently parked.
             self = .retry
         }
     }
