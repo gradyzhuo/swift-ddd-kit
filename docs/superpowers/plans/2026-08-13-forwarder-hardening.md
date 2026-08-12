@@ -649,3 +649,10 @@ git commit -m "feat: ForwarderGroup runs and self-heals multiple forwarders"
 - OC's mount (`OpportunityContext` branch `feature/pl-forwarder`) still depends on the standalone package and uses `record.occurredAt`; migrating it to the kit module + `decodeOccurred()` waits on the human's routing decision.
 - Parked-message *replay* (KurrentDB's replayParked) — monitoring first, remediation tooling later.
 - Real OAuth2 client-credentials implementation (the token provider is the seam; hosts bring their own flow).
+
+## Follow-ups from final review
+
+- **設計變更(在七項裁決之上追加,需 owner 確認):** `.park` 的引入產生了原本不存在的靜默遺失路徑——同一筆事件若前面的 rule 永久失敗,後面的 rule 因為 park 不再投遞而永遠沒機會執行。已改為**逐一嘗試所有命中的 rule、收集失敗後才決定單一 disposition**,優先序 `任一暫時性 → retry`(給暫時性的那條再一次機會;永久性的只是再失敗一次,由 maxRetryCount 收斂)`否則任一永久性 → park`,`皆無失敗 → ack`。若你偏好別的取捨(例如限制「一個事件型別只准一條 rule」),說一聲即可改。
+- ack() 失敗現在會傳出 `consume()`(先前是 nack-then-continue)。現實情境下 ack 失敗代表連線已斷,下一次迭代本來就會拋錯,由 host 的重啟迴圈接手;列為已知的行為變更。
+- OC 掛載遷到 kit 內建模組時,需一併讀 `ForwardedRecord` 的說明(事件時間改由 payload 取)與上述多 rule/park 互動。
+- `ForwarderGroupTests` 的 `>=3` 下界在高負載 CI 有約 40% 餘裕,理論上可能 flake;真的發生時把視窗拉長即可。
