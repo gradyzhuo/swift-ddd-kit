@@ -16,6 +16,22 @@ public struct ContextForwarder: Sendable {
         public var messageTimeout: Duration = .seconds(30)
         public var startFrom: StartPosition = .end
         public enum StartPosition: Sendable { case start, end }
+        /// Deliveries attempted before the server parks the message. Mirrors
+        /// KurrentDB's own default; lower it when a rule's failures are cheap
+        /// to diagnose and expensive to retry.
+        public var maxRetryCount: Int32 = 10
+        public init() {}
+    }
+
+    /// Parked messages stop being delivered silently — nothing throws, nothing
+    /// logs, the downstream simply never receives those events. This poll is
+    /// the only thing that makes that visible.
+    public struct MonitoringSettings: Sendable {
+        /// nil disables the poll entirely.
+        public var parkedCheckInterval: Duration? = .seconds(60)
+        /// Called with the parked count whenever it is greater than zero.
+        /// Defaults to an error-level log line.
+        public var onParkedDetected: (@Sendable (Int64) async -> Void)?
         public init() {}
     }
 
@@ -26,6 +42,7 @@ public struct ContextForwarder: Sendable {
     private let rules: [ForwardingRule]
     private let logger: Logger
     private let subscriptionSettings: SubscriptionSettings
+    private let monitoring: MonitoringSettings
 
     public init(
         client: KurrentDBClient,
@@ -34,6 +51,7 @@ public struct ContextForwarder: Sendable {
         groupName: String,
         rules: [ForwardingRule] = [],
         subscriptionSettings: SubscriptionSettings = .init(),
+        monitoring: MonitoringSettings = .init(),
         logger: Logger = Logger(label: "ContextForwarder")
     ) {
         self.client = client
@@ -42,6 +60,7 @@ public struct ContextForwarder: Sendable {
         self.groupName = groupName
         self.rules = rules
         self.subscriptionSettings = subscriptionSettings
+        self.monitoring = monitoring
         self.logger = logger
     }
 
@@ -50,7 +69,8 @@ public struct ContextForwarder: Sendable {
         ContextForwarder(
             client: client, publisher: publisher, stream: stream,
             groupName: groupName, rules: rules + [rule],
-            subscriptionSettings: subscriptionSettings, logger: logger)
+            subscriptionSettings: subscriptionSettings, monitoring: monitoring,
+            logger: logger)
     }
 
     /// Idempotent: creates the persistent subscription group (resolveLink on,
@@ -69,6 +89,10 @@ public struct ContextForwarder: Sendable {
                 // milliseconds for `CreateSettings.messageTimeout`
                 // (Core/PersistenSubscription/PersistentSubscription.Settings.swift:18,47).
                 $0.settings.messageTimeout = .ms(subscriptionSettings.messageTimeout.milliseconds)
+                // `CreateSettings.maxRetryCount: Int32`
+                // (Core/PersistenSubscription/PersistentSubscription.Settings.swift:20-21),
+                // default 10 — mirrored by `SubscriptionSettings.maxRetryCount`.
+                $0.settings.maxRetryCount = subscriptionSettings.maxRetryCount
                 // `Options.revision: RevisionCursor` (Core/Cursor/RevisionCursor.swift:9-16),
                 // consumed by `SpecifiedStream.Create.Options.build()`
                 // (PersistentSubscriptions/Usecase/Specified/PersistentSubscriptions.SpecifiedStream.Create.swift:71,87-95).
@@ -92,9 +116,23 @@ public struct ContextForwarder: Sendable {
         }
     }
 
+    /// Consumes until cancelled, while polling for parked messages in
+    /// parallel. Either child throwing cancels the other.
+    public func run() async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await self.consume() }
+            if let interval = monitoring.parkedCheckInterval {
+                group.addTask { try await self.pollParked(every: interval) }
+            }
+            // Surface the first failure and tear the sibling down with it.
+            try await group.next()
+            group.cancelAll()
+        }
+    }
+
     /// Consumes until cancelled. Publish THEN ack; failures nack for redelivery.
     /// Records matching no rule are acked immediately (skip).
-    public func run() async throws {
+    private func consume() async throws {
         let subscription = try await client.persistentSubscriptions(stream: stream, group: groupName).subscribe()
         for try await result in subscription.events {
             if Task.isCancelled { return }
@@ -117,6 +155,32 @@ public struct ContextForwarder: Sendable {
                     logger.error("forwarding failed, will retry: \(error)")
                     try await subscription.nack(readEvents: event, action: .retry, reason: "\(error)")
                 }
+            }
+        }
+    }
+
+    /// Polls `getInfo()` (`PersistentSubscriptions+Specified.swift:50`) for
+    /// `parkedMessageCount`
+    /// (`Core/PersistenSubscription/PersistentSubscription.SubscriptionInfo.swift:69`,
+    /// `Int64`) every `interval`, surfacing any parked backlog via
+    /// `onParkedDetected` (or an error-level log by default). A failed poll
+    /// must never take the forwarder down — it's logged and polling continues.
+    private func pollParked(every interval: Duration) async throws {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: interval)
+            if Task.isCancelled { return }
+            do {
+                let info = try await client.persistentSubscriptions(stream: stream, group: groupName).getInfo()
+                let parked = info.parkedMessageCount
+                guard parked > 0 else { continue }
+                if let onParkedDetected = monitoring.onParkedDetected {
+                    await onParkedDetected(parked)
+                } else {
+                    logger.error("\(parked) parked message(s) on \(stream)/\(groupName) — those events are NOT reaching the backbone")
+                }
+            } catch {
+                // A failed poll must never take the forwarder down.
+                logger.warning("parked-message check failed: \(error)")
             }
         }
     }
