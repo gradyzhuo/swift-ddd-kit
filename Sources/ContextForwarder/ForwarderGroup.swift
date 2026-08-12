@@ -36,19 +36,36 @@ public struct ForwarderGroup: Sendable {
     public func run() async throws {
         await withTaskGroup(of: Void.self) { group in
             for forwarder in forwarders {
+                let label = "\(forwarder.streamName)/\(forwarder.subscriptionGroupName)"
                 group.addTask { [restartDelay, logger] in
-                    while !Task.isCancelled {
-                        do {
-                            try await forwarder.run()
-                            logger.warning("forwarder \(forwarder.streamName)/\(forwarder.subscriptionGroupName) stream ended cleanly — restarting in \(restartDelay)")
-                        } catch {
-                            logger.error("forwarder \(forwarder.streamName)/\(forwarder.subscriptionGroupName) stopped: \(error) — restarting in \(restartDelay)")
-                        }
-                        if Task.isCancelled { return }
-                        try? await Task.sleep(for: restartDelay)
+                    await Self.runWithRestart(label: label, restartDelay: restartDelay, logger: logger) {
+                        try await forwarder.run()
                     }
                 }
             }
+        }
+    }
+
+    /// The restart loop, extracted so its semantics are testable without a
+    /// live forwarder. `body` returning normally is NOT "done" — the server
+    /// closes subscription streams cleanly on idle timeout / broker restart /
+    /// LB reset — so both exits back off before retrying.
+    static func runWithRestart(
+        label: String,
+        restartDelay: Duration,
+        logger: Logger,
+        body: @Sendable () async throws -> Void
+    ) async {
+        while !Task.isCancelled {
+            do {
+                try await body()
+                if Task.isCancelled { return }
+                logger.warning("\(label): stream ended cleanly — restarting in \(restartDelay)")
+            } catch {
+                if Task.isCancelled { return }
+                logger.error("\(label): stopped: \(error) — restarting in \(restartDelay)")
+            }
+            try? await Task.sleep(for: restartDelay)
         }
     }
 }
