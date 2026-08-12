@@ -6,6 +6,16 @@ import Logging
 /// KurrentDB (server-side checkpoint — no dual-write), translates matching
 /// events to Published Language, publishes to Pulsar, THEN acks.
 /// At-least-once: downstream dedups on eventId.
+///
+/// **Ack granularity is per delivery, not per rule** (accepted trade-off): if
+/// one record matches several rules and a later rule fails, the whole record is
+/// redelivered and the earlier rules publish again. Consumers dedup on
+/// `eventId`, which absorbs it.
+///
+/// **The loop is strictly sequential** (accepted trade-off): one record at a
+/// time, so throughput is bounded by translate + publish latency. Ordering
+/// within the source stream is preserved, which is the property worth keeping;
+/// revisit only if a high-frequency stream ever needs forwarding.
 public struct ContextForwarder: Sendable {
     /// Subscription creation settings. Defaults chosen for forwarding work
     /// (host lookups + an HTTP publish per event): 30s message timeout —
@@ -40,6 +50,15 @@ public struct ContextForwarder: Sendable {
     private let stream: String
     private let groupName: String
     private let rules: [ForwardingRule]
+
+    /// The source stream this forwarder subscribes to. Read-only; exposed so
+    /// callers running several forwarders side by side (see `ForwarderGroup`)
+    /// can identify which one logged what.
+    public var streamName: String { stream }
+
+    /// The persistent-subscription group name this forwarder consumes from.
+    /// Read-only, for the same reason as `streamName`.
+    public var subscriptionGroupName: String { groupName }
     private let logger: Logger
     private let subscriptionSettings: SubscriptionSettings
     private let monitoring: MonitoringSettings
