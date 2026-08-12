@@ -33,7 +33,10 @@ struct ParkedMonitorTests {
 
         var subscriptionSettings = ContextForwarder.SubscriptionSettings()
         subscriptionSettings.startFrom = .start        // the seed is appended first
-        subscriptionSettings.maxRetryCount = 1         // park fast
+        // Permanent errors park immediately — there's no retry loop for
+        // maxRetryCount to bound. It's set low here only as a belt-and-braces
+        // cap in case this failure were ever (mis)classified as transient.
+        subscriptionSettings.maxRetryCount = 1
         var monitoring = ContextForwarder.MonitoringSettings()
         monitoring.parkedCheckInterval = .milliseconds(300)
         monitoring.onParkedDetected = { count in await recorder.record(count) }

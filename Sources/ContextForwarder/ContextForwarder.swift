@@ -7,10 +7,12 @@ import Logging
 /// events to Published Language, publishes to Pulsar, THEN acks.
 /// At-least-once: downstream dedups on eventId.
 ///
-/// **Ack granularity is per delivery, not per rule** (accepted trade-off): if
-/// one record matches several rules and a later rule fails, the whole record is
-/// redelivered and the earlier rules publish again. Consumers dedup on
-/// `eventId`, which absorbs it.
+/// **Ack granularity is per delivery, not per rule** (accepted trade-off): all
+/// rules matching a record are attempted, then ONE disposition covers the whole
+/// record. A retry therefore re-publishes rules that already succeeded —
+/// consumers dedup on `eventId`, which absorbs it. A record is parked only when
+/// every failure is permanent, so a healthy rule is never stranded by a broken
+/// sibling.
 ///
 /// **The loop is strictly sequential** (accepted trade-off): one record at a
 /// time, so throughput is bounded by translate + publish latency. Ordering
@@ -136,7 +138,9 @@ public struct ContextForwarder: Sendable {
     }
 
     /// Consumes until cancelled, while polling for parked messages in
-    /// parallel. Either child throwing cancels the other.
+    /// parallel. The first child to finish — whether by throwing or by
+    /// returning normally — tears the other down; neither is expected to
+    /// return on its own outside of cancellation.
     public func run() async throws {
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask { try await self.consume() }
@@ -149,31 +153,48 @@ public struct ContextForwarder: Sendable {
         }
     }
 
-    /// Consumes until cancelled. Publish THEN ack; failures nack for redelivery.
-    /// Records matching no rule are acked immediately (skip).
+    /// Consumes until cancelled. Every rule matching a record is attempted —
+    /// even after one fails — because a parked record is never redelivered,
+    /// so a later rule's turn right now is its only chance to translate this
+    /// record; letting one broken rule strand a healthy sibling would be a
+    /// silent-loss path. Failures are collected and reduced to ONE disposition
+    /// for the whole record via `ForwardingDisposition(forAnyOf:)`: any
+    /// transient failure retries (redelivery is the transient rule's only path
+    /// to success; a permanent one just fails again, bounded by
+    /// `maxRetryCount`), else any permanent failure parks, else the record is
+    /// acked. A retry re-publishes rules that already succeeded on this
+    /// delivery — consumers dedup on `eventId`, which absorbs it. Records
+    /// matching no rule are acked immediately (skip).
     private func consume() async throws {
         let subscription = try await client.persistentSubscriptions(stream: stream, group: groupName).subscribe()
         for try await result in subscription.events {
             if Task.isCancelled { return }
             let event = result.event
-            do {
-                let record = ForwardedRecord(from: event)
-                for rule in rules where rule.eventTypes.contains(record.eventType) {
+            let record = ForwardedRecord(from: event)
+            var failures: [any Error] = []
+            for rule in rules where rule.eventTypes.contains(record.eventType) {
+                do {
                     if let published = try await rule.translate(record) {
                         try await publisher.publish(published)
-                        logger.info("forwarded \(record.eventType) -> \(published.eventType) (\(published.eventId))")
+                        logger.info("\(stream)/\(groupName): forwarded \(record.eventType) -> \(published.eventType) (\(published.eventId))")
                     }
+                } catch {
+                    // Keep going: a later rule may be perfectly healthy, and a
+                    // parked record is never redelivered — this is its only chance.
+                    failures.append(error)
                 }
+            }
+            switch ForwardingDisposition(forAnyOf: failures) {
+            case nil:
                 try await subscription.ack(readEvents: event)
-            } catch {
-                switch ForwardingDisposition(for: error) {
-                case .park:
-                    logger.error("forwarding permanently failed, parking: \(error)")
-                    try await subscription.nack(readEvents: event, action: .park, reason: "\(error)")
-                case .retry:
-                    logger.error("forwarding failed, will retry: \(error)")
-                    try await subscription.nack(readEvents: event, action: .retry, reason: "\(error)")
-                }
+            case .retry:
+                // Routine under at-least-once — a healthy redelivery path, not
+                // an operator page. `.park` below is the one that needs eyes.
+                logger.warning("\(stream)/\(groupName): forwarding failed (\(failures.count) rule failure(s)), will retry: \(failures)")
+                try await subscription.nack(readEvents: event, action: .retry, reason: "\(failures)")
+            case .park:
+                logger.error("\(stream)/\(groupName): forwarding permanently failed (\(failures.count) rule failure(s)), parking: \(failures)")
+                try await subscription.nack(readEvents: event, action: .park, reason: "\(failures)")
             }
         }
     }
@@ -184,6 +205,11 @@ public struct ContextForwarder: Sendable {
     /// `Int64`) every `interval`, surfacing any parked backlog via
     /// `onParkedDetected` (or an error-level log by default). A failed poll
     /// must never take the forwarder down — it's logged and polling continues.
+    /// `throws` here is structural, not functional: the body never actually
+    /// throws (poll failures are caught and logged below), but the signature
+    /// keeps this task's type uniform with `consume()`'s inside the
+    /// `withThrowingTaskGroup.addTask { try await … }` in `run()`. Don't
+    /// "simplify" it away.
     private func pollParked(every interval: Duration) async throws {
         while !Task.isCancelled {
             try? await Task.sleep(for: interval)
