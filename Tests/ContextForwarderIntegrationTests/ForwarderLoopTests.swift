@@ -19,6 +19,7 @@ struct ForwarderLoopTests {
     private struct TestBody: Codable {
         let collaboratorId: String
         let role: String
+        let occurred: Date
     }
 
     @Test("translates and publishes a matching event, then acks (live delivery)")
@@ -43,7 +44,7 @@ struct ForwarderLoopTests {
             return PublishedLanguageEvent(
                 eventId: record.eventId,
                 eventType: "OpportunityCollaboratorAdded.v1",
-                occurredAt: record.occurredAt,
+                occurredAt: try record.decodeOccurred(),
                 recipientIds: [decoded.collaboratorId],
                 payload: ["role": decoded.role])
         })
@@ -59,7 +60,7 @@ struct ForwarderLoopTests {
         // Seed one matching event (raw append via the streams API; model-encoding
         // EventData initializer — see swift-kurrentdb's EventData.swift).
         try await client.streams(specified: streamName).append(events: [
-            EventData(eventType: "CollaboratorAdded", model: TestBody(collaboratorId: "acc-1", role: "editor"))
+            EventData(eventType: "CollaboratorAdded", model: TestBody(collaboratorId: "acc-1", role: "editor", occurred: Date()))
         ])
 
         let runner = Task { try await forwarder.run() }

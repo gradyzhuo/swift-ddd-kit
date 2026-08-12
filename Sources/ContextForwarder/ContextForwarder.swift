@@ -109,8 +109,14 @@ public struct ContextForwarder: Sendable {
                 }
                 try await subscription.ack(readEvents: event)
             } catch {
-                logger.error("forwarding failed: \(error)")
-                try await subscription.nack(readEvents: event, action: .retry, reason: "\(error)")
+                switch ForwardingDisposition(for: error) {
+                case .park:
+                    logger.error("forwarding permanently failed, parking: \(error)")
+                    try await subscription.nack(readEvents: event, action: .park, reason: "\(error)")
+                case .retry:
+                    logger.error("forwarding failed, will retry: \(error)")
+                    try await subscription.nack(readEvents: event, action: .retry, reason: "\(error)")
+                }
             }
         }
     }
@@ -130,7 +136,6 @@ extension Duration {
 extension ForwardedRecord {
     /// Maps a persistent-subscription delivery to the kit-agnostic record.
     ///
-    /// Adaptation notes (see task-2-report.md for the full citation trail):
     /// - `event` here is a `ReadEvent` (swift-kurrentdb
     ///   `Sources/KurrentDB/Core/Event/ReadEvent.swift`), exposing `record`
     ///   (the resolved `RecordedEvent`) and an optional `link` (the raw link
@@ -139,19 +144,12 @@ extension ForwardedRecord {
     ///   subscription-create time (confirmed in
     ///   `PersistentSubscriptions.SpecifiedStream.Create.swift` /
     ///   `PersistentSubscription.CreateSettings`).
-    /// - `RecordedEvent` (`Sources/KurrentDB/Core/Event/RecordedEvent.swift`)
-    ///   carries `id: UUID`, `eventType: String`, `streamIdentifier`, `data`
-    ///   — but no created-timestamp field at all (checked the whole file and
-    ///   its two `init(message:)` overloads). There is nothing to fall back
-    ///   from; `occurredAt` is always `Date()` (capture time) until
-    ///   swift-kurrentdb exposes a server timestamp.
     init(from event: ReadEvent) {
         let record = event.record
         self.init(
             eventType: record.eventType,
             streamName: record.streamIdentifier.name,
             eventId: record.id.uuidString,
-            data: record.data,
-            occurredAt: Date())
+            data: record.data)
     }
 }
