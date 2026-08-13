@@ -33,7 +33,7 @@ struct PulsarPublisherTests {
         statsRequest.method = .GET
         let response = try await HTTPClient.shared.execute(statsRequest, timeout: .seconds(10))
         let body = try await response.body.collect(upTo: 1 << 16)
-        let stats = try JSONSerialization.jsonObject(with: Data(buffer: body)) as? [String: Any]
+        let stats = try JSONSerialization.jsonObject(with: Data(body.readableBytesView)) as? [String: Any]
         let entriesAdded = (stats?["entriesAddedCounter"] as? Int) ?? 0
         #expect(entriesAdded >= 2)
     }

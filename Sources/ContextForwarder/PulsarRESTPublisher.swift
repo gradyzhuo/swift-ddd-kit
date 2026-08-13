@@ -93,7 +93,11 @@ public struct PulsarRESTPublisher: PublishedLanguagePublisher {
         if let authorization = try await configuration.authorizationHeader() {
             request.headers.add(name: "Authorization", value: authorization)
         }
-        request.body = .bytes(ByteBuffer(data: body))
+        // ByteBuffer(bytes:) is NIOCore; ByteBuffer(data:) lives in
+        // NIOFoundationCompat, which is only implicitly available on some
+        // platforms — using it broke the Linux build (Data is a Sequence<UInt8>,
+        // so bytes: is the portable spelling).
+        request.body = .bytes(ByteBuffer(bytes: body))
 
         let response = try await httpClient.execute(request, timeout: .seconds(10))
         guard (200..<300).contains(response.status.code) else {
