@@ -1,3 +1,5 @@
+import PublishedLanguage
+
 /// One declarative forwarding registration: which raw event types to inspect,
 /// and how to turn one into a Published Language event. Returning nil skips
 /// the record (inspected, judged not notification-worthy). The closure runs

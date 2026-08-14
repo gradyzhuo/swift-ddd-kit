@@ -17,6 +17,9 @@ let package = Package(
             name: "ContextForwarder",
             targets: ["ContextForwarder"]),
         .library(
+            name: "PublishedLanguage",
+            targets: ["PublishedLanguage"]),
+        .library(
             name: "TestUtility",
             targets: ["TestUtility"]),
         .library(
@@ -198,8 +201,11 @@ let package = Package(
                     .product(name: "Yams", package: "yams")
                 ]),
         .target(
+            name: "PublishedLanguage"),
+        .target(
             name: "ContextForwarder",
             dependencies: [
+                "PublishedLanguage",
                 .product(name: "KurrentDB", package: "swift-kurrentdb"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "Logging", package: "swift-log"),

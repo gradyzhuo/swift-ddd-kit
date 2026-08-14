@@ -13,14 +13,23 @@ public struct PublishedLanguageEvent: Codable, Equatable, Sendable {
     public let recipientIds: [String]
     /// Template parameters — flat string map (schema-evolution friendly).
     public let payload: [String: String]
+    /// Pulsar partition key. `Key_Shared` guarantees ordering per key, so hosts
+    /// that need per-aggregate ordering set this to the aggregate id. Optional
+    /// for wire compatibility; falls back to `eventId`, which yields a unique
+    /// key per message and therefore no ordering guarantee.
+    public let partitionKey: String?
 
-    public init(eventId: String, eventType: String, occurredAt: Date, recipientIds: [String], payload: [String: String]) {
+    public init(eventId: String, eventType: String, occurredAt: Date, recipientIds: [String], payload: [String: String], partitionKey: String? = nil) {
         self.eventId = eventId
         self.eventType = eventType
         self.occurredAt = occurredAt
         self.recipientIds = recipientIds
         self.payload = payload
+        self.partitionKey = partitionKey
     }
+
+    /// The key actually sent to Pulsar.
+    public var effectivePartitionKey: String { partitionKey ?? eventId }
 
     public static let wireEncoder: JSONEncoder = {
         let encoder = JSONEncoder()

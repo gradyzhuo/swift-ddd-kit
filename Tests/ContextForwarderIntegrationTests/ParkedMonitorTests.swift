@@ -1,5 +1,6 @@
 import Foundation
 import KurrentDB
+import PublishedLanguage
 import Testing
 @testable import ContextForwarder
 

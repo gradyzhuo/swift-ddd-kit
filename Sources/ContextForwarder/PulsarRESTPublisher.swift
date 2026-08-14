@@ -1,6 +1,7 @@
 import AsyncHTTPClient
 import Foundation
 import NIOCore
+import PublishedLanguage
 
 /// Publishes PL events to Pulsar over the broker's REST produce endpoint —
 /// upstream contexts need ZERO Pulsar client dependency. Topics must exist;
