@@ -69,4 +69,14 @@ struct ConsumerFrameTests {
         #expect(record.redeliveryCount == 3)
         #expect(record.isRedelivery)
     }
+
+    /// `publishTime` is decoded on `ConsumerFrame` but was previously dropped
+    /// on the floor at `ReceivedRecord` construction, leaving a host with no
+    /// way to compute produce-to-consume latency from a field the transport
+    /// already parses.
+    @Test func recordSurfacesPublishTime() throws {
+        let frame = try ConsumerFrame(json: frameJSON(payload: eventPayloadBase64))
+        let record = ReceivedRecord(frame: frame, event: try frame.decodedEvent())
+        #expect(record.publishTime == "2026-08-14T01:02:03.000Z")
+    }
 }

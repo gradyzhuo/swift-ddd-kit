@@ -119,3 +119,35 @@ public struct PulsarRESTPublisher: PublishedLanguagePublisher {
         _ = try await response.body.collect(upTo: 4096)
     }
 }
+
+extension PulsarRESTPublisher.PublishError {
+    /// This is not `ForwardingRule`-authored — it comes from the transport
+    /// itself — so it needs its own classification to reach
+    /// `ForwardingDisposition(for:)` rather than falling through to the
+    /// unrecognized-error default of `.retry`. Without this, a Pulsar 400
+    /// (malformed payload) or 404 (unknown topic) would burn the full
+    /// `maxRetryCount` redelivery budget and log noise before the KurrentDB
+    /// subscription eventually parks it server-side — knowable as permanent
+    /// on the very first attempt.
+    var disposition: ForwardingDisposition {
+        switch self {
+        case .encodingFailed:
+            // The event could not even be serialized; retrying encodes the
+            // exact same bytes and fails the exact same way.
+            return .park
+        case .unexpectedStatus(let status, _):
+            switch status {
+            // 408 (Request Timeout) and 429 (Too Many Requests) are the two
+            // 4xx codes that genuinely mean "try again" — everything else in
+            // the 4xx range describes a request that will never succeed as
+            // sent. 5xx (and anything outside 4xx) stays retryable.
+            case 408, 429:
+                return .retry
+            case 400..<500:
+                return .park
+            default:
+                return .retry
+            }
+        }
+    }
+}

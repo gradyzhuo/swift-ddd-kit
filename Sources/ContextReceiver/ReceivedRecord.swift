@@ -8,6 +8,12 @@ public struct ReceivedRecord: Sendable {
     public let redeliveryCount: Int
     public let key: String?
     public let properties: [String: String]
+    /// Broker-reported publish time, passed through verbatim from
+    /// `ConsumerFrame.publishTime`. Left as the raw wire string rather than
+    /// parsed into a `Date`: Pulsar's exact format for this field has not
+    /// been verified, and a host that wants produce-to-consume latency can
+    /// parse it with whatever tolerance it needs.
+    public let publishTime: String?
 
     /// True when the broker has delivered this message before. Hosts rely on
     /// deterministic aggregate ids for idempotency; this only informs logging
@@ -20,5 +26,6 @@ public struct ReceivedRecord: Sendable {
         self.redeliveryCount = frame.redeliveryCount
         self.key = frame.key
         self.properties = frame.properties
+        self.publishTime = frame.publishTime
     }
 }

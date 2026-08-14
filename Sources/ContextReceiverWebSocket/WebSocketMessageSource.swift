@@ -7,26 +7,39 @@ import WSClient
 
 /// Pulsar WebSocket consumer transport backed by a single socket.
 ///
-/// Lifetime contract: **one instance is exactly one socket session.**
-/// `run()` connects once. On a clean close it finishes `frames()` normally
-/// and returns; on a transport failure it finishes `frames()` by throwing
-/// that same error and rethrows it from `run()` — this matches
+/// Lifetime contract: **one instance is single-use.** `run()` may be called
+/// exactly once; a second call throws `ReceiveError.transportUnavailable`
+/// immediately rather than attempting another connection or silently
+/// reusing state. On a clean close, that one `run()` finishes `frames()`
+/// normally and returns; on a transport failure it finishes `frames()` by
+/// throwing that same error and rethrows it — this matches
 /// `PulsarMessageSource.frames()`'s documented contract exactly.
 ///
-/// It never reconnects internally. Pulsar's WebSocket consumer is pull-mode:
-/// a reconnect opens a brand-new broker-side subscription session whose
-/// permit budget starts at zero. Only the host can correctly recover from
-/// that, because only the host (`ContextReceiver.run()`) knows to re-grant
-/// `initialPermits` — this actor has no way to tell the runner a new session
-/// started underneath it. So supervision (backoff, discarding this instance,
-/// constructing a fresh one, re-running both `run()` calls together) belongs
-/// to the host, not here.
+/// It never reconnects internally, and it must never be retried by calling
+/// `run()` again on the same instance. Pulsar's WebSocket consumer is
+/// pull-mode: a reconnect opens a brand-new broker-side subscription session
+/// whose permit budget starts at zero. Only the host can correctly recover
+/// from that, because only the host (`ContextReceiver.run()`) knows to
+/// re-grant `initialPermits` — this actor has no way to tell the runner a
+/// new session started underneath it. Reusing one instance would in fact be
+/// *worse* than that stall: `stream`/`continuation` are created once and
+/// `frames()` always returns the same one, so a second `run()` after the
+/// first has finished would reconnect a live socket underneath an already-
+/// finished stream — every subsequent `yield` becomes a silent no-op, and
+/// the host's `for try await` loop has already exited looking like a clean
+/// shutdown while the broker drops messages into a socket nobody is
+/// listening to. So supervision means **discard this instance and construct
+/// a new one** — backoff and re-granting initial permits belong to that
+/// supervising host, never to a retried call on this actor.
 public actor WebSocketMessageSource: PulsarMessageSource {
     private let endpoint: ConsumerEndpoint
     private let authorizationHeader: @Sendable () async throws -> String?
     private let logger: Logger
 
     private var outbound: WebSocketOutboundWriter?
+    /// Guards against a second `run()` call reusing an already-finished
+    /// `stream`/`continuation` pair. See the type doc.
+    private var hasStarted = false
     private nonisolated let stream: AsyncThrowingStream<ConsumerFrame, any Error>
     private nonisolated let continuation: AsyncThrowingStream<ConsumerFrame, any Error>.Continuation
 
@@ -66,8 +79,19 @@ public actor WebSocketMessageSource: PulsarMessageSource {
     }
 
     /// Connects once and pumps frames until the socket closes or fails. Does
-    /// not reconnect — see the type doc for the supervision contract.
+    /// not reconnect, and must not be called again after it returns or
+    /// throws — see the type doc for the supervision contract.
     public func run() async throws {
+        // Checked (and set) before the `defer` below is even registered: a
+        // second call must throw immediately, never register another
+        // `finish` against a stream that already finished on the first call.
+        guard !hasStarted else {
+            throw ReceiveError.transportUnavailable(
+                "WebSocketMessageSource is single-use; construct a new instance to reconnect"
+            )
+        }
+        hasStarted = true
+
         defer { continuation.finish() }
         do {
             try await connectOnce()

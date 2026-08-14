@@ -49,5 +49,37 @@ struct WebSocketMessageSourceReadinessTests {
             )
         }
     }
+
+    /// Proves reuse fails loudly instead of silently dropping every message
+    /// after the first `run()`. Without the single-use guard, a second
+    /// `run()` would instead attempt another connection to this same
+    /// unreachable port and throw a transport-level error that is NOT
+    /// `ReceiveError.transportUnavailable` naming reuse — so this test
+    /// distinguishes the guarded behaviour from the unguarded one, it does
+    /// not merely pass either way.
+    @Test func secondRunThrowsRatherThanSilentlyReusingState() async throws {
+        let endpoint = ConsumerEndpoint(
+            baseURL: "ws://127.0.0.1:1", tenant: "public", namespace: "default",
+            topic: "unused", subscription: "unused"
+        )
+        let source = WebSocketMessageSource(endpoint: endpoint, logger: Logger(label: "single-use-test"))
+
+        // First call: connecting to a port nothing listens on always fails,
+        // but that failure is incidental to this test. What matters is that
+        // `run()` marks the instance started synchronously on entry.
+        _ = try? await source.run()
+
+        do {
+            try await source.run()
+            Issue.record("second run() must throw, not silently reconnect")
+        } catch ReceiveError.transportUnavailable(let reason) {
+            #expect(
+                reason.contains("single-use"),
+                "expected the single-use guard's message, got: \(reason)"
+            )
+        } catch {
+            Issue.record("expected ReceiveError.transportUnavailable naming reuse, got \(error)")
+        }
+    }
 }
 #endif

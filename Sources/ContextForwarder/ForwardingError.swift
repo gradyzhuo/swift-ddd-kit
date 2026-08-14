@@ -30,6 +30,8 @@ public enum ForwardingDisposition: Equatable, Sendable {
     public init(for error: any Error) {
         if let forwarding = error as? ForwardingError {
             self = forwarding.disposition
+        } else if let publish = error as? PulsarRESTPublisher.PublishError {
+            self = publish.disposition
         } else {
             // Transient is the safe default: an unrecognized failure gets
             // redelivered rather than silently parked.
