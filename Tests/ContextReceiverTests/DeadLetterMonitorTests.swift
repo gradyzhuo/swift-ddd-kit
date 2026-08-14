@@ -33,6 +33,23 @@ struct DeadLetterMonitorTests {
         #expect(await sink.alerts == [7])
     }
 
+    /// Pins the `>=` boundary itself: `alertsWhenBacklogCrossesThreshold` uses
+    /// backlog 7 against threshold 5, which passes under `>` just as well as
+    /// `>=`. At the default `threshold: 1`, a `>` regression would silently
+    /// require a second dead-lettered message before alerting — exactly the
+    /// silence this component exists to prevent.
+    @Test func alertsWhenBacklogExactlyEqualsThreshold() async throws {
+        let probe = StubProbe(counts: [1])
+        let sink = AlertSink()
+        let monitor = DeadLetterMonitor(
+            probe: probe, topic: "t-DLQ", interval: .milliseconds(1),
+            threshold: 1, maxChecks: 1, logger: logger,
+            onAlert: { await sink.record($0) }
+        )
+        try await monitor.run()
+        #expect(await sink.alerts == [1])
+    }
+
     @Test func staysSilentBelowThreshold() async throws {
         let probe = StubProbe(counts: [0, 1])
         let sink = AlertSink()
