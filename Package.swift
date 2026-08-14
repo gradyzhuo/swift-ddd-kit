@@ -20,6 +20,9 @@ let package = Package(
             name: "PublishedLanguage",
             targets: ["PublishedLanguage"]),
         .library(
+            name: "ContextReceiver",
+            targets: ["ContextReceiver"]),
+        .library(
             name: "TestUtility",
             targets: ["TestUtility"]),
         .library(
@@ -221,6 +224,20 @@ let package = Package(
             name: "ContextForwarderIntegrationTests",
             dependencies: ["ContextForwarder", "PublishedLanguage"],
             path: "Tests/ContextForwarderIntegrationTests"
+        ),
+        .target(
+            name: "ContextReceiver",
+            dependencies: [
+                "PublishedLanguage",
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            path: "Sources/ContextReceiver"
+        ),
+        .testTarget(
+            name: "ContextReceiverTests",
+            dependencies: ["ContextReceiver", "PublishedLanguage"],
+            path: "Tests/ContextReceiverTests"
         ),
         .executableTarget(name: "generate",
                           dependencies: [
