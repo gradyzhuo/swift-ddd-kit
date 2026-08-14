@@ -23,6 +23,9 @@ let package = Package(
             name: "ContextReceiver",
             targets: ["ContextReceiver"]),
         .library(
+            name: "ContextReceiverWebSocket",
+            targets: ["ContextReceiverWebSocket"]),
+        .library(
             name: "TestUtility",
             targets: ["TestUtility"]),
         .library(
@@ -64,6 +67,13 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3"),
         .package(url: "https://github.com/apple/swift-async-algorithms.git", from: "1.0.4"),
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.21.0"),
+        // Pinned to upstream. Does not build on the macOS 26 SDK (missing @available
+        // on ByteBuffer.init(_uint8Span:)); Linux is verified clean on Swift 6.2.4.
+        // This is why the WebSocket transport is its own target — every other target
+        // and all unit tests stay buildable on macOS.
+        .package(url: "https://github.com/hummingbird-project/swift-websocket.git", from: "1.6.1"),
+        // HTTPFields carries the Authorization header into WebSocketClientConfiguration.
+        .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -246,6 +256,21 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
             ],
             path: "Tests/ContextReceiverTests"
+        ),
+        .target(
+            name: "ContextReceiverWebSocket",
+            dependencies: [
+                "ContextReceiver",
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                // Platform-conditional so macOS never compiles swift-websocket (or its
+                // HTTPTypes header type) at all. Without the condition, `swift build`
+                // on macOS fails for the whole package — including for
+                // OpportunityContext developers who never touch the receiver.
+                .product(name: "WSClient", package: "swift-websocket", condition: .when(platforms: [.linux])),
+                .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(platforms: [.linux])),
+            ],
+            path: "Sources/ContextReceiverWebSocket"
         ),
         .executableTarget(name: "generate",
                           dependencies: [
