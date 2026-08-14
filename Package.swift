@@ -214,12 +214,12 @@ let package = Package(
         ),
         .testTarget(
             name: "ContextForwarderTests",
-            dependencies: ["ContextForwarder"],
+            dependencies: ["ContextForwarder", "PublishedLanguage"],
             path: "Tests/ContextForwarderTests"
         ),
         .testTarget(
             name: "ContextForwarderIntegrationTests",
-            dependencies: ["ContextForwarder"],
+            dependencies: ["ContextForwarder", "PublishedLanguage"],
             path: "Tests/ContextForwarderIntegrationTests"
         ),
         .executableTarget(name: "generate",
