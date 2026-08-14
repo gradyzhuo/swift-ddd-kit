@@ -2,6 +2,12 @@ import Foundation
 import Testing
 @testable import ContextReceiver
 
+/// Thrown by `FakeMessageSource.settle` for message ids named in
+/// `failingSettleMessageIds`, simulating e.g. a dropped socket mid-settlement.
+struct FakeSettleFailure: Error, Sendable {
+    let messageId: String
+}
+
 actor FakeMessageSource: PulsarMessageSource {
     // `nonisolated let` so `frames()` can read them without hopping onto the
     // actor — an `await` on an immutable Sendable property is a warning.
@@ -10,12 +16,21 @@ actor FakeMessageSource: PulsarMessageSource {
     /// `& Sendable` is required: a bare `any Error` is not Sendable and cannot
     /// be held in a `nonisolated let`.
     private nonisolated let failure: (any Error & Sendable)?
+    /// Message ids for which `settle` throws instead of recording. Lets tests
+    /// prove the runner survives a settle failure without stranding the rest
+    /// of the batch, since a `Settlement` is only ever appended on success.
+    private nonisolated let failingSettleMessageIds: Set<String>
     private(set) var settlements: [Settlement] = []
     private(set) var grantedPermits = 0
 
-    init(frames: [ConsumerFrame], failure: (any Error & Sendable)? = nil) {
+    init(
+        frames: [ConsumerFrame],
+        failure: (any Error & Sendable)? = nil,
+        failingSettleMessageIds: Set<String> = []
+    ) {
         self.queued = frames
         self.failure = failure
+        self.failingSettleMessageIds = failingSettleMessageIds
     }
 
     nonisolated func frames() -> AsyncThrowingStream<ConsumerFrame, any Error> {
@@ -30,6 +45,9 @@ actor FakeMessageSource: PulsarMessageSource {
     }
 
     func settle(messageId: String, as disposition: ReceiveDisposition) async throws {
+        if failingSettleMessageIds.contains(messageId) {
+            throw FakeSettleFailure(messageId: messageId)
+        }
         settlements.append(Settlement(messageId: messageId, disposition: disposition))
     }
 

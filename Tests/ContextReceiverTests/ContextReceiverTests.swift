@@ -91,6 +91,26 @@ struct ContextReceiverTests {
         #expect(await handler.handled.first?.isRedelivery == true)
     }
 
+    /// A settle failure must not abort the loop: the broker will redeliver on
+    /// ack-timeout, so it is recoverable, and aborting would strand every
+    /// message still queued behind it. This also pins the decision that
+    /// permits are refilled on settle *attempts*, not just successes — with
+    /// `permitRefillThreshold = 1`, a refill fires after m-1's failed settle
+    /// too, so `grantedPermits` only comes out to 3 if the failed attempt
+    /// still counted.
+    @Test func survivesSettleFailureWithoutStrandingLaterMessages() async throws {
+        let frames = try (1...3).map { try frame(id: "m-\($0)", eventId: "e-\($0)") }
+        let source = FakeMessageSource(frames: frames, failingSettleMessageIds: ["m-1"])
+        let handler = RecordingHandler()
+        var flow = ContextReceiver.FlowSettings()
+        flow.initialPermits = 0
+        flow.permitRefillThreshold = 1
+        try await ContextReceiver(source: source, handler: handler, flow: flow, logger: logger).run()
+        #expect(await handler.handledIds == ["e-1", "e-2", "e-3"])
+        #expect(await source.settlements.map(\.messageId) == ["m-2", "m-3"])
+        #expect(await source.grantedPermits == 3)
+    }
+
     @Test func propagatesTransportFailure() async throws {
         struct Dropped: Error {}
         let source = FakeMessageSource(frames: [], failure: Dropped())

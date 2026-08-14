@@ -48,6 +48,11 @@ public struct ContextReceiver: Sendable {
                 ])
             }
 
+            // Count settle *attempts*, not just successes: permits are the
+            // broker's flow-control quota, not an ack ledger. If a failed
+            // settle didn't count here, the permit window would shrink
+            // permanently every time a settle fails, eventually starving the
+            // consumer into receiving nothing at all.
             settledSinceRefill += 1
             if settledSinceRefill >= flow.permitRefillThreshold {
                 try await source.grantPermits(settledSinceRefill)

@@ -236,7 +236,10 @@ let package = Package(
         ),
         .testTarget(
             name: "ContextReceiverTests",
-            dependencies: ["ContextReceiver", "PublishedLanguage"],
+            dependencies: [
+                "ContextReceiver", "PublishedLanguage",
+                .product(name: "Logging", package: "swift-log"),
+            ],
             path: "Tests/ContextReceiverTests"
         ),
         .executableTarget(name: "generate",
