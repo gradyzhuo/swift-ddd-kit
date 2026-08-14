@@ -271,6 +271,28 @@ let package = Package(
             ],
             path: "Sources/ContextReceiverWebSocket"
         ),
+        .testTarget(
+            name: "ContextReceiverWebSocketTests",
+            dependencies: [
+                "ContextReceiver",
+                .target(name: "ContextReceiverWebSocket", condition: .when(platforms: [.linux])),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            path: "Tests/ContextReceiverWebSocketTests"
+        ),
+        .testTarget(
+            name: "ContextReceiverIntegrationTests",
+            dependencies: [
+                "ContextReceiver",
+                "ContextForwarder",
+                "PublishedLanguage",
+                .target(name: "ContextReceiverWebSocket", condition: .when(platforms: [.linux])),
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "NIOCore", package: "swift-nio"),
+            ],
+            path: "Tests/ContextReceiverIntegrationTests"
+        ),
         .executableTarget(name: "generate",
                           dependencies: [
                             "DomainEventGenerator",

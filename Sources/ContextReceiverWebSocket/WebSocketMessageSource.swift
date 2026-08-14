@@ -30,13 +30,19 @@ public actor WebSocketMessageSource: PulsarMessageSource {
     private nonisolated let stream: AsyncThrowingStream<ConsumerFrame, any Error>
     private nonisolated let continuation: AsyncThrowingStream<ConsumerFrame, any Error>.Continuation
 
+    /// Bound on `grantPermits`' wait for a live socket. See `waitForSocketReady`.
+    private let readinessTimeout: Duration
+    private static let readinessPollInterval: Duration = .milliseconds(50)
+
     public init(
         endpoint: ConsumerEndpoint,
         authorizationHeader: @escaping @Sendable () async throws -> String? = { nil },
+        readinessTimeout: Duration = .seconds(10),
         logger: Logger
     ) {
         self.endpoint = endpoint
         self.authorizationHeader = authorizationHeader
+        self.readinessTimeout = readinessTimeout
         self.logger = logger
         (self.stream, self.continuation) = AsyncThrowingStream.makeStream()
     }
@@ -151,8 +157,35 @@ public actor WebSocketMessageSource: PulsarMessageSource {
         }
     }
 
+    /// Permits are meaningless before a broker session exists. `run()` and the
+    /// host granting initial permits are started as sibling tasks with no
+    /// other ordering guarantee, so throwing immediately here (as `settle`
+    /// does) would spuriously fail startup almost every time — the socket
+    /// simply hasn't connected yet. Waiting, bounded, is the correct
+    /// behaviour; a settle failure, in contrast, means a session that
+    /// existed has already ended, which the caller already handles.
     public func grantPermits(_ count: Int) async throws {
+        try await waitForSocketReady()
         try await send(ConsumerCommand.permit(count: count).json)
+    }
+
+    /// Polls actor-isolated state rather than registering a continuation:
+    /// with no external timer/reactor to drive resumption, a poll loop
+    /// cannot leak or double-resume, which a hand-rolled continuation
+    /// paired with a race against a timeout task would risk getting wrong.
+    /// Bounded so a socket that never arrives (bad endpoint, broker down,
+    /// `run()` never started) fails loudly instead of hanging the caller.
+    private func waitForSocketReady() async throws {
+        guard outbound == nil else { return }
+        let deadline = ContinuousClock.now.advanced(by: readinessTimeout)
+        while outbound == nil {
+            guard ContinuousClock.now < deadline else {
+                throw ReceiveError.transportUnavailable(
+                    "no socket became ready within \(readinessTimeout)"
+                )
+            }
+            try await Task.sleep(for: Self.readinessPollInterval)
+        }
     }
 
     private func send(_ json: String) async throws {
