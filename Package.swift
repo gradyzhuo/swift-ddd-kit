@@ -231,12 +231,19 @@ let package = Package(
         ),
         .testTarget(
             name: "ContextForwarderTests",
-            dependencies: ["ContextForwarder", "PublishedLanguage"],
+            dependencies: [
+                "ContextForwarder", "PublishedLanguage",
+                .product(name: "Logging", package: "swift-log"),
+            ],
             path: "Tests/ContextForwarderTests"
         ),
         .testTarget(
             name: "ContextForwarderIntegrationTests",
-            dependencies: ["ContextForwarder", "PublishedLanguage"],
+            dependencies: [
+                "ContextForwarder", "PublishedLanguage",
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+            ],
             path: "Tests/ContextForwarderIntegrationTests"
         ),
         .target(
@@ -277,6 +284,7 @@ let package = Package(
                 "ContextReceiver",
                 .target(name: "ContextReceiverWebSocket", condition: .when(platforms: [.linux])),
                 .product(name: "Logging", package: "swift-log"),
+                .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(platforms: [.linux])),
             ],
             path: "Tests/ContextReceiverWebSocketTests"
         ),

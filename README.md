@@ -705,6 +705,80 @@ Pulsar's WebSocket API has no "send to DLQ now" command. `ContextReceiver` maps 
 
 `ContextReceiverWebSocket` only builds on Linux. The underlying `swift-websocket` dependency fails to compile on the macOS 26 SDK: `WebSocketOutboundWriter.swift:210` extends `ByteBuffer` with a method that needs `@available(macOS 26, iOS 26, tvOS 26, *)` and doesn't have it, so the extension is unconditionally unavailable there. `ContextReceiverWebSocket`'s target dependencies on `WSClient`/`HTTPTypes` are therefore platform-conditioned to Linux only (see `Package.swift`), which is also why `WebSocketMessageSource.swift` and every test that imports it are wrapped in `#if os(Linux)` — this keeps `swift build`/`swift test` green on macOS for every other target while the receiver itself only ever runs in Linux production. The upstream fix is a single missing `@available` annotation; until it lands (or the pin changes), macOS developers can still build and test `ContextReceiver`, `ContextForwarder`, and everything else — only the WebSocket transport and its own tests are unavailable to them.
 
+### The WebSocket transport is single-use — supervision is the host's job
+
+`WebSocketMessageSource` wraps exactly one socket session: one instance == one
+connection to Pulsar's WebSocket consumer endpoint, and `run()` may be called
+**exactly once**. Call it a second time on the same instance and it throws
+`ReceiveError.transportUnavailable` immediately, rather than reconnecting or
+silently reusing state.
+
+This is deliberate, not a missing feature. A transparent internal reconnect
+would open a brand-new broker-side consumer session, and a new session's
+permit budget starts at **zero** — but `ContextReceiver.run()` grants
+`FlowSettings.initialPermits` exactly once, before it ever enters its receive
+loop. If the transport reconnected behind that loop's back, the loop would
+keep `await`-ing frames from a session nobody ever granted permits to, and
+the consumer would silently stall forever — no error, no crash, just no more
+messages. That failure mode is worse than a thrown error, because nothing
+tells the host it happened.
+
+So: **retrying the same instance is the trap.** `run()` on an already-run
+`WebSocketMessageSource` will throw, and there is no way to revive a finished
+frame stream — `frames()` always returns the same `AsyncThrowingStream`, and
+once it has completed, a fresh socket underneath it has nowhere to deliver
+into. Recovery means **discard the instance and construct a fresh one**, then
+restart `ContextReceiver` alongside it so `initialPermits` gets re-granted
+against the new broker session. Supervising that lifecycle — catching the
+throw, backing off, rebuilding both objects — is the host's responsibility;
+neither `WebSocketMessageSource` nor `ContextReceiver` do it for you.
+
+This is the same shape as `ForwarderGroup.runWithRestart` on the produce side,
+with one crucial difference: `runWithRestart` retries `body()` — the *same*
+`ContextForwarder` instance — because a forwarder's underlying subscription
+survives a clean stream end. The receive side cannot do that; the socket
+itself is single-use, so each retry attempt must build **new**
+`WebSocketMessageSource` and `ContextReceiver` instances, not re-invoke the
+old ones. Copying `ForwarderGroup`'s shape verbatim — retrying a captured
+`receiver.run()` closure — reproduces exactly the permit-starvation stall
+this contract exists to prevent.
+
+```swift
+func runReceiverWithRestart(
+    endpoint: ConsumerEndpoint,
+    handler: some PublishedLanguageHandler,
+    restartDelay: Duration = .seconds(5),
+    logger: Logger
+) async {
+    while !Task.isCancelled {
+        // A fresh socket + a fresh receiver every attempt — never reuse
+        // either instance across a restart. This is what re-grants
+        // `initialPermits` against the new broker-side consumer session.
+        let source = WebSocketMessageSource(
+            endpoint: endpoint,
+            authorizationHeader: { "Bearer \(try await fetchAccessToken())" },
+            logger: logger
+        )
+        let receiver = ContextReceiver(source: source, handler: handler, logger: logger)
+
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask { try await source.run() }
+                group.addTask { try await receiver.run() }
+                try await group.next()
+                group.cancelAll()
+            }
+            if Task.isCancelled { return }
+            logger.warning("receiver stream ended — restarting in \(restartDelay)")
+        } catch {
+            if Task.isCancelled { return }
+            logger.error("receiver stopped: \(error) — restarting in \(restartDelay)")
+        }
+        try? await Task.sleep(for: restartDelay)
+    }
+}
+```
+
 ### Running the live integration suite
 
 `Tests/ContextReceiverIntegrationTests/LivePulsarTests.swift` is gated on the `PULSAR_HTTP_URL` environment variable so a plain `swift test` never needs a broker. To run it locally:

@@ -39,10 +39,14 @@ struct ConsumerEndpointTests {
         #expect(!url.contains("negativeAckRedeliveryDelay"))
     }
 
-    /// Auth must never ride in the query string — it lands in broker access logs.
-    @Test func neverPutsTokenInQueryString() {
-        #expect(!endpoint().url.contains("token="))
-    }
+    // Auth-header coverage lives in
+    // Tests/ContextReceiverWebSocketTests/WebSocketMessageSourceAuthTests.swift:
+    // `ConsumerEndpoint.Settings` has no token/auth field at all, so a test
+    // here asserting the URL never contains "token=" would pass no matter
+    // what happened to auth handling — it can't fail, so it can't detect
+    // anything. The real auth path (bearer token -> `Authorization` header,
+    // never the query string) only exists on `WebSocketClientConfiguration`,
+    // which is Linux-only.
 
     @Test func trimsTrailingSlashOnBaseURL() {
         let e = ConsumerEndpoint(

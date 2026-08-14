@@ -112,13 +112,7 @@ public actor WebSocketMessageSource: PulsarMessageSource {
         // `setOutbound`, permanently nulling out a healthy socket's writer.
         defer { outbound = nil }
 
-        var configuration = WebSocketClientConfiguration()
-        if let authorization = try await authorizationHeader() {
-            // Header, not the `token` query parameter: query strings are logged
-            // by the broker.
-            configuration.additionalHeaders = [.authorization: authorization]
-        }
-        configuration.autoPing = .enabled(timePeriod: .seconds(30))
+        let configuration = Self.makeConfiguration(authorization: try await authorizationHeader())
 
         _ = try await WebSocketClient.connect(
             url: endpoint.url,
@@ -136,6 +130,22 @@ public actor WebSocketMessageSource: PulsarMessageSource {
                 }
             }
         }
+    }
+
+    /// Builds the client configuration for one connection attempt. Pulled out
+    /// of `connectOnce()` as a pure, non-isolated function so the auth-header
+    /// mapping — a bearer token in, `.authorization` header out, never a
+    /// query-string `token=` — is directly unit-testable without a live
+    /// socket. `internal`, not `public`: this is test seam, not API surface.
+    static func makeConfiguration(authorization: String?) -> WebSocketClientConfiguration {
+        var configuration = WebSocketClientConfiguration()
+        if let authorization {
+            // Header, not the `token` query parameter: query strings are logged
+            // by the broker.
+            configuration.additionalHeaders = [.authorization: authorization]
+        }
+        configuration.autoPing = .enabled(timePeriod: .seconds(30))
+        return configuration
     }
 
     /// A frame that fails to decode as a `ConsumerFrame` is either a routine
