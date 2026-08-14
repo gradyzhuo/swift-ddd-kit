@@ -33,6 +33,16 @@ public struct ConsumerEndpoint: Sendable {
         self.settings = settings
     }
 
+    /// Whether a dead-letter policy is configured. Pulsar's WebSocket API has
+    /// no direct "send to DLQ now" command — `maxRedeliverCount` plus
+    /// `deadLetterTopic` are what make a negative acknowledgement eventually
+    /// park a message instead of looping it forever. The transport uses this
+    /// to warn when a message deliberately routed to dead letter has no
+    /// policy to actually get it there.
+    public var hasDeadLetterPolicy: Bool {
+        settings.maxRedeliverCount != nil || settings.deadLetterTopic != nil
+    }
+
     public var url: String {
         let root = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
         let path = "\(root)/ws/v2/consumer/persistent/\(tenant)/\(namespace)/\(topic)/\(subscription)"

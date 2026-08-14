@@ -3,42 +3,52 @@ import ContextReceiver
 import Foundation
 import HTTPTypes
 import Logging
-import NIOCore
 import WSClient
 
-/// Pulsar WebSocket consumer transport. Owns the socket, translates frames,
-/// and reconnects with backoff. Unacked messages are redelivered by the broker
-/// after a reconnect, which is why at-least-once plus host-side deterministic
-/// ids is the required contract.
+/// Pulsar WebSocket consumer transport backed by a single socket.
+///
+/// Lifetime contract: **one instance is exactly one socket session.**
+/// `run()` connects once. On a clean close it finishes `frames()` normally
+/// and returns; on a transport failure it finishes `frames()` by throwing
+/// that same error and rethrows it from `run()` — this matches
+/// `PulsarMessageSource.frames()`'s documented contract exactly.
+///
+/// It never reconnects internally. Pulsar's WebSocket consumer is pull-mode:
+/// a reconnect opens a brand-new broker-side subscription session whose
+/// permit budget starts at zero. Only the host can correctly recover from
+/// that, because only the host (`ContextReceiver.run()`) knows to re-grant
+/// `initialPermits` — this actor has no way to tell the runner a new session
+/// started underneath it. So supervision (backoff, discarding this instance,
+/// constructing a fresh one, re-running both `run()` calls together) belongs
+/// to the host, not here.
 public actor WebSocketMessageSource: PulsarMessageSource {
     private let endpoint: ConsumerEndpoint
     private let authorizationHeader: @Sendable () async throws -> String?
-    private let reconnectBackoff: [Duration]
     private let logger: Logger
 
     private var outbound: WebSocketOutboundWriter?
-    private var continuation: AsyncThrowingStream<ConsumerFrame, any Error>.Continuation?
+    private nonisolated let stream: AsyncThrowingStream<ConsumerFrame, any Error>
+    private nonisolated let continuation: AsyncThrowingStream<ConsumerFrame, any Error>.Continuation
 
     public init(
         endpoint: ConsumerEndpoint,
         authorizationHeader: @escaping @Sendable () async throws -> String? = { nil },
-        reconnectBackoff: [Duration] = [.seconds(1), .seconds(2), .seconds(5), .seconds(15)],
         logger: Logger
     ) {
         self.endpoint = endpoint
         self.authorizationHeader = authorizationHeader
-        self.reconnectBackoff = reconnectBackoff
         self.logger = logger
+        (self.stream, self.continuation) = AsyncThrowingStream.makeStream()
     }
 
+    /// Built eagerly in `init`, not lazily on first call: if the continuation
+    /// were only created (or only stored on the actor) once `frames()` runs,
+    /// there would be a window between the host granting initial permits and
+    /// the host beginning to iterate this stream during which the broker can
+    /// legitimately push frames that arrive with nowhere to land and are
+    /// silently dropped — each one a permit spent with nothing to settle.
     public nonisolated func frames() -> AsyncThrowingStream<ConsumerFrame, any Error> {
-        AsyncThrowingStream { continuation in
-            Task { await self.store(continuation) }
-        }
-    }
-
-    private func store(_ continuation: AsyncThrowingStream<ConsumerFrame, any Error>.Continuation) {
-        self.continuation = continuation
+        stream
     }
 
     private func setOutbound(_ writer: WebSocketOutboundWriter?) {
@@ -46,30 +56,32 @@ public actor WebSocketMessageSource: PulsarMessageSource {
     }
 
     private func yield(_ frame: ConsumerFrame) {
-        continuation?.yield(frame)
+        continuation.yield(frame)
     }
 
-    /// Connects and pumps frames until cancelled, reconnecting on drop.
+    /// Connects once and pumps frames until the socket closes or fails. Does
+    /// not reconnect — see the type doc for the supervision contract.
     public func run() async throws {
-        var attempt = 0
-        while !Task.isCancelled {
-            do {
-                try await connectOnce()
-                attempt = 0  // clean close: reset backoff
-            } catch {
-                if Task.isCancelled { break }
-                let delay = reconnectBackoff[min(attempt, reconnectBackoff.count - 1)]
-                attempt += 1
-                logger.warning("consumer socket dropped, reconnecting", metadata: [
-                    "error": "\(error)", "delay": "\(delay)",
-                ])
-                try await Task.sleep(for: delay)
-            }
+        defer { continuation.finish() }
+        do {
+            try await connectOnce()
+        } catch {
+            // A second `finish` (the bare one in the `defer` above) is
+            // harmless: the first call to finish a stream wins.
+            continuation.finish(throwing: error)
+            throw error
         }
-        continuation?.finish()
     }
 
     private func connectOnce() async throws {
+        // Actor-isolated and synchronous, so it runs strictly after this
+        // connection's own `setOutbound` calls and before the next
+        // connection (if any) can start. An unstructured `Task` doing this
+        // clear instead — as a prior version of this file did — has no such
+        // ordering guarantee and can land after a *newer* connection's
+        // `setOutbound`, permanently nulling out a healthy socket's writer.
+        defer { outbound = nil }
+
         var configuration = WebSocketClientConfiguration()
         if let authorization = try await authorizationHeader() {
             // Header, not the `token` query parameter: query strings are logged
@@ -84,37 +96,63 @@ public actor WebSocketMessageSource: PulsarMessageSource {
             logger: logger
         ) { inbound, outbound, _ in
             await self.setOutbound(outbound)
-            defer { Task { await self.setOutbound(nil) } }
             // Pulsar sends JSON text frames.
             for try await message in inbound.messages(maxSize: 1 << 20) {
                 guard case .text(let json) = message else { continue }
                 do {
                     await self.yield(try ConsumerFrame(json: Data(json.utf8)))
                 } catch {
-                    // Not a message frame (ack receipt, error notice, ping).
-                    self.logger.debug("ignoring non-message frame", metadata: [
-                        "frame": "\(json.prefix(256))",
-                    ])
+                    self.logNonMessageFrame(json)
                 }
             }
         }
     }
 
+    /// A frame that fails to decode as a `ConsumerFrame` is either a routine
+    /// command receipt (e.g. `{"result":"ok",...}` for an ack or permit) or
+    /// the broker rejecting one of our own ack/nack/permit commands. Flow
+    /// control depends entirely on permit commands being accepted, so a
+    /// rejection must be visible at `error` — logging every non-message frame
+    /// at `debug` would hide exactly the failure mode that causes a silent,
+    /// permanent stall.
+    private nonisolated func logNonMessageFrame(_ json: String) {
+        let notice = try? JSONDecoder().decode(BrokerNotice.self, from: Data(json.utf8))
+        let rejected = notice?.errorMsg != nil || (notice?.result).map { $0 != "ok" } == true
+        if rejected {
+            logger.error("broker rejected a websocket command", metadata: [
+                "frame": "\(json.prefix(256))",
+            ])
+        } else {
+            logger.debug("ignoring routine ack/permit receipt", metadata: [
+                "frame": "\(json.prefix(256))",
+            ])
+        }
+    }
+
     public func settle(messageId: String, as disposition: ReceiveDisposition) async throws {
-        let json: String
         switch disposition {
         case .ack:
-            json = #"{"messageId":"\#(messageId)"}"#
-        case .nack, .dropToDeadLetter:
-            // Both negatively acknowledge; maxRedeliverCount routes repeatedly
-            // failing messages to the dead letter topic.
-            json = #"{"type":"negativeAcknowledge","messageId":"\#(messageId)"}"#
+            try await send(ConsumerCommand.ack(messageId: messageId).json)
+        case .nack:
+            try await send(ConsumerCommand.negativeAcknowledge(messageId: messageId).json)
+        case .dropToDeadLetter:
+            // Pulsar's WebSocket API has no "send to DLQ now" command;
+            // negative-acknowledging is the closest available primitive.
+            // maxRedeliverCount plus deadLetterTopic on the endpoint are what
+            // route repeatedly failing messages to the DLQ instead of
+            // redelivering forever — without both configured, a message the
+            // host has explicitly given up on loops indefinitely.
+            if !endpoint.hasDeadLetterPolicy {
+                logger.warning("dropToDeadLetter settled with no dead letter policy configured on the endpoint; broker will redeliver this message forever", metadata: [
+                    "messageId": "\(messageId)",
+                ])
+            }
+            try await send(ConsumerCommand.negativeAcknowledge(messageId: messageId).json)
         }
-        try await send(json)
     }
 
     public func grantPermits(_ count: Int) async throws {
-        try await send(#"{"type":"permit","permitMessages":\#(count)}"#)
+        try await send(ConsumerCommand.permit(count: count).json)
     }
 
     private func send(_ json: String) async throws {
@@ -123,5 +161,13 @@ public actor WebSocketMessageSource: PulsarMessageSource {
         }
         try await outbound.writeTextMessage(json)
     }
+}
+
+/// Minimal shape of Pulsar's non-message WebSocket replies (ack/permit
+/// receipts, and error notices when a command is rejected) — just enough to
+/// tell the two apart for logging.
+private struct BrokerNotice: Decodable {
+    let result: String?
+    let errorMsg: String?
 }
 #endif

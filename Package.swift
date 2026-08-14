@@ -262,7 +262,6 @@ let package = Package(
             dependencies: [
                 "ContextReceiver",
                 .product(name: "Logging", package: "swift-log"),
-                .product(name: "NIOCore", package: "swift-nio"),
                 // Platform-conditional so macOS never compiles swift-websocket (or its
                 // HTTPTypes header type) at all. Without the condition, `swift build`
                 // on macOS fails for the whole package — including for
