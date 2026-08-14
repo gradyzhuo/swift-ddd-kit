@@ -1851,3 +1851,107 @@ git commit -m "test: verify Pulsar round trip end to end"
 - **`OCForwarding` should set `partitionKey`** to the opportunity id, otherwise Task 1's ordering capability goes unused in production.
 - **`ForwarderGroupTests` sleep-ratio assertion** — still measures a ratio of two sleeps; the signal-based redesign remains unimplemented.
 - **`ContextForwarder`/`ContextReceiver` import NIOCore without declaring it** — resolved transitively today. Same latent class of bug that broke the Linux build once already.
+
+---
+
+## Appendix: rulings made during execution
+
+This plan was executed with a subagent-per-task loop plus per-task and whole-branch review.
+Where a review finding conflicted with the plan, or the plan turned out to be wrong, the
+controller ruled rather than stalling. Every ruling is recorded here with what it costs if it
+was the wrong call, so the repo owner can find and undo any of them.
+
+### Pre-flight (found by scanning the plan before any code was written)
+
+- **F1** — `Package.swift` is edited by four tasks in sequence; each must re-read before editing.
+  No structural change. *Cost if wrong: a clobbered manifest, caught by the next task's build.*
+- **F2** — `produceBody(for:)` stays `internal`; the integration test uses `@testable import`.
+  Making it public would expose a wire-format detail as permanent API for one test's benefit.
+  *Cost if wrong: one keyword.*
+- **F3** — the plan's fake recorded settlements as `[(String, ReceiveDisposition)]` and compared
+  them with `==`. Swift tuples are not `Equatable`, so **two tasks' tests would not have compiled**.
+  Replaced with a named `Settlement` struct. *Cost if wrong: none — a compile-or-not fact.*
+- **F4** — Tasks 6 and 7 reused `ReceiveError.malformedFrame` for an admin-HTTP failure and a dead
+  socket, which would also mis-route through `ReceiveDisposition(for:)` and try to dead-letter a
+  message that does not exist. Added `.adminProbeFailed` / `.transportUnavailable` at the type's
+  birth. *Cost if wrong: two unused enum cases.*
+- **F5** — dropped a vestigial `ConsumerURL.swift` the plan listed but never implemented.
+  *Cost if wrong: none.*
+- **F6** — **contain the macOS breakage instead of letting it leak.** As written, Tasks 7-8 would
+  have made `swift build` and `swift test` fail package-wide on macOS, hitting every consumer of
+  swift-ddd-kit including developers who never touch the receiver. Fixed with a
+  `condition: .when(platforms: [.linux])` dependency plus `#if os(Linux)` around the source, so
+  macOS compiles the module empty. *Cost if wrong: the guards are removable in one commit if the
+  owner prefers the simpler, louder failure.*
+
+### During the task loop
+
+- **Brief vs. existing tests** — when a brief's test code would replace an existing test file,
+  MERGE. A brief's contents are additive intent, never a deletion instruction; the plan was written
+  without reading every existing test. *Cost if wrong: a duplicated test.*
+- **Undeclared imports** — every module a target imports must be declared, even when SwiftPM's
+  shared module search path makes it compile anyway. This defect class recurred **eight times** in
+  this branch and had already reddened the Linux build once before it. *Cost if wrong: none; the
+  alternative does not compile under per-target builds.*
+- **Settle-failure coverage** — the "a settle failure must not abort the loop" guarantee was
+  implemented but untested, and the fake could not even exercise it. Closed rather than deferred,
+  because the real transport throws from `settle` whenever the socket has dropped. *Cost if wrong:
+  a slightly larger test fake.*
+- **Permit accounting counts attempts, not successes** — if a failed settle did not count toward
+  refill, the permit window would shrink permanently on every failure until the consumer starved
+  itself into receiving nothing. *Cost if wrong: over-granting by the number of failed settles,
+  which loosens backpressure but cannot lose messages.*
+- **Declare `NIOCore`** — settles a question that was on the owner's open-decision list. swift-nio
+  was already resolved at 2.97.0 transitively via async-http-client, so declaring a `from: "2.81.0"`
+  floor exerts no constraint pressure and `Package.resolved` did not move. Shipping new code whose
+  import works by accident is strictly worse. *Cost if wrong: one visible line in the dependency
+  list.*
+- **Fix the pre-existing `ContextForwarder` NIOCore instance in the same pass**, against the
+  reviewer's suggestion of separate follow-up — the implementer was already editing those exact
+  manifest lines. *Cost if wrong: scope crept by one line.*
+- **Close the `>=` vs `>` boundary gap now** — at the default `threshold: 1`, a `>` regression means
+  never alerting on the *first* dead-lettered message, the exact silence the monitor exists to
+  prevent. *Cost if wrong: one extra test.*
+- **THE TRANSPORT MUST NOT RECONNECT INTERNALLY** — the largest ruling. A transparent reconnect
+  creates a new broker consumer session with a **zero permit budget**, but the runner grants
+  `initialPermits` once and refills only after N settlements, so it waits forever on a session that
+  never pushes. After any broker restart, deploy, or idle drop the receiver became a silent zombie.
+  `run()` now finishes the stream with the error and rethrows; supervision moves to the host.
+  *Cost if wrong: the host carries a restart loop it could have inherited — visible, cheap to move
+  back.*
+- **`.dropToDeadLetter` without a DLQ policy** — proportionate fix only (honest comment plus a
+  `warning`). Whether `maxRedeliverCount`/`deadLetterTopic` should be **mandatory together** is a
+  real API question left to the owner. *Cost if wrong: a poison message still loops in a
+  misconfigured deployment, but noisily instead of silently.*
+- **Extract the control-frame JSON to the portable target** — it was simultaneously the most
+  consequential untested code (Linux-only, unreachable from macOS tests) and it interpolated a
+  broker-supplied `messageId` unescaped. *Cost if wrong: one small extra type.*
+
+### At the whole-branch review
+
+- **Single-use guard** — `run()` could be called twice, and reuse caused **silent total message
+  loss**: the socket reconnects and `settle`/`grantPermits` succeed, but the stream was already
+  finished, so every yield is a no-op and the runner returns *normally*, looking like clean
+  shutdown. Reachable by copying this codebase's own `ForwarderGroup.runWithRestart` shape.
+  *Cost if wrong: a host that wanted to reuse an instance gets a loud error instead — the intended
+  trade.*
+- **DECLINED to build a `ContextReceiverGroup`** supervisor, despite its absence being what makes
+  the above likely. It is a new public type in the kit's API surface and that decision belongs to
+  the owner, not to a fix wave. *Cost if wrong: hosts hand-roll supervision until the owner decides;
+  errors are loud, not silent.* **← owner decision needed**
+- **Classify Pulsar 4xx as permanent**, excluding 408 and 429. Previously a 400/404/413 burned up
+  to 10 redelivery cycles on a failure knowable as permanent on the first attempt. *Cost if wrong:
+  a retryable status parked early — which is why 408/429 are carved out.*
+- **Left `ReceiveError.transportUnavailable` doing double duty** for the `run()`-twice misuse case.
+  No live path feeds it through `ReceiveDisposition(for:)` today, so a host cannot currently misread
+  misuse as a transient blip. A dedicated `.invalidUsage` case is a public API addition.
+  *Cost if wrong: a future host writing error-type-sensitive supervision could conflate the two.*
+  **← owner decision needed**
+- **Document the supervision contract in the README** — it was tested and in the transport's doc
+  comment but absent from operator-facing docs, so an operator would call `run()` once, have it
+  throw on the first disconnect, and never learn the consumer had stopped. This was the direct
+  operational consequence of the no-reconnect ruling. *Cost if wrong: none; documentation only.*
+- **Replaced a test that could not fail** — `neverPutsTokenInQueryString` asserted something
+  structurally guaranteed (`Settings` has no token field at all) while reading as security-relevant.
+  Deferring it once was a mistake; a test that reads as a safety check and cannot fail is worse than
+  no test. *Cost if wrong: none.*
