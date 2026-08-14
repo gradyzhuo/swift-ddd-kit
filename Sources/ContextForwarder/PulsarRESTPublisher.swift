@@ -74,19 +74,29 @@ public struct PulsarRESTPublisher: PublishedLanguagePublisher {
         _ = try await response.body.collect(upTo: 4096)
     }
 
-    public func publish(_ event: PublishedLanguageEvent) async throws {
+    /// Builds the REST produce envelope. `internal` so tests can assert the
+    /// wire shape without a live broker.
+    static func produceBody(for event: PublishedLanguageEvent) throws -> Data {
         let payloadJSON = try PublishedLanguageEvent.wireEncoder.encode(event)
         guard let payloadString = String(data: payloadJSON, encoding: .utf8) else {
             throw PublishError.encodingFailed
         }
         let envelope: [String: Any] = [
             "messages": [[
+                // Raw string, not base64: the REST endpoint encodes server-side.
                 "payload": payloadString,
-                "key": event.eventId,
+                // Key_Shared orders per key, so this must be the aggregate id
+                // when the host wants ordering — not the per-message eventId.
+                "key": event.effectivePartitionKey,
+                "eventTime": Int64(event.occurredAt.timeIntervalSince1970 * 1000),
                 "properties": ["eventType": event.eventType],
             ]]
         ]
-        let body = try JSONSerialization.data(withJSONObject: envelope)
+        return try JSONSerialization.data(withJSONObject: envelope)
+    }
+
+    public func publish(_ event: PublishedLanguageEvent) async throws {
+        let body = try Self.produceBody(for: event)
 
         var request = HTTPClientRequest(url: configuration.producePath)
         request.method = .POST
