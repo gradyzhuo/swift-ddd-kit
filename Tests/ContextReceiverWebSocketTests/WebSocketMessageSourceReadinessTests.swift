@@ -18,17 +18,35 @@ struct WebSocketMessageSourceReadinessTests {
             baseURL: "ws://127.0.0.1:1", tenant: "public", namespace: "default",
             topic: "unused", subscription: "unused"
         )
+        let timeout: Duration = .milliseconds(200)
         let source = WebSocketMessageSource(
             endpoint: endpoint,
-            readinessTimeout: .milliseconds(200),
+            readinessTimeout: timeout,
             logger: Logger(label: "readiness-test")
         )
 
+        let started = ContinuousClock.now
         do {
             try await source.grantPermits(1)
             Issue.record("expected grantPermits to time out with no live socket")
-        } catch ReceiveError.transportUnavailable {
-            // Expected: no socket ever arrives because `run()` was never called.
+        } catch ReceiveError.transportUnavailable(let message) {
+            // Both assertions are required, not just one: the pre-fix code
+            // threw this exact case — `ReceiveError.transportUnavailable`
+            // from `send`'s `guard let outbound` — immediately, with the
+            // message "socket not connected". Matching only the case would
+            // pass against that reverted behaviour too. Elapsed time proves
+            // this actually *waited* rather than failing fast, and the
+            // message wording proves it came from `waitForSocketReady`
+            // specifically, not from `send`.
+            let elapsed = started.duration(to: .now)
+            #expect(
+                elapsed >= .milliseconds(150),
+                "expected grantPermits to wait close to the \(timeout) readiness timeout, took \(elapsed)"
+            )
+            #expect(
+                message.contains("became ready within"),
+                "expected the readiness-timeout message, got: \(message)"
+            )
         }
     }
 }

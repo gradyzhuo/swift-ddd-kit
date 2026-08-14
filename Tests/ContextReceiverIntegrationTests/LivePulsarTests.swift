@@ -50,14 +50,17 @@ struct LivePulsarTests {
         let httpClient = HTTPClient(eventLoopGroupProvider: .singleton)
         // `HTTPClient.syncShutdown()` is `noasync` — it cannot be called from
         // this test's async context even inside `defer`, and `defer` bodies
-        // cannot themselves `await`. So both the success and failure paths
-        // shut the client down explicitly with the async API instead.
+        // cannot themselves `await`. So every exit path shuts the client
+        // down explicitly with the async API instead, after best-effort
+        // deleting the scratch topic this test created on the shared broker.
         do {
             try await runRoundTrip(httpClient: httpClient, topic: topic, logger: logger)
         } catch {
+            await deleteTopicBestEffort(httpClient: httpClient, topic: topic)
             try? await httpClient.shutdown()
             throw error
         }
+        await deleteTopicBestEffort(httpClient: httpClient, topic: topic)
         try? await httpClient.shutdown()
     }
 
@@ -74,12 +77,14 @@ struct LivePulsarTests {
             group.addTask { try await source.run() }
             group.addTask { try await receiver.run() }
 
-            // Let the subscription attach before producing, otherwise the
-            // message lands before the cursor exists. `receiver.run()`'s
-            // initial permit grant now waits (bounded) for `source.run()`'s
-            // socket to come up, so this sleep only needs to cover the
-            // broker-side subscribe, not our own connect race.
-            try await Task.sleep(for: .seconds(3))
+            // Let the subscription actually attach before producing —
+            // otherwise the message lands before the cursor exists and is
+            // never delivered. `receiver.run()`'s initial permit grant now
+            // waits (bounded) for `source.run()`'s socket to come up, but
+            // that only covers *our* connect race, not the broker attaching
+            // the subscription server-side, so this polls the admin API
+            // rather than sleeping blind for a guessed duration.
+            try await waitForSubscriptionAttached(httpClient: httpClient, topic: topic, timeout: .seconds(15))
 
             let event = PublishedLanguageEvent(
                 eventId: "e-live-1",
@@ -97,7 +102,12 @@ struct LivePulsarTests {
             request.headers.add(name: "Content-Type", value: "application/json")
             request.body = .bytes(ByteBuffer(bytes: try PulsarRESTPublisher.produceBody(for: event)))
             let response = try await httpClient.execute(request, timeout: .seconds(15))
-            #expect(response.status.code < 300, "produce failed with \(response.status)")
+            // `#require`, not `#expect`: a 4xx here (e.g. the missing
+            // `valueSchema` the plan called out) must fail at the actual
+            // cause immediately, not fall through into a 30-second consume
+            // wait that reports "waitForCount was false" next to an error
+            // that already explained itself.
+            try #require(response.status.code < 300, "produce failed with \(response.status)")
 
             #expect(try await collector.waitForCount(1, timeout: .seconds(30)))
             let record = await collector.received.first
@@ -107,7 +117,67 @@ struct LivePulsarTests {
             #expect(record?.redeliveryCount == 0)
 
             group.cancelAll()
+            // `cancelAll` does not itself wait for the children to observe
+            // cancellation. Draining here means a `source.run()`/`receiver.run()`
+            // that surfaced a real error after cancellation would fail this
+            // test loudly and immediately, instead of relying on
+            // `withThrowingTaskGroup` silently discarding a cancelled
+            // child's error on scope exit — which happens to be true today
+            // but is not a documented guarantee.
+            while !group.isEmpty {
+                _ = try? await group.next()
+            }
         }
+    }
+
+    /// Polls Pulsar's topic stats admin endpoint until the `itest`
+    /// subscription appears, rather than sleeping a guessed duration.
+    /// Mirrors the plan's own broker-readiness pattern ("wait for readiness
+    /// rather than sleeping blind") applied one level deeper, to the
+    /// subscription instead of the broker.
+    private func waitForSubscriptionAttached(
+        httpClient: HTTPClient, topic: String, timeout: Duration
+    ) async throws {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while ContinuousClock.now < deadline {
+            var request = HTTPClientRequest(
+                url: "\(httpURL)/admin/v2/persistent/public/default/\(topic)/stats"
+            )
+            request.method = .GET
+            if let response = try? await httpClient.execute(request, timeout: .seconds(5)),
+               response.status.code == 200,
+               let bodyBuffer = try? await response.body.collect(upTo: 1 << 20) {
+                let json = try? JSONSerialization.jsonObject(with: Data(String(buffer: bodyBuffer).utf8))
+                if let stats = json as? [String: Any],
+                   let subscriptions = stats["subscriptions"] as? [String: Any],
+                   subscriptions["itest"] != nil {
+                    return
+                }
+            }
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        throw SubscriptionNeverAttached(topic: topic, timeout: timeout)
+    }
+
+    /// Best-effort: this test writes a uniquely-named scratch topic into
+    /// whatever broker `PULSAR_HTTP_URL` points at (a long-lived shared
+    /// broker in practice), and nothing else reclaims it. A failed delete
+    /// must never fail the test — cleanup is a courtesy, not part of the
+    /// thing under test.
+    private func deleteTopicBestEffort(httpClient: HTTPClient, topic: String) async {
+        var request = HTTPClientRequest(
+            url: "\(httpURL)/admin/v2/persistent/public/default/\(topic)?force=true"
+        )
+        request.method = .DELETE
+        _ = try? await httpClient.execute(request, timeout: .seconds(10))
+    }
+}
+
+private struct SubscriptionNeverAttached: Error, CustomStringConvertible {
+    let topic: String
+    let timeout: Duration
+    var description: String {
+        "subscription 'itest' never attached to topic \(topic) within \(timeout)"
     }
 }
 #endif
