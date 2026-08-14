@@ -1277,7 +1277,23 @@ git commit -m "feat: alert on dead letter backlog growth"
 - Consumes: `PulsarMessageSource`, `ConsumerFrame`, `ReceiveDisposition`.
 - Produces:
   - `struct ConsumerEndpoint: Sendable` (in `ContextReceiver`) — `init(baseURL:tenant:namespace:topic:subscription:settings:)`, `var url: String`, `struct Settings: Sendable` with `subscriptionType: String = "Key_Shared"`, `consumerName: String?`, `maxRedeliverCount: Int?`, `deadLetterTopic: String?`, `negativeAckRedeliveryDelayMillis: Int?`, `receiverQueueSize: Int?`.
-  - `actor WebSocketMessageSource: PulsarMessageSource` (in `ContextReceiverWebSocket`) — `init(endpoint:authorizationHeader:reconnectBackoff:logger:)`, `func run() async throws`.
+  - `actor WebSocketMessageSource: PulsarMessageSource` (in `ContextReceiverWebSocket`) — `init(endpoint:authorizationHeader:logger:)`, `func run() async throws`.
+
+> **Corrected during execution — do not restore the earlier design.** An earlier draft of this
+> task gave the transport an internal reconnect ladder (`reconnectBackoff:`) that caught socket
+> failures and retried transparently. That is a **silent-stall bug**, not a resilience feature.
+> A reconnect creates a new broker-side consumer session whose permit budget is zero (that is
+> what `pullMode=true` means), but the runner grants `initialPermits` exactly once before its
+> loop and refills only after `permitRefillThreshold` settlements. A transparent reconnect
+> therefore leaves the runner waiting on a session that will never push anything: no frames, so
+> the settle counter never advances, so no refill ever happens. After any broker restart, deploy,
+> or idle drop the receiver becomes a silent zombie whose only trace is one warning line.
+>
+> The shipped contract instead matches `PulsarMessageSource`'s documented one: **one instance ==
+> one socket session.** `run()` connects once; on transport failure it calls
+> `continuation.finish(throwing:)` and rethrows; on clean close it finishes cleanly and returns.
+> Supervision — backoff, discarding the source, recreating it, and re-granting initial permits —
+> belongs to the host, the only layer that can restart the runner alongside the socket.
 
 **Note on `pullMode`:** `ConsumerEndpoint` always sets `pullMode=true`; the runner's permit accounting depends on it, so it is not configurable.
 
@@ -1489,63 +1505,66 @@ import WSClient
 public actor WebSocketMessageSource: PulsarMessageSource {
     private let endpoint: ConsumerEndpoint
     private let authorizationHeader: @Sendable () async throws -> String?
-    private let reconnectBackoff: [Duration]
     private let logger: Logger
 
     private var outbound: WebSocketOutboundWriter?
-    private var continuation: AsyncThrowingStream<ConsumerFrame, any Error>.Continuation?
+
+    // Built eagerly in init, NOT lazily inside frames(). A lazily-stored
+    // continuation is nil until an unstructured Task lands, and the runner grants
+    // permits before it starts iterating — so the broker can legitimately push
+    // into that window and every frame yielded there is discarded silently,
+    // permanently shrinking the permit window. Both are `nonisolated let` because
+    // the continuation is Sendable and frames() is nonisolated.
+    private nonisolated let stream: AsyncThrowingStream<ConsumerFrame, any Error>
+    private nonisolated let continuation: AsyncThrowingStream<ConsumerFrame, any Error>.Continuation
 
     public init(
         endpoint: ConsumerEndpoint,
         authorizationHeader: @escaping @Sendable () async throws -> String? = { nil },
-        reconnectBackoff: [Duration] = [.seconds(1), .seconds(2), .seconds(5), .seconds(15)],
         logger: Logger
     ) {
         self.endpoint = endpoint
         self.authorizationHeader = authorizationHeader
-        self.reconnectBackoff = reconnectBackoff
         self.logger = logger
+        (self.stream, self.continuation) = AsyncThrowingStream.makeStream()
     }
 
-    public nonisolated func frames() -> AsyncThrowingStream<ConsumerFrame, any Error> {
-        AsyncThrowingStream { continuation in
-            Task { await self.store(continuation) }
-        }
-    }
-
-    private func store(_ continuation: AsyncThrowingStream<ConsumerFrame, any Error>.Continuation) {
-        self.continuation = continuation
-    }
+    public nonisolated func frames() -> AsyncThrowingStream<ConsumerFrame, any Error> { stream }
 
     private func setOutbound(_ writer: WebSocketOutboundWriter?) {
         self.outbound = writer
     }
 
-    private func yield(_ frame: ConsumerFrame) {
-        continuation?.yield(frame)
+    private nonisolated func yield(_ frame: ConsumerFrame) {
+        continuation.yield(frame)
     }
 
-    /// Connects and pumps frames until cancelled, reconnecting on drop.
+    /// Connects and pumps frames for exactly one socket session.
+    ///
+    /// Throws on transport failure after finishing the stream with that error;
+    /// finishes cleanly and returns when the broker closes the socket. Does NOT
+    /// reconnect — see the correction note in this task's Interfaces section for
+    /// why an internal reconnect silently stalls the runner. The host supervises.
     public func run() async throws {
-        var attempt = 0
-        while !Task.isCancelled {
-            do {
-                try await connectOnce()
-                attempt = 0  // clean close: reset backoff
-            } catch {
-                if Task.isCancelled { break }
-                let delay = reconnectBackoff[min(attempt, reconnectBackoff.count - 1)]
-                attempt += 1
-                logger.warning("consumer socket dropped, reconnecting", metadata: [
-                    "error": "\(error)", "delay": "\(delay)",
-                ])
-                try await Task.sleep(for: delay)
-            }
+        defer { continuation.finish() }   // reached on every path, cancellation included
+        do {
+            try await connectOnce()
+        } catch {
+            // finish(throwing:) BEFORE rethrowing, so the consumer of frames()
+            // sees the cause rather than a bare completion. The defer's later
+            // bare finish() is a no-op: the first termination wins.
+            continuation.finish(throwing: error)
+            throw error
         }
-        continuation?.finish()
     }
 
     private func connectOnce() async throws {
+        // Isolated + synchronous, so it is ordered before any later connect.
+        // The earlier `defer { Task { await self.setOutbound(nil) } }` was
+        // unstructured and could null out a NEWER socket's writer, leaving every
+        // settle/grantPermits throwing transportUnavailable for a healthy socket.
+        defer { outbound = nil }
+
         var configuration = WebSocketClientConfiguration()
         if let authorization = try await authorizationHeader() {
             // Header, not the `token` query parameter: query strings are logged
@@ -1560,17 +1579,21 @@ public actor WebSocketMessageSource: PulsarMessageSource {
             logger: logger
         ) { inbound, outbound, _ in
             await self.setOutbound(outbound)
-            defer { Task { await self.setOutbound(nil) } }
+            // No clear here — the isolated `defer` in connectOnce owns that.
             // Pulsar sends JSON text frames.
             for try await message in inbound.messages(maxSize: 1 << 20) {
                 guard case .text(let json) = message else { continue }
                 do {
-                    await self.yield(try ConsumerFrame(json: Data(json.utf8)))
+                    self.yield(try ConsumerFrame(json: Data(json.utf8)))
                 } catch {
-                    // Not a message frame (ack receipt, error notice, ping).
-                    self.logger.debug("ignoring non-message frame", metadata: [
-                        "frame": "\(json.prefix(256))",
-                    ])
+                    // Could be a routine ack/permit receipt OR a broker rejection.
+                    // Classify before discarding: a silently rejected permit command
+                    // is another route to a permanently stalled consumer, and at
+                    // `debug` nobody would ever see it. See logNonMessageFrame —
+                    // `errorMsg` present, or `result` present and not "ok", logs at
+                    // `error`. autoPing handles ping/pong at the protocol level, so
+                    // ping frames never arrive here.
+                    self.logNonMessageFrame(json)
                 }
             }
         }
