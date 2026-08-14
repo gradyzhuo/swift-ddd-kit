@@ -14,7 +14,8 @@
 
 - **No `@unchecked Sendable`, no `nonisolated(unsafe)` in our own code.** Use actors or `Sendable` value types. This is a standing project rule, not a preference.
 - **`swift-websocket` is pinned to the official upstream `from: "1.6.1"`.** It does not compile on the macOS 26 SDK (upstream bug: `Sources/WSCore/WebSocketOutboundWriter.swift:210` declares `extension ByteBuffer { init(_uint8Span: Span<UInt8>) }` guarded only by `#if compiler(>=6.2)`, with no `@available`; the call site at `:83` is guarded but the helper is not). Verified: fails on macOS 26 for tags 1.4.0/1.5.0/1.6.0/1.6.1; **builds clean on Linux Swift 6.2.4** (`swift:6.2-noble`, exit 0).
-- **Therefore `ContextReceiverWebSocket` is developed and tested on Linux only**, via `docker run --rm -v $PWD:/src -w /src swift:6.2-noble`. Every other target, and every unit test in this plan, must build and pass on macOS. Do not add a `swift-websocket` dependency to any target other than `ContextReceiverWebSocket`.
+- **Therefore `ContextReceiverWebSocket` is developed and tested on Linux only**, via `docker run --rm -v $PWD:/src -w /src swift:6.2-noble`. Do not add a `swift-websocket` dependency to any target other than `ContextReceiverWebSocket`.
+- **The macOS breakage must stay contained to that one target.** Its `WSClient` dependency is declared `condition: .when(platforms: [.linux])` and its source body sits inside `#if os(Linux)`, so on macOS the module compiles empty rather than failing. `swift build` and `swift test` must both still succeed on macOS after every task in this plan — including Tasks 7 and 8. A whole-package build failure would hit every consumer of swift-ddd-kit, not just this module.
 - **Wire compatibility is not optional.** `PublishedLanguageEvent` may only gain *optional* fields. An event written by the current forwarder must decode unchanged after Task 1.
 - **All credentials via environment variables**, never in the repo, never in test fixtures.
 - **Branch:** `feature/context-forwarder` (this work is folded into the existing open PR #7, per the owner's decision).
@@ -117,9 +118,12 @@ Sources/ContextReceiver/                   (new target: PublishedLanguage, Async
   ContextReceiver.swift                    the runner: source -> handler -> settle, permit accounting
   DeadLetterMonitor.swift                  periodic DLQ backlog probe + alert callback
 
+Sources/ContextReceiver/
+  ConsumerEndpoint.swift                   endpoint + query-parameter builder (pure, portable tests)
+
 Sources/ContextReceiverWebSocket/          (new target: ContextReceiver, WSClient) — LINUX ONLY
-  ConsumerURL.swift                        endpoint + query-parameter builder (pure, portable tests)
   WebSocketMessageSource.swift             the real transport, reconnect with backoff
+                                           (whole file body inside #if os(Linux))
 
 Tests/ContextReceiverTests/                (portable, offline — must pass on macOS)
   ConsumerFrameTests.swift
@@ -404,7 +408,7 @@ git commit -m "fix: send aggregate partition key and eventTime on produce"
 - Produces:
   - `struct ConsumerFrame: Sendable` — `messageId: String`, `payload: String`, `publishTime: String?`, `redeliveryCount: Int` (defaults to 0 when absent), `properties: [String: String]`, `key: String?`; `init(json: Data) throws`; `func decodedEvent() throws -> PublishedLanguageEvent`.
   - `struct ReceivedRecord: Sendable` — `event: PublishedLanguageEvent`, `messageId: String`, `redeliveryCount: Int`, `key: String?`, `properties: [String: String]`; `var isRedelivery: Bool`.
-  - `enum ReceiveError: Error, Equatable, Sendable` — `.malformedFrame(String)`, `.payloadNotBase64`, `.payloadNotDecodable(String)`.
+  - `enum ReceiveError: Error, Equatable, Sendable` — `.malformedFrame(String)`, `.payloadNotBase64`, `.payloadNotDecodable(String)`, `.adminProbeFailed(String)` (used by Task 6), `.transportUnavailable(String)` (used by Task 7). The last two are declared here, where the type is born, so later tasks do not overload `.malformedFrame` for conditions that have no frame — which would also mis-route through `ReceiveDisposition(for:)`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -544,9 +548,14 @@ public struct ConsumerFrame: Sendable, Codable {
 }
 
 public enum ReceiveError: Error, Equatable, Sendable {
+    /// A WebSocket text frame that is not a Pulsar message frame at all.
     case malformedFrame(String)
     case payloadNotBase64
     case payloadNotDecodable(String)
+    /// The admin backlog probe could not read topic stats (Task 6).
+    case adminProbeFailed(String)
+    /// A settle or permit was attempted with no live socket (Task 7).
+    case transportUnavailable(String)
 }
 ```
 
@@ -623,9 +632,10 @@ git commit -m "feat: add ContextReceiver frame decoding"
 - Produces:
   - `protocol PulsarMessageSource: Sendable` — `func frames() -> AsyncThrowingStream<ConsumerFrame, any Error>`; `func settle(messageId: String, as: ReceiveDisposition) async throws`; `func grantPermits(_ count: Int) async throws`.
   - `enum ReceiveDisposition: Equatable, Sendable` — `.ack`, `.nack`, `.dropToDeadLetter`; `init(for error: any Error)`.
+  - `struct Settlement: Equatable, Sendable` — `messageId: String`, `disposition: ReceiveDisposition`. A named type, **not** a `(String, ReceiveDisposition)` tuple: Swift tuples do not conform to `Equatable`, so an array of them cannot be compared with `==` and the tests below would not compile.
   - `protocol PublishedLanguageHandler: Sendable` — `func handle(_ record: ReceivedRecord) async throws`.
   - `protocol TransientReceiveError: Error` — marker a host error can adopt to force `.nack`.
-  - `actor FakeMessageSource: PulsarMessageSource` (test target) — `init(frames: [ConsumerFrame], failure: (any Error & Sendable)? = nil)`, `var settlements: [(String, ReceiveDisposition)]`, `var grantedPermits: Int`.
+  - `actor FakeMessageSource: PulsarMessageSource` (test target) — `init(frames: [ConsumerFrame], failure: (any Error & Sendable)? = nil)`, `var settlements: [Settlement]`, `var grantedPermits: Int`.
 
 **Why `.dropToDeadLetter` exists:** mirroring hardening ruling #2 (`.park` over silent drop), a decode failure must not be retried forever — the payload will never become valid. But it must also not vanish. `.dropToDeadLetter` NACKs with a marker so `maxRedeliverCount` routes it to the DLQ promptly, where Task 6's monitor will see it.
 
@@ -671,7 +681,7 @@ struct FakeMessageSourceTests {
         let source = FakeMessageSource(frames: [])
         try await source.settle(messageId: "m-1", as: .ack)
         try await source.grantPermits(5)
-        #expect(await source.settlements == [("m-1", .ack)])
+        #expect(await source.settlements == [Settlement(messageId: "m-1", disposition: .ack)])
         #expect(await source.grantedPermits == 5)
     }
 }
@@ -687,6 +697,19 @@ Expected: FAIL — `cannot find 'ReceiveDisposition' in scope`.
 `Sources/ContextReceiver/ReceiveDisposition.swift`:
 
 ```swift
+/// One settled message. A named type rather than a tuple: Swift tuples do not
+/// conform to `Equatable`, so `[(String, ReceiveDisposition)] == [...]` will not
+/// compile and test assertions could not be written against it.
+public struct Settlement: Equatable, Sendable {
+    public let messageId: String
+    public let disposition: ReceiveDisposition
+
+    public init(messageId: String, disposition: ReceiveDisposition) {
+        self.messageId = messageId
+        self.disposition = disposition
+    }
+}
+
 /// What to tell the broker about a message after the host has handled it.
 public enum ReceiveDisposition: Equatable, Sendable {
     /// Handled successfully; remove from the subscription.
@@ -757,7 +780,7 @@ actor FakeMessageSource: PulsarMessageSource {
     /// `& Sendable` is required: a bare `any Error` is not Sendable and cannot
     /// be held in a `nonisolated let`.
     private nonisolated let failure: (any Error & Sendable)?
-    private(set) var settlements: [(String, ReceiveDisposition)] = []
+    private(set) var settlements: [Settlement] = []
     private(set) var grantedPermits = 0
 
     init(frames: [ConsumerFrame], failure: (any Error & Sendable)? = nil) {
@@ -777,7 +800,7 @@ actor FakeMessageSource: PulsarMessageSource {
     }
 
     func settle(messageId: String, as disposition: ReceiveDisposition) async throws {
-        settlements.append((messageId, disposition))
+        settlements.append(Settlement(messageId: messageId, disposition: disposition))
     }
 
     func grantPermits(_ count: Int) async throws {
@@ -858,14 +881,14 @@ struct ContextReceiverTests {
         let handler = RecordingHandler()
         try await ContextReceiver(source: source, handler: handler, logger: logger).run()
         #expect(await handler.handledIds == ["e-1"])
-        #expect(await source.settlements.map(\.1) == [.ack])
+        #expect(await source.settlements.map(\.disposition) == [.ack])
     }
 
     @Test func nacksWhenHandlerThrowsTransiently() async throws {
         let source = FakeMessageSource(frames: [try frame(id: "m-1", eventId: "e-1")])
         let handler = RecordingHandler(throwing: Transient())
         try await ContextReceiver(source: source, handler: handler, logger: logger).run()
-        #expect(await source.settlements == [("m-1", .nack)])
+        #expect(await source.settlements == [Settlement(messageId: "m-1", disposition: .nack)])
     }
 
     /// An undecodable payload must never reach the handler, and must not loop.
@@ -874,7 +897,7 @@ struct ContextReceiverTests {
         let handler = RecordingHandler()
         try await ContextReceiver(source: source, handler: handler, logger: logger).run()
         #expect(await handler.handled.isEmpty)
-        #expect(await source.settlements == [("m-bad", .dropToDeadLetter)])
+        #expect(await source.settlements == [Settlement(messageId: "m-bad", disposition: .dropToDeadLetter)])
     }
 
     @Test func grantsInitialPermitsBeforeConsuming() async throws {
@@ -1102,7 +1125,7 @@ struct DeadLetterMonitorTests {
             private(set) var calls = 0
             func backlogCount(topic: String) async throws -> Int {
                 calls += 1
-                throw ReceiveError.payloadNotBase64
+                throw ReceiveError.adminProbeFailed("HTTP 503")
             }
         }
         let probe = FailingProbe()
@@ -1162,7 +1185,7 @@ public struct PulsarAdminBacklogProbe: DeadLetterBacklogProbe {
         let response = try await httpClient.execute(request, timeout: .seconds(10))
         let body = try await response.body.collect(upTo: 1 << 20)
         guard response.status == .ok else {
-            throw ReceiveError.malformedFrame(String(buffer: body))
+            throw ReceiveError.adminProbeFailed("HTTP \(response.status.code): \(String(buffer: body))")
         }
         struct Stats: Decodable { let msgBacklog: Int? }
         // ByteBuffer(bytes:)/readableBytesView are NIOCore spellings; the
@@ -1245,7 +1268,6 @@ git commit -m "feat: alert on dead letter backlog growth"
 ### Task 7: The WebSocket transport (Linux-only target)
 
 **Files:**
-- Create: `Sources/ContextReceiverWebSocket/ConsumerURL.swift`
 - Create: `Sources/ContextReceiverWebSocket/WebSocketMessageSource.swift`
 - Create: `Sources/ContextReceiver/ConsumerEndpoint.swift` — the URL builder lives in the **portable** target so its tests run on macOS
 - Modify: `Package.swift` — add `swift-websocket` dependency and the `ContextReceiverWebSocket` target
@@ -1426,10 +1448,27 @@ In `Package.swift` add the dependency and target:
     name: "ContextReceiverWebSocket",
     dependencies: [
         "ContextReceiver",
-        .product(name: "WSClient", package: "swift-websocket"),
+        // Platform-conditional so macOS never compiles swift-websocket at all.
+        // Without the condition, `swift build` on macOS fails for the whole
+        // package — including for OpportunityContext developers who never
+        // touch the receiver.
+        .product(name: "WSClient", package: "swift-websocket", condition: .when(platforms: [.linux])),
     ]
 ),
 ```
+
+The target's source must therefore also be platform-guarded, or macOS would compile
+`import WSClient` against a dependency that is not there. Wrap the **entire body** of
+`Sources/ContextReceiverWebSocket/WebSocketMessageSource.swift`:
+
+```swift
+#if os(Linux)
+// ...the whole implementation below...
+#endif
+```
+
+On macOS the module compiles empty. This keeps `swift build` and `swift test` working
+on macOS while the real transport exists only where it can build.
 
 - [ ] **Step 6: Implement the transport**
 
@@ -1555,7 +1594,9 @@ public actor WebSocketMessageSource: PulsarMessageSource {
     }
 
     private func send(_ json: String) async throws {
-        guard let outbound else { throw ReceiveError.malformedFrame("socket not connected") }
+        guard let outbound else {
+            throw ReceiveError.transportUnavailable("socket not connected")
+        }
         try await outbound.writeTextMessage(json)
     }
 }
@@ -1563,7 +1604,7 @@ public actor WebSocketMessageSource: PulsarMessageSource {
 
 - [ ] **Step 7: Verify the Linux build**
 
-macOS cannot compile this target. Run:
+The real implementation only compiles on Linux. Run:
 
 ```bash
 docker run --rm -v "$PWD":/src -w /src swift:6.2-noble \
@@ -1571,13 +1612,15 @@ docker run --rm -v "$PWD":/src -w /src swift:6.2-noble \
 echo "exit=$?"
 ```
 
-Expected: `exit=0`. Capture the exit code explicitly — a `tail` in a pipeline otherwise masks the compiler's status.
+Expected: `exit=0`. Capture the exit code explicitly — a `tail` in a pipeline otherwise masks the compiler's status, which has produced a false "verified" claim on this project before.
 
-Then confirm macOS is still healthy for everything else:
+Then confirm macOS is still healthy for the **whole package**, not just one target — this is what the `#if os(Linux)` guard and the conditional dependency exist to guarantee:
 
 ```bash
-swift build --target ContextReceiver && swift test --filter ContextReceiverTests
+swift build && swift test --filter ContextReceiverTests
 ```
+
+Both must succeed. If `swift build` fails on macOS, the guard or the dependency condition is wrong — fix it rather than narrowing the command.
 
 - [ ] **Step 8: Commit**
 
@@ -1717,14 +1760,23 @@ struct LivePulsarTests {
 
 Note: `PulsarRESTPublisher.produceBody` is `internal`, so add `@testable import ContextForwarder` if the direct call fails to resolve.
 
-In `Package.swift`:
+Wrap the whole test file body in `#if os(Linux)` for the same reason as Task 7, and make
+the manifest entry platform-conditional too:
 
 ```swift
 .testTarget(
     name: "ContextReceiverIntegrationTests",
-    dependencies: ["ContextReceiver", "ContextReceiverWebSocket", "ContextForwarder"]
+    dependencies: [
+        "ContextReceiver",
+        "ContextForwarder",
+        .target(name: "ContextReceiverWebSocket", condition: .when(platforms: [.linux])),
+    ]
 ),
 ```
+
+Verify afterwards that `swift test --filter ContextReceiverTests` still runs on macOS —
+a test target that drags in a Linux-only module would break the entire macOS test run,
+not just its own suite.
 
 - [ ] **Step 3: Run it against a live broker**
 
