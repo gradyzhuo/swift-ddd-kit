@@ -226,7 +226,7 @@ public actor WebSocketMessageSource: PulsarMessageSource {
         guard let outbound else {
             throw ReceiveError.transportUnavailable("socket not connected")
         }
-        try await outbound.writeTextMessage(json)
+        try await outbound.write(.text(json))
     }
 }
 
