@@ -40,12 +40,6 @@ let package = Package(
        .plugin(name: "GenerateKurrentDBProjectionsPlugin", targets: [
            "GenerateKurrentDBProjectionsPlugin"
        ]),
-       .executable(
-           name: "dddkit",
-           targets: ["DDDKitCLI"]),
-       .plugin(name: "DDDKitCreatePlugin", targets: [
-           "DDDKitCreatePlugin"
-       ]),
     ],
     dependencies: [
         .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.0.0"),
@@ -184,13 +178,6 @@ let package = Package(
                             "DomainEventGenerator",
                             .product(name: "ArgumentParser", package: "swift-argument-parser")
                           ]),
-        // Target name is "DDDKitCLI", not "dddkit": on case-insensitive filesystems
-        // (default macOS) "Sources/dddkit" collides with "Sources/DDDKit". The
-        // `.executable(name: "dddkit", ...)` product above is what users actually invoke.
-        .executableTarget(name: "DDDKitCLI",
-                          dependencies: [
-                            .product(name: "ArgumentParser", package: "swift-argument-parser")
-                          ]),
         .plugin(
           name: "DomainEventGeneratorPlugin",
           capability: .buildTool(),
@@ -228,19 +215,5 @@ let package = Package(
           dependencies: [
             "generate",
           ]),
-        .plugin(
-          name: "DDDKitCreatePlugin",
-          capability: .command(
-            intent: .custom(
-                verb: "dddkit-create",
-                description: "Scaffold a new swift-ddd-kit starter project (aggregate + usecases + KurrentDB wiring)."),
-            permissions: [
-                PluginPermission.writeToPackageDirectory(
-                    reason: "Writes the generated starter project's files to disk.")
-            ]),
-          dependencies: [
-            "DDDKitCLI",
-          ]),
-
     ]
 )

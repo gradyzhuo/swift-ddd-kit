@@ -153,33 +153,12 @@ Then add `DDDKit` and `KurrentSupport` to your target:
 )
 ```
 
-### `dddkit` CLI
+### Project scaffolding CLI
 
-`dddkit` scaffolds a runnable starter project (aggregate + use cases + KurrentDB
-wiring) — see `dddkit project create --help`.
-
-**Homebrew (macOS):**
-
-```bash
-brew tap gradyzhuo/tap
-brew install dddkit
-```
-
-**apt (Ubuntu/Debian, amd64/arm64):**
-
-```bash
-curl -fsSL https://gradyzhuo.github.io/swift-ddd-kit/apt/pubkey.gpg \
-  | sudo gpg --dearmor -o /usr/share/keyrings/dddkit.gpg
-echo "deb [signed-by=/usr/share/keyrings/dddkit.gpg] https://gradyzhuo.github.io/swift-ddd-kit/apt stable main" \
-  | sudo tee /etc/apt/sources.list.d/dddkit.list
-sudo apt update && sudo apt install dddkit
-```
-
-**From this package** (no separate install — works anywhere swift-ddd-kit is a dependency):
-
-```bash
-swift package dddkit-create OrderContext
-```
+Looking to scaffold a runnable starter project (aggregate + use cases + KurrentDB
+wiring)? That's now [swift-pangu-cli](https://github.com/gradyzhuo/swift-pangu-cli)
+(`pangu project create`), a standalone tool with no dependency on this package's
+library targets.
 
 ## Core Concepts
 
