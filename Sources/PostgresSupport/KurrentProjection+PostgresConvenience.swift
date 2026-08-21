@@ -32,6 +32,26 @@ extension KurrentProjection.TransactionalSubscriptionRunner where Provider == Po
         logger: Logger = Logger(label: "KurrentProjection.TransactionalSubscriptionRunner")
     ) {
         self.init(
+            client: LiveEventStoreClient(client: client),
+            transactionProvider: PostgresTransactionProvider(client: pgClient, logger: logger),
+            stream: stream,
+            groupName: groupName,
+            retryPolicy: retryPolicy,
+            logger: logger
+        )
+    }
+
+    /// Convenience init for the Postgres common case with a test-double `EventStoreClient`
+    /// (e.g. `InMemoryEventStoreClient`) — wraps `PostgresClient` in a `PostgresTransactionProvider` for you.
+    public convenience init(
+        client: any EventStoreClient,
+        pgClient: PostgresClient,
+        stream: String,
+        groupName: String,
+        retryPolicy: any KurrentProjection.RetryPolicy = KurrentProjection.MaxRetriesPolicy(max: 5),
+        logger: Logger = Logger(label: "KurrentProjection.TransactionalSubscriptionRunner")
+    ) {
+        self.init(
             client: client,
             transactionProvider: PostgresTransactionProvider(client: pgClient, logger: logger),
             stream: stream,

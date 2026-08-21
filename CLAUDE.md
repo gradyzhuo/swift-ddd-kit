@@ -25,7 +25,7 @@ swift run generate event --input Sources/MyTarget/event.yaml --config Sources/My
 swift run generate projection --input Sources/MyTarget/projection-model.yaml
 ```
 
-`DDDCoreTests` requires a local KurrentDB instance (connects to `localhost`). `EventSourcingTests` uses an in-memory `TestCoordinator` and can run without KurrentDB.
+`DDDCoreTests` and `KurrentSupportIntegrationTests` require a local KurrentDB instance (connects to `localhost`). `EventSourcingTests` uses an in-memory `InMemoryStorageCoordinator` and can run without KurrentDB. `KurrentSupportInMemoryTests` exercises `KurrentStorageCoordinator`/`KurrentProjection.PersistentSubscriptionRunner` end to end against `InMemoryEventStoreClient` (`KurrentSupportInMemory` target) — no KurrentDB needed either.
 
 ## Architecture Overview
 
@@ -38,6 +38,7 @@ DDDKit (umbrella re-export)
 ├── DDDCore          — Core DDD protocols: Entity, DomainEvent, AggregateRoot, DomainEventBus
 ├── EventSourcing    — Abstract event sourcing patterns: EventStorageCoordinator, EventSourcingRepository, EventSourcingProjector, ReadModel, CQRSProjectorInput/Output
 ├── KurrentSupport   — KurrentDB adapter: KurrentStorageCoordinator, EventTypeMapper, DomainEventBus+KurrentDB
+├── KurrentSupportInMemory — In-memory KurrentDB test double: InMemoryEventStoreClient (no live server needed)
 ├── EventBus         — In-memory event bus (EventBus class)
 ├── MigrationUtility — Event schema migration framework
 ├── DomainEventGenerator — YAML→Swift code generation library
@@ -59,9 +60,13 @@ DDDKit (umbrella re-export)
 
 **`EventSourcingRepository`** (EventSourcing) — Builds on coordinator: `find(byId:)`, `save(aggregateRoot:external:)`, `delete(byId:external:)`, `purge(byId:)`. Default implementations handle event replay and soft-delete logic.
 
-**`KurrentStorageCoordinator<StreamNaming: EventStreamNaming, Metadata: EventMetadata>`** (KurrentSupport) — Concrete `EventStore` wrapping a KurrentDB client. Stream names come from `StreamNaming`. The typed `Metadata?` passed to `append` is JSON-encoded into KurrentDB's `customMetadata` field; nil metadata writes no bytes.
+**`KurrentStorageCoordinator<StreamNaming: EventStreamNaming, Metadata: EventMetadata>`** (KurrentSupport) — Concrete `EventStore` wrapping an `any EventStoreClient` (not `KurrentDBClient` directly — see below). Stream names come from `StreamNaming`. The typed `Metadata?` passed to `append` is JSON-encoded into KurrentDB's `customMetadata` field; nil metadata writes no bytes.
 
-**`EventTypeMapper`** (KurrentSupport) — Converts a raw `RecordedEvent` from KurrentDB into a typed `DomainEvent`. Implementations switch on `eventData.eventType`.
+**`EventTypeMapper`** (KurrentSupport) — Converts an `any RecordedEventLike` (decoupled from KurrentDB's concrete `RecordedEvent`) into a typed `DomainEvent`. Implementations switch on `eventData.eventType`.
+
+**`EventStoreClient`** (KurrentSupport) — Narrow seam covering exactly the KurrentDB operations `KurrentStorageCoordinator`/`KurrentProjection` call: append/read/delete on a named stream, and subscribe/ack/nack on a persistent subscription. `RecordedEvent`/`ReadEvent`/`Streams`/`PersistentSubscriptions` (swift-kurrentdb) can't be constructed or conformed to from outside that package (no public initializers, gRPC-hardwired), so the seam is expressed in terms of `EventData` (already public) plus its own `RecordedEventLike`/`SubscriptionDelivery` DTOs. `LiveEventStoreClient` (KurrentSupport) is the production conformance, wrapping a real `KurrentDBClient`; `InMemoryEventStoreClient` (`KurrentSupportInMemory` target) needs no server at all — pass it to `KurrentStorageCoordinator`/`KurrentProjection.PersistentSubscriptionRunner`'s `client:` parameter in unit tests. Both runners and `KurrentStorageCoordinator` also keep a `client: KurrentDBClient` convenience initializer that wraps `LiveEventStoreClient` internally, so existing production call sites are unaffected.
+
+> **Breaking change (this repo and downstream apps):** `EventTypeMapper.mapping(eventData:)` and `KurrentProjection`'s `register(extractInput:...)` closures now take `any RecordedEventLike` instead of the concrete `RecordedEvent`. Call sites that only `switch eventData.eventType` / call `.decode(to:)` are source-compatible after updating the parameter type; code that read `RecordedEvent.streamIdentifier.name` should use the new `RecordedEventLike.streamName` property instead.
 
 **`EventSourcingProjector`** (EventSourcing) — CQRS read side. Requires `StorageCoordinator: EventStorageCoordinator`, `Input: CQRSProjectorInput`, and `ReadModelType: ReadModel`. The `execute(input:)` default fetches events and folds them into a `ReadModel` via `apply(readModel:events:)`.
 

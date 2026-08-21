@@ -31,7 +31,7 @@ private struct DemoModel: ReadModel, Codable, Sendable {
 private struct DemoInput: CQRSProjectorInput, Sendable { let id: String }
 
 private struct DemoEventMapper: EventTypeMapper {
-    func mapping(eventData: RecordedEvent) throws -> (any DomainEvent)? {
+    func mapping(eventData: any RecordedEventLike) throws -> (any DomainEvent)? {
         switch eventData.eventType {
         case "DemoEvent":
             return try eventData.decode(to: DemoEvent.self)
@@ -64,8 +64,8 @@ private struct DemoProjector: EventSourcingProjector, Sendable {
 
 private struct IntentionalApplyFailure: Error {}
 
-private func demoAggregateId(from record: RecordedEvent) -> String? {
-    let name = record.streamIdentifier.name
+private func demoAggregateId(from record: any RecordedEventLike) -> String? {
+    let name = record.streamName
     let prefix = "TxDemo-"
     guard name.hasPrefix(prefix) else { return nil }
     return String(name.dropFirst(prefix.count))

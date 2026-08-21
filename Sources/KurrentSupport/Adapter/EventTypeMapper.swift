@@ -7,9 +7,8 @@
 
 import DDDCore
 import EventSourcing
-import KurrentDB
 import Foundation
 
 public protocol EventTypeMapper: Sendable {
-    func mapping(eventData: RecordedEvent) throws -> (any DomainEvent)?
+    func mapping(eventData: any RecordedEventLike) throws -> (any DomainEvent)?
 }

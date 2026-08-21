@@ -43,7 +43,7 @@ struct KurrentProjectionRunnerHappyPathTests {
             groupName: groupName
         )
         .register(extractInput: { record -> String? in
-            record.streamIdentifier.name
+            record.streamName
         }, execute: { (streamName: String) in
             captured.withLock { $0.append(streamName) }
         })

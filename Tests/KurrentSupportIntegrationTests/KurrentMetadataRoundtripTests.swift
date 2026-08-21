@@ -19,7 +19,7 @@ private struct RoundtripEvent: DomainEvent {
 
 private struct RoundtripEventMapper: EventTypeMapper {
     init() {}
-    func mapping(eventData: RecordedEvent) throws -> (any DomainEvent)? {
+    func mapping(eventData: any RecordedEventLike) throws -> (any DomainEvent)? {
         guard eventData.eventType == "RoundtripEvent" else { return nil }
         guard var event = try eventData.decode(to: RoundtripEvent.self) else { return nil }
         if !eventData.customMetadata.isEmpty {
