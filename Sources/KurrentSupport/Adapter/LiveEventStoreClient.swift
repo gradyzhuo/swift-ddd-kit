@@ -90,9 +90,10 @@ final class LiveSubscriptionSession: PersistentSubscriptionSession, Sendable {
         let (stream, continuation) = AsyncThrowingStream<SubscriptionDelivery, Error>.makeStream()
         events = stream
 
-        Task {
+        let bridgeTask = Task {
             do {
                 for try await result in subscription.events {
+                    try Task.checkCancellation()
                     let record = result.event.record
                     self.pendingReadEvents.withLock { $0[record.id] = result.event }
                     continuation.yield(SubscriptionDelivery(event: record, retryCount: Int(result.retryCount)))
@@ -102,6 +103,11 @@ final class LiveSubscriptionSession: PersistentSubscriptionSession, Sendable {
                 continuation.finish(throwing: error)
             }
         }
+        // The real subscription is only observed by this producer task — if the
+        // consumer stops iterating `events` (runner cancelled/returns) without this,
+        // the task keeps pulling from the live gRPC subscription forever, holding
+        // its connection and session open.
+        continuation.onTermination = { _ in bridgeTask.cancel() }
     }
 
     func ack(_ deliveries: [SubscriptionDelivery]) async throws {

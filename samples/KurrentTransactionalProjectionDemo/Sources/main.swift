@@ -124,10 +124,10 @@ struct OrderRegistryProjector: OrderRegistryProjectorProtocol, Sendable {
     }
 }
 
-// MARK: - Helper to extract orderId from a RecordedEvent (Order-{id} → {id})
+// MARK: - Helper to extract orderId from a RecordedEventLike (Order-{id} → {id})
 
-func orderId(from record: RecordedEvent) -> String? {
-    let name = record.streamIdentifier.name
+func orderId(from record: any RecordedEventLike) -> String? {
+    let name = record.streamName
     let prefix = "Order-"
     guard name.hasPrefix(prefix) else { return nil }
     return String(name.dropFirst(prefix.count))

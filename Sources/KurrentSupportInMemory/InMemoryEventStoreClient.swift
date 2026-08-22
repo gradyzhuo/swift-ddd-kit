@@ -134,9 +134,26 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     }
 
     public func deleteStream(name: String, expectedRevision: StreamRevision) async throws {
-        if case .streamExists = expectedRevision, streams[name] == nil {
-            throw EventStoreClientError.streamNotFound
+        let existing = streams[name]
+        let lastRevision = existing?.last?.revision
+
+        switch expectedRevision {
+        case .any:
+            break
+        case .noStream:
+            guard existing == nil else {
+                throw EventStoreClientError.wrongExpectedRevision(current: lastRevision)
+            }
+        case .streamExists:
+            guard existing != nil else {
+                throw EventStoreClientError.streamNotFound
+            }
+        case let .at(expected):
+            guard lastRevision == expected else {
+                throw EventStoreClientError.wrongExpectedRevision(current: lastRevision)
+            }
         }
+
         streams.removeValue(forKey: name)
     }
 
