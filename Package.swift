@@ -29,6 +29,9 @@ let package = Package(
             name: "PostgresSupport",
             targets: ["PostgresSupport"]),
         .library(
+            name: "KurrentSupportInMemory",
+            targets: ["KurrentSupportInMemory"]),
+        .library(
             name: "DomainEventGenerator",
             targets: ["DomainEventGenerator"]),
        .plugin(name: "DomainEventGeneratorPlugin", targets: [
@@ -110,6 +113,22 @@ let package = Package(
                 .product(name: "KurrentDB", package: "swift-kurrentdb"),
                 .product(name: "PostgresNIO", package: "postgres-nio"),
                 .product(name: "Logging", package: "swift-log"),
+            ]),
+        .target(
+            name: "KurrentSupportInMemory",
+            dependencies: [
+                "KurrentSupport",
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
+            ]),
+        .testTarget(
+            name: "KurrentSupportInMemoryTests",
+            dependencies: [
+                "KurrentSupportInMemory",
+                "KurrentSupport",
+                "EventSourcing",
+                "ReadModelPersistence",
+                "DDDCore",
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
             ]),
         .testTarget(
             name: "ReadModelPersistencePostgresIntegrationTests",

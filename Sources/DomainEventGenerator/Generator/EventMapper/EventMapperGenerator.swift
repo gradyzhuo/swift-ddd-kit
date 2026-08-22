@@ -25,7 +25,7 @@ package struct EventMapperGenerator {
 
     \(accessLevel.rawValue) init(){}
 
-    \(accessLevel.rawValue) func mapping(eventData: RecordedEvent) throws -> (any DomainEvent)? {
+    \(accessLevel.rawValue) func mapping(eventData: any RecordedEventLike) throws -> (any DomainEvent)? {
 """)
         
         lines.append("""

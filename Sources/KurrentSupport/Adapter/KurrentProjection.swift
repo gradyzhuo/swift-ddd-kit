@@ -56,7 +56,7 @@ import ReadModelPersistence
 ///
 /// When subscribing to a system projection stream like `$ce-<Category>` or `$et-<Type>`,
 /// you must create the persistent subscription with `resolveLink = true`. Otherwise the
-/// `RecordedEvent` delivered to your `extractInput` closure will reference the system
+/// event delivered to your `extractInput` closure will reference the system
 /// stream itself (e.g., `$ce-Order`) rather than the original aggregate stream
 /// (e.g., `Order-<id>`). This is a KurrentDB requirement, not enforced by the runner.
 ///
@@ -66,6 +66,13 @@ import ReadModelPersistence
 ///         options.settings.resolveLink = true
 ///     }
 /// ```
+///
+/// ## Test doubles
+///
+/// Both runners accept `client: any EventStoreClient` in addition to a concrete
+/// `KurrentDBClient` — pass an `InMemoryEventStoreClient` (see the
+/// `KurrentSupportInMemory` target) to exercise `run()`/`register()` in unit tests
+/// with no live KurrentDB instance.
 ///
 /// ## Phase 2 (deferred)
 ///
@@ -106,7 +113,7 @@ public enum KurrentProjection {
 
     public final class PersistentSubscriptionRunner: Sendable {
 
-        private let client: KurrentDBClient
+        private let client: any EventStoreClient
         private let stream: String
         private let groupName: String
         private let retryPolicy: any RetryPolicy
@@ -117,7 +124,7 @@ public enum KurrentProjection {
         private let _registrations = Mutex<[Registration]>([])
 
         public init(
-            client: KurrentDBClient,
+            client: any EventStoreClient,
             stream: String,
             groupName: String,
             retryPolicy: any RetryPolicy = MaxRetriesPolicy(max: 5),
@@ -128,6 +135,24 @@ public enum KurrentProjection {
             self.groupName = groupName
             self.retryPolicy = retryPolicy
             self.logger = logger
+        }
+
+        /// Convenience initializer for the common case of a real KurrentDB connection.
+        /// Wraps `client` in a `LiveEventStoreClient` internally.
+        public convenience init(
+            client: KurrentDBClient,
+            stream: String,
+            groupName: String,
+            retryPolicy: any RetryPolicy = MaxRetriesPolicy(max: 5),
+            logger: Logger = Logger(label: "KurrentProjection.PersistentSubscriptionRunner")
+        ) {
+            self.init(
+                client: LiveEventStoreClient(client: client),
+                stream: stream,
+                groupName: groupName,
+                retryPolicy: retryPolicy,
+                logger: logger
+            )
         }
 
         /// Register a projector with a long-lived (non-transactional) store.
@@ -147,7 +172,7 @@ public enum KurrentProjection {
             projector: Projector,
             store: Store,
             eventFilter: (any EventTypeFilter)? = nil,
-            extractInput: @Sendable @escaping (RecordedEvent) -> Projector.Input?
+            extractInput: @Sendable @escaping (any RecordedEventLike) -> Projector.Input?
         ) -> Self
         where Store.Model == Projector.ReadModelType,
               Store.Model.ID == String,
@@ -181,7 +206,7 @@ public enum KurrentProjection {
         @discardableResult
         public func register<Input: Sendable>(
             eventFilter: (any EventTypeFilter)? = nil,
-            extractInput: @Sendable @escaping (RecordedEvent) -> Input?,
+            extractInput: @Sendable @escaping (any RecordedEventLike) -> Input?,
             execute: @Sendable @escaping (Input) async throws -> Void
         ) -> Self {
             let registration = Registration(dispatch: { record in
@@ -197,7 +222,7 @@ public enum KurrentProjection {
 
         /// Dispatch a single recorded event to all registered projectors in parallel.
         /// Throws if any projector throws (TaskGroup semantics — others are cancelled).
-        internal func dispatch(record: RecordedEvent) async throws {
+        internal func dispatch(record: any RecordedEventLike) async throws {
             let snapshot = _registrations.withLock { $0 }
             try await withThrowingTaskGroup(of: Void.self) { group in
                 for registration in snapshot {
@@ -220,43 +245,30 @@ public enum KurrentProjection {
         /// enters `dispatch(record:)` it runs to completion (or until the registered
         /// closures themselves observe `Task.isCancelled`).
         public func run() async throws {
-            let subscription = try await client
-                .persistentSubscriptions(stream: stream, group: groupName)
-                .subscribe()
+            let subscription = try await client.subscribePersistent(stream: stream, group: groupName)
 
-            for try await result in subscription.events {
+            for try await delivery in subscription.events {
                 if Task.isCancelled { return }
 
-                let record = result.event.record
                 do {
-                    try await dispatch(record: record)
-                    try await subscription.ack(readEvents: result.event)
+                    try await dispatch(record: delivery.event)
+                    try await subscription.ack([delivery])
                 } catch {
-                    try await handleFailure(error: error, result: result, subscription: subscription)
+                    try await handleFailure(error: error, delivery: delivery, subscription: subscription)
                 }
             }
         }
 
         private func handleFailure(
             error: any Error,
-            result: PersistentSubscription.EventResult,
-            subscription: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Subscription<PersistentSubscription.EventResult>
+            delivery: SubscriptionDelivery,
+            subscription: any PersistentSubscriptionSession
         ) async throws {
-            let action = retryPolicy.decide(error: error, retryCount: Int(result.retryCount))
-            let kurrentAction: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Nack.Action = switch action {
-                case .retry: .retry
-                case .skip:  .skip
-                case .park:  .park
-                case .stop:  .stop
-            }
+            let action = retryPolicy.decide(error: error, retryCount: delivery.retryCount)
             do {
-                try await subscription.nack(
-                    readEvents: [result.event],
-                    action: kurrentAction,
-                    reason: "\(error)"
-                )
+                try await subscription.nack([delivery], action: action, reason: "\(error)")
             } catch let nackError {
-                logger.error("nack failed for event \(result.event.record.id): \(nackError)")
+                logger.error("nack failed for event \(delivery.event.id): \(nackError)")
                 // Continue — nack failure should not crash the run loop.
             }
 
@@ -264,7 +276,7 @@ public enum KurrentProjection {
             // decision to stop the runner is independent of whether the server
             // received the nack message.
             if case .stop = action {
-                throw RunnerStopped(reason: "RetryPolicy returned .stop after \(result.retryCount) retries: \(error)")
+                throw RunnerStopped(reason: "RetryPolicy returned .stop after \(delivery.retryCount) retries: \(error)")
             }
         }
 
@@ -287,7 +299,7 @@ public enum KurrentProjection {
     }
 
     fileprivate struct Registration: Sendable {
-        let dispatch: @Sendable (RecordedEvent) async throws -> Void
+        let dispatch: @Sendable (any RecordedEventLike) async throws -> Void
     }
 
     /// Transactional projection runner — every event triggers a single shared
@@ -299,7 +311,7 @@ public enum KurrentProjection {
     /// the only difference is the per-event transaction scope.
     public final class TransactionalSubscriptionRunner<Provider: TransactionProvider>: Sendable {
 
-        private let client: KurrentDBClient
+        private let client: any EventStoreClient
         private let transactionProvider: Provider
         private let stream: String
         private let groupName: String
@@ -307,11 +319,11 @@ public enum KurrentProjection {
         private let logger: Logger
 
         // Registrations: closure captures projector + storeFactory + extractInput;
-        // signature is (RecordedEvent, Provider.Transaction) async throws -> Void.
+        // signature is (any RecordedEventLike, Provider.Transaction) async throws -> Void.
         private let _registrations = Mutex<[TransactionalRegistration<Provider.Transaction>]>([])
 
         public init(
-            client: KurrentDBClient,
+            client: any EventStoreClient,
             transactionProvider: Provider,
             stream: String,
             groupName: String,
@@ -324,6 +336,26 @@ public enum KurrentProjection {
             self.groupName = groupName
             self.retryPolicy = retryPolicy
             self.logger = logger
+        }
+
+        /// Convenience initializer for the common case of a real KurrentDB connection.
+        /// Wraps `client` in a `LiveEventStoreClient` internally.
+        public convenience init(
+            client: KurrentDBClient,
+            transactionProvider: Provider,
+            stream: String,
+            groupName: String,
+            retryPolicy: any RetryPolicy = MaxRetriesPolicy(max: 5),
+            logger: Logger = Logger(label: "KurrentProjection.TransactionalSubscriptionRunner")
+        ) {
+            self.init(
+                client: LiveEventStoreClient(client: client),
+                transactionProvider: transactionProvider,
+                stream: stream,
+                groupName: groupName,
+                retryPolicy: retryPolicy,
+                logger: logger
+            )
         }
 
         /// Register a projector with a per-event tx-bound store factory.
@@ -339,7 +371,7 @@ public enum KurrentProjection {
             projector: Projector,
             storeFactory: @Sendable @escaping (Provider.Transaction) -> Store,
             eventFilter: (any EventTypeFilter)? = nil,
-            extractInput: @Sendable @escaping (RecordedEvent) -> Projector.Input?
+            extractInput: @Sendable @escaping (any RecordedEventLike) -> Projector.Input?
         ) -> Self
         where Store.Model == Projector.ReadModelType,
               Store.Transaction == Provider.Transaction,
@@ -396,22 +428,19 @@ public enum KurrentProjection {
         ///
         /// Cancellation is observed between events, not mid-dispatch.
         public func run() async throws {
-            let subscription = try await client
-                .persistentSubscriptions(stream: stream, group: groupName)
-                .subscribe()
+            let subscription = try await client.subscribePersistent(stream: stream, group: groupName)
 
             do {
-                for try await result in subscription.events {
+                for try await delivery in subscription.events {
                     if Task.isCancelled { return }
 
-                    let record = result.event.record
                     do {
                         try await transactionProvider.withTransaction { tx in
-                            try await self.dispatch(record: record, transaction: tx)
+                            try await self.dispatch(record: delivery.event, transaction: tx)
                         }
-                        try await subscription.ack(readEvents: result.event)
+                        try await subscription.ack([delivery])
                     } catch {
-                        try await handleFailure(error: error, result: result, subscription: subscription)
+                        try await handleFailure(error: error, delivery: delivery, subscription: subscription)
                     }
                 }
             } catch is CancellationError {
@@ -423,7 +452,7 @@ public enum KurrentProjection {
         /// the supplied transaction. Throws if any projector throws — TaskGroup
         /// cancels remaining children, the throw bubbles to `withTransaction`
         /// which rolls back.
-        internal func dispatch(record: RecordedEvent, transaction tx: Provider.Transaction) async throws {
+        internal func dispatch(record: any RecordedEventLike, transaction tx: Provider.Transaction) async throws {
             let snapshot = _registrations.withLock { $0 }
             try await withThrowingTaskGroup(of: Void.self) { group in
                 for registration in snapshot {
@@ -437,24 +466,14 @@ public enum KurrentProjection {
 
         private func handleFailure(
             error: any Error,
-            result: PersistentSubscription.EventResult,
-            subscription: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Subscription<PersistentSubscription.EventResult>
+            delivery: SubscriptionDelivery,
+            subscription: any PersistentSubscriptionSession
         ) async throws {
-            let action = retryPolicy.decide(error: error, retryCount: Int(result.retryCount))
-            let kurrentAction: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Nack.Action = switch action {
-                case .retry: .retry
-                case .skip:  .skip
-                case .park:  .park
-                case .stop:  .stop
-            }
+            let action = retryPolicy.decide(error: error, retryCount: delivery.retryCount)
             do {
-                try await subscription.nack(
-                    readEvents: [result.event],
-                    action: kurrentAction,
-                    reason: "\(error)"
-                )
+                try await subscription.nack([delivery], action: action, reason: "\(error)")
             } catch let nackError {
-                logger.error("nack failed for event \(result.event.record.id): \(nackError)")
+                logger.error("nack failed for event \(delivery.event.id): \(nackError)")
                 // Continue — nack failure should not crash the run loop.
             }
 
@@ -462,12 +481,12 @@ public enum KurrentProjection {
             // decision to stop the runner is independent of whether the server
             // received the nack message.
             if case .stop = action {
-                throw RunnerStopped(reason: "RetryPolicy returned .stop after \(result.retryCount) retries: \(error)")
+                throw RunnerStopped(reason: "RetryPolicy returned .stop after \(delivery.retryCount) retries: \(error)")
             }
         }
     }
 
     fileprivate struct TransactionalRegistration<Transaction: Sendable>: Sendable {
-        let dispatch: @Sendable (RecordedEvent, Transaction) async throws -> Void
+        let dispatch: @Sendable (any RecordedEventLike, Transaction) async throws -> Void
     }
 }

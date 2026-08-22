@@ -15,11 +15,17 @@ public final class KurrentStorageCoordinator<
 >: EventStore {
     let logger = Logger(label: "KurrentStorageCoordinator")
     let eventMapper: any EventTypeMapper
-    let client: KurrentDBClient
+    let client: any EventStoreClient
 
-    public init(client: KurrentDBClient, eventMapper: any EventTypeMapper) {
+    public init(client: any EventStoreClient, eventMapper: any EventTypeMapper) {
         self.eventMapper = eventMapper
         self.client = client
+    }
+
+    /// Convenience initializer for the common case of a real KurrentDB connection.
+    /// Wraps `client` in a `LiveEventStoreClient` internally.
+    public convenience init(client: KurrentDBClient, eventMapper: any EventTypeMapper) {
+        self.init(client: LiveEventStoreClient(client: client), eventMapper: eventMapper)
     }
 
     public func append(
@@ -39,33 +45,21 @@ public final class KurrentStorageCoordinator<
                 customMetadata: metadataBytes
             )
         }
-        let stream = client.streams(specified: streamName)
-        let response = try await stream.append(events: eventDataList) {
-            // A `nil` version means the aggregate has never been persisted —
-            // expect `.noStream` so a concurrent/duplicate create collides
-            // with the existing stream instead of silently succeeding under
-            // `.any` (which skips the concurrency check altogether).
-            $0.expectedRevision = version.map { .at(UInt64($0)) } ?? .noStream
-        }
-        return response.currentRevision.flatMap { UInt64($0) }
+        // A `nil` version means the aggregate has never been persisted —
+        // expect `.noStream` so a concurrent/duplicate create collides
+        // with the existing stream instead of silently succeeding under
+        // `.any` (which skips the concurrency check altogether).
+        let expectedRevision: StreamRevision = version.map { .at($0) } ?? .noStream
+        return try await client.append(events: eventDataList, toStream: streamName, category: StreamNaming.category, expectedRevision: expectedRevision)
     }
 
     public func fetchEvents(byId id: String) async throws
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         let streamName = StreamNaming.getStreamName(id: id)
         do {
-            let stream = client.streams(specified: streamName)
-            let recordEvents = try await stream.read {
-                $0.direction = .forward
-                $0.revision = .start
-                $0.resolveLinks = true
-            }.map { response in
-                try response.event.record
-            }.reduce(.init()) { partialResult, event in
-                return partialResult + [event]
-            }
+            let records = try await client.readStream(name: streamName, from: .start, resolveLinks: true)
 
-            let eventWrappers: [EventWrapped] = recordEvents.reduce(into: .init()) {
+            let eventWrappers: [EventWrapped] = records.reduce(into: .init()) {
                 do {
                     guard let event = try self.eventMapper.mapping(eventData: $1) else {
                         return
@@ -87,8 +81,8 @@ public final class KurrentStorageCoordinator<
             }
 
             return (events: sortedEvents, latestRevision: latestRevision)
-        } catch KurrentError.resourceNotFound(let reason) {
-            logger.warning("Skip an error happened in esdb, with reason: \(reason)")
+        } catch EventStoreClientError.streamNotFound {
+            logger.warning("Skip an error happened, stream not found: \(streamName)")
             return nil
         } catch {
             logger.error("The error happened when fetching events: \(error)")
@@ -100,18 +94,9 @@ public final class KurrentStorageCoordinator<
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         let streamName = StreamNaming.getStreamName(id: id)
         do {
-            let stream = client.streams(specified: streamName)
-            let recordEvents = try await stream.read {
-                $0.direction = .forward
-                $0.revision = .specified(revision + 1)
-                $0.resolveLinks = true
-            }.map { response in
-                try response.event.record
-            }.reduce(.init()) { partialResult, event in
-                return partialResult + [event]
-            }
+            let records = try await client.readStream(name: streamName, from: .specified(revision + 1), resolveLinks: true)
 
-            let eventWrappers: [EventWrapped] = recordEvents.reduce(into: .init()) {
+            let eventWrappers: [EventWrapped] = records.reduce(into: .init()) {
                 do {
                     guard let event = try self.eventMapper.mapping(eventData: $1) else {
                         return
@@ -132,8 +117,8 @@ public final class KurrentStorageCoordinator<
             }
 
             return (events: sortedEvents, latestRevision: latestRevision)
-        } catch KurrentError.resourceNotFound(let reason) {
-            logger.warning("Skip an error happened in esdb, with reason: \(reason)")
+        } catch EventStoreClientError.streamNotFound {
+            logger.warning("Skip an error happened, stream not found: \(streamName)")
             return nil
         } catch {
             logger.error("The error happened when fetching events: \(error)")
@@ -143,6 +128,6 @@ public final class KurrentStorageCoordinator<
 
     public func purge(byId id: String) async throws {
         let streamName = StreamNaming.getStreamName(id: id)
-        try await self.client.streams(specified: streamName).delete()
+        try await self.client.deleteStream(name: streamName, expectedRevision: .streamExists)
     }
 }
