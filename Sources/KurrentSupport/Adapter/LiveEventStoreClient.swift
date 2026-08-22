@@ -67,6 +67,12 @@ public struct LiveEventStoreClient: EventStoreClient {
     }
 
     public func subscribePersistent(stream: String, group: String) async throws -> any PersistentSubscriptionSession {
+        if let category = CategoryProjectionStream.category(forStream: stream), category.contains("-") {
+            // A dashed category can never receive anything on a real cluster (see
+            // `EventStoreClientError.unroutableCategory`) — fail now rather than leave
+            // the runner subscribed forever with no deliveries.
+            throw EventStoreClientError.unroutableCategory(stream: stream)
+        }
         let subscription = try await client.persistentSubscriptions(stream: stream, group: group).subscribe()
         return LiveSubscriptionSession(subscription: subscription)
     }

@@ -49,14 +49,16 @@ public protocol PersistentSubscriptionSession: Sendable {
 /// actually call. `LiveEventStoreClient` wraps a real `KurrentDBClient`;
 /// `InMemoryEventStoreClient` (KurrentSupportInMemory) needs no server at all.
 public protocol EventStoreClient: Sendable {
-    /// - Parameter category: The stream's category, exactly as declared by the caller's
-    ///   `EventStreamNaming.category` — e.g. `"Order"` for stream `"Order-42"`. Passed
-    ///   explicitly rather than re-derived from `name` by splitting on `"-"`: a category
-    ///   that itself contains a dash (a `.custom("Sales-Order")` rule, say) would make a
-    ///   naive first-dash split disagree with the category a `$ce-Sales-Order` subscriber
-    ///   asks for. `LiveEventStoreClient` ignores this — real KurrentDB derives category
-    ///   server-side regardless of what's passed. `InMemoryEventStoreClient` uses it as
-    ///   the ground truth for routing to `$ce-<category>` persistent-subscription sessions.
+    /// - Parameter category: The stream's category, as declared by the caller's
+    ///   `EventStreamNaming.category` — e.g. `"Order"` for stream `"Order-42"`. Both
+    ///   conformances currently ignore this for `$ce-<category>` routing: real KurrentDB's
+    ///   `$by_category` standard projection derives category server-side from the stream
+    ///   name's segment up to its *first* `-`, not from any value the appending client
+    ///   supplies, so `InMemoryEventStoreClient` must derive it the same way to stay a
+    ///   faithful test double — a declared category containing its own dash (a
+    ///   `.custom("Sales-Order")` rule, say) still only contributes `"Sales"` on a real
+    ///   cluster. The parameter is kept for interface symmetry with the caller's naming
+    ///   convention and possible future use, not because either conformance trusts it today.
     @discardableResult
     func append(events: [EventData], toStream name: String, category: String, expectedRevision: StreamRevision) async throws -> UInt64?
     func readStream(name: String, from revision: RevisionCursor, resolveLinks: Bool) async throws -> [any RecordedEventLike]
@@ -75,4 +77,24 @@ public enum EventStoreClientError: Error, Sendable, Equatable {
     /// doesn't emulate (e.g. `$et-<EventType>`, `$all`) — only `$ce-<Category>` is understood.
     /// Raised instead of silently returning a session that will never receive anything.
     case unsupportedProjection(stream: String)
+    /// `subscribePersistent` was asked for a `$ce-<category>` stream whose `<category>`
+    /// itself contains a `-`. KurrentDB's `$by_category` standard projection always
+    /// derives a stream's category from the segment up to its *first* dash, so no stream
+    /// can ever be categorized under a name that itself has an embedded dash — the
+    /// subscription would never receive anything on a real cluster. Raised at subscribe
+    /// time instead of leaving a persistent-subscription runner running forever with no
+    /// deliveries.
+    case unroutableCategory(stream: String)
+}
+
+/// Shared by both `EventStoreClient` conformances so `$ce-<category>` handling stays
+/// consistent between them.
+public enum CategoryProjectionStream {
+    /// `"$ce-<category>"` → `"<category>"`, or `nil` if `stream` isn't a
+    /// category-projection stream at all.
+    public static func category(forStream stream: String) -> String? {
+        let prefix = "$ce-"
+        guard stream.hasPrefix(prefix) else { return nil }
+        return String(stream.dropFirst(prefix.count))
+    }
 }

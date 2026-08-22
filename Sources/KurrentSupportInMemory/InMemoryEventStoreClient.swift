@@ -24,9 +24,13 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         let revision: UInt64
         let customMetadata: Data
         let streamName: String
-        /// The category the caller declared for this stream (`EventStreamNaming.category`),
-        /// passed in at append time rather than re-derived from `streamName` — see the
-        /// doc comment on `EventStoreClient.append`.
+        /// The category as KurrentDB's own `$by_category` standard projection would
+        /// derive it: the segment of `streamName` up to (not including) its first `-`.
+        /// Deliberately *not* the caller-declared `EventStreamNaming.category` — a
+        /// custom category with its own dash (e.g. `.custom("Sales-Order")`, stream
+        /// `"Sales-Order-1"`) still only contributes `"Sales"` to the real `$ce-Sales`
+        /// stream server-side. Routing here must reproduce that, or tests against
+        /// this fake would pass for a `$ce-` subscription that never fires for real.
         let category: String
         let payloadData: Data
         /// Global append order across all streams — the only way to interleave
@@ -68,6 +72,11 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         category: String,
         expectedRevision: StreamRevision
     ) async throws -> UInt64? {
+        // `category` (the caller-declared `EventStreamNaming.category`) is ignored for
+        // routing, same as `LiveEventStoreClient` ignores it — see `EventStoreClient.append`'s
+        // doc comment. `$ce-<Category>` routing must match what real KurrentDB derives
+        // from the stream name itself.
+        let systemCategory = Self.systemCategory(forStreamName: name)
         var existing = streams[name] ?? []
         let lastRevision = existing.last?.revision
 
@@ -98,7 +107,7 @@ public actor InMemoryEventStoreClient: EventStoreClient {
                 revision: nextRevision,
                 customMetadata: event.customMetadata ?? Data(),
                 streamName: name,
-                category: category,
+                category: systemCategory,
                 payloadData: try event.payload.data,
                 globalSequence: globalSequenceCounter
             ))
@@ -108,7 +117,7 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         existing.append(contentsOf: stored)
         streams[name] = existing
 
-        deliverToSubscriptions(stored, streamName: name, category: category)
+        deliverToSubscriptions(stored, streamName: name, category: systemCategory)
 
         return existing.last?.revision
     }
@@ -164,8 +173,17 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         // `$by_category`-style name, etc. — would otherwise create a session
         // that looks fine but silently never receives anything. Fail loudly
         // instead: a hung test with a clear error beats a hung test with none.
-        if target.hasPrefix("$"), categoryProjectionName(target) == nil {
-            throw EventStoreClientError.unsupportedProjection(stream: target)
+        if target.hasPrefix("$") {
+            guard let category = categoryProjectionName(target) else {
+                throw EventStoreClientError.unsupportedProjection(stream: target)
+            }
+            // A category containing its own dash can never be produced by real
+            // KurrentDB's `$by_category` projection (see `systemCategory(forStreamName:)`),
+            // so no stream will ever be routed here — fail now instead of a session
+            // that silently never receives anything.
+            guard !category.contains("-") else {
+                throw EventStoreClientError.unroutableCategory(stream: target)
+            }
         }
 
         let key = SubscriptionKey(stream: target, group: group)
@@ -200,12 +218,19 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         return streams[target] ?? []
     }
 
-    /// `"$ce-<Category>"` → `"<Category>"` (kept whole, dashes and all — a category
-    /// name may itself contain `"-"`), or `nil` if `target` isn't a category-projection stream.
     private func categoryProjectionName(_ target: String) -> String? {
-        let prefix = "$ce-"
-        guard target.hasPrefix(prefix) else { return nil }
-        return String(target.dropFirst(prefix.count))
+        CategoryProjectionStream.category(forStream: target)
+    }
+
+    /// KurrentDB's `$by_category` standard projection categorizes a stream by
+    /// everything before its *first* `-`, regardless of what the appending code
+    /// considers its "real" category. A `.custom("Sales-Order")` category rule
+    /// producing stream `"Sales-Order-1"` therefore lands under `$ce-Sales`, not
+    /// `$ce-Sales-Order`, on a real cluster — mirrored here so this fake's
+    /// `$ce-<Category>` routing matches it.
+    private static func systemCategory(forStreamName name: String) -> String {
+        guard let dashIndex = name.firstIndex(of: "-") else { return name }
+        return String(name[..<dashIndex])
     }
 
     private func deliverToSubscriptions(_ newEvents: [StoredEvent], streamName: String, category: String) {

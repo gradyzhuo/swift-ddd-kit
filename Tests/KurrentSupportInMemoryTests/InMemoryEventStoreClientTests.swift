@@ -126,13 +126,15 @@ struct InMemoryEventStoreClientTests {
         }
     }
 
-    @Test("category with its own dash is passed through, not re-derived from the stream name")
-    func multiDashCategoryIsNotMisparsed() async throws {
+    @Test("a category with its own dash still routes by the stream name's first dash, matching real KurrentDB")
+    func multiDashCategoryRoutesLikeRealKurrentDB() async throws {
         // Regression test: `EventStreamNaming.categoryRule` allows `.custom("Sales-Order")`,
-        // giving stream names like `"Sales-Order-<id>"`. A naive "split on the first dash"
-        // would derive category `"Sales"` here — wrong, and inconsistent with what a
-        // `$ce-Sales-Order` subscriber asks for. `category` must be taken from the caller,
-        // not guessed from `toStream`.
+        // giving stream names like `"Sales-Order-<id>"`. Real KurrentDB's `$by_category`
+        // standard projection derives category from the stream name's segment up to its
+        // *first* `-` server-side, regardless of what the appending client declares — so
+        // `"Sales-Order-1"` lands under `$ce-Sales`, never `$ce-Sales-Order`. This fake must
+        // reproduce that, or a test passing against it would give false confidence about a
+        // subscription that never fires against a real cluster.
         let client = InMemoryEventStoreClient()
         _ = try await client.append(
             events: [EventData(eventType: "SampleEvent", model: SampleEvent(text: "x"))],
@@ -141,9 +143,21 @@ struct InMemoryEventStoreClientTests {
             expectedRevision: .noStream
         )
 
-        let session = try await client.subscribePersistent(stream: "$ce-Sales-Order", group: "g")
+        let session = try await client.subscribePersistent(stream: "$ce-Sales", group: "g")
         var iterator = session.events.makeAsyncIterator()
         let delivery = try await iterator.next()
         #expect(delivery?.event.eventType == "SampleEvent")
+    }
+
+    @Test("subscribing to a $ce- stream whose category has its own dash throws unroutableCategory")
+    func subscribingToDashedCategoryStreamThrows() async throws {
+        // `$ce-Sales-Order` can never receive anything on a real cluster — no stream is
+        // ever categorized under a name containing a dash. Failing at subscribe time beats
+        // returning a session that silently never delivers (same rationale as
+        // `unsupportedProjection` for `$et-`/`$all`).
+        let client = InMemoryEventStoreClient()
+        await #expect(throws: EventStoreClientError.unroutableCategory(stream: "$ce-Sales-Order")) {
+            _ = try await client.subscribePersistent(stream: "$ce-Sales-Order", group: "g")
+        }
     }
 }
