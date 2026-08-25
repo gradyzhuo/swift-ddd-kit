@@ -45,7 +45,7 @@ let package = Package(
        ]),
     ],
     dependencies: [
-        .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.0.0"),
+        .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.3.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.5.4"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3"),
@@ -90,6 +90,7 @@ let package = Package(
             dependencies: [
                 "DDDCore",
                 .product(name: "KurrentDB", package: "swift-kurrentdb"),
+                .product(name: "KurrentDBPool", package: "swift-kurrentdb"),
             ]),
         .target(
             name: "ReadModelPersistence",
