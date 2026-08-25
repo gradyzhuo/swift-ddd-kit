@@ -90,6 +90,7 @@ let package = Package(
             dependencies: [
                 "DDDCore",
                 .product(name: "KurrentDB", package: "swift-kurrentdb"),
+                .product(name: "KurrentDBPool", package: "swift-kurrentdb"),
             ]),
         .target(
             name: "ReadModelPersistence",
