@@ -38,6 +38,10 @@ extension KurrentDBClient {
             return try await action(.makeIntegrationTestClient())
         }
         guard let result = try await withBorrowedClient({ borrowed in try await action(borrowed.client) }) else {
+            // `withBorrowedClient` also returns nil when this task was cancelled while
+            // waiting for a member or during liveness probing — that's not a dead pool,
+            // it's cancellation, and callers need to see it as such.
+            try Task.checkCancellation()
             throw PooledIntegrationTestClientUnavailable()
         }
         return result
