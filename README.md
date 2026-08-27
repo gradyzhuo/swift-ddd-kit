@@ -678,6 +678,122 @@ fromStreams(["$ce-Order"])
 
 Tiers 1 and 2 can be mixed within a single definition. Hand-written `.js` files in `projections/` coexist without conflict.
 
+## Cross-Context Events (Pulsar)
+
+Two modules move Published Language events between bounded contexts over Apache Pulsar, without either side depending on a Pulsar client library:
+
+- **`ContextForwarder`** (produce side) — `PulsarRESTPublisher` posts a `PublishedLanguageEvent` to Pulsar's REST produce endpoint (`/topics/persistent/{tenant}/{namespace}/{topic}`). No Pulsar SDK, no binary protocol — just `AsyncHTTPClient`.
+- **`ContextReceiver`** (consume side, portable) + **`ContextReceiverWebSocket`** (Linux-only transport) — `ContextReceiver` drives a `PulsarMessageSource` into a `PublishedLanguageHandler`, handling flow control and settlement. `WebSocketMessageSource` is the concrete transport, talking to Pulsar's WebSocket consumer endpoint (`/ws/v2/consumer/...`).
+
+### The payload asymmetry
+
+Pulsar's REST produce endpoint accepts a **raw JSON string** as the message payload; its WebSocket consumer endpoint hands that same payload back **base64-encoded**. `PulsarRESTPublisher.produceBody` sends the raw string; `ConsumerFrame.decodedEvent()` base64-decodes before parsing. Get either side wrong and every message fails silently — this is exactly the kind of defect that only surfaces against a live broker, which is why `Tests/ContextReceiverIntegrationTests/LivePulsarTests.swift` exists: it posts through the real REST endpoint and asserts the event survives the trip through a real WebSocket consumer, unlike every other test in this plan, which either builds the REST body by hand or feeds hand-built base64 into the decoder.
+
+### Why `pullMode` is mandatory
+
+`ConsumerEndpoint.url` always sets `pullMode=true` and does not expose it as a setting. In push mode, Pulsar streams messages as fast as the socket accepts them, with no host-side backpressure; in pull mode, the client must explicitly grant permits (`ContextReceiver.FlowSettings.initialPermits`/`permitRefillThreshold`) for the broker to deliver more. Pull mode is what makes the flow-control contract in `ContextReceiver` meaningful at all — without it, a slow handler has no way to signal "stop sending".
+
+### At-least-once delivery, host-side dedup
+
+Pulsar redelivers on ack timeout or nack, so a `PublishedLanguageHandler` may see the same `eventId` more than once (`ReceivedRecord.isRedelivery` / `redeliveryCount` surface this for logging). The framework does not deduplicate on the consumer's behalf — hosts are expected to derive deterministic downstream aggregate/entity ids from the upstream `eventId` so that reapplying the same event is naturally idempotent, rather than tracking a separate dedup table.
+
+### Dead letter mapping
+
+Pulsar's WebSocket API has no "send to DLQ now" command. `ContextReceiver` maps a permanent failure (an undecodable payload, or a handler classifying its own error as non-retryable) to `ReceiveDisposition.dropToDeadLetter`, which the transport implements as a negative-acknowledge. The message only actually parks in the dead letter topic once `maxRedeliverCount` is exhausted — both `maxRedeliverCount` and `deadLetterTopic` must be set on `ConsumerEndpoint.Settings`, or a message the host has explicitly given up on will redeliver forever instead of parking. `DeadLetterMonitor` polls the DLQ's backlog via the admin API so a growing park pile can page someone.
+
+### macOS limitation
+
+`ContextReceiverWebSocket` only builds on Linux. The underlying `swift-websocket` dependency fails to compile on the macOS 26 SDK: `WebSocketOutboundWriter.swift:210` extends `ByteBuffer` with a method that needs `@available(macOS 26, iOS 26, tvOS 26, *)` and doesn't have it, so the extension is unconditionally unavailable there. `ContextReceiverWebSocket`'s target dependencies on `WSClient`/`HTTPTypes` are therefore platform-conditioned to Linux only (see `Package.swift`), which is also why `WebSocketMessageSource.swift` and every test that imports it are wrapped in `#if os(Linux)` — this keeps `swift build`/`swift test` green on macOS for every other target while the receiver itself only ever runs in Linux production. The upstream fix is a single missing `@available` annotation; until it lands (or the pin changes), macOS developers can still build and test `ContextReceiver`, `ContextForwarder`, and everything else — only the WebSocket transport and its own tests are unavailable to them.
+
+### The WebSocket transport is single-use — supervision is the host's job
+
+`WebSocketMessageSource` wraps exactly one socket session: one instance == one
+connection to Pulsar's WebSocket consumer endpoint, and `run()` may be called
+**exactly once**. Call it a second time on the same instance and it throws
+`ReceiveError.transportUnavailable` immediately, rather than reconnecting or
+silently reusing state.
+
+This is deliberate, not a missing feature. A transparent internal reconnect
+would open a brand-new broker-side consumer session, and a new session's
+permit budget starts at **zero** — but `ContextReceiver.run()` grants
+`FlowSettings.initialPermits` exactly once, before it ever enters its receive
+loop. If the transport reconnected behind that loop's back, the loop would
+keep `await`-ing frames from a session nobody ever granted permits to, and
+the consumer would silently stall forever — no error, no crash, just no more
+messages. That failure mode is worse than a thrown error, because nothing
+tells the host it happened.
+
+So: **retrying the same instance is the trap.** `run()` on an already-run
+`WebSocketMessageSource` will throw, and there is no way to revive a finished
+frame stream — `frames()` always returns the same `AsyncThrowingStream`, and
+once it has completed, a fresh socket underneath it has nowhere to deliver
+into. Recovery means **discard the instance and construct a fresh one**, then
+restart `ContextReceiver` alongside it so `initialPermits` gets re-granted
+against the new broker session. Supervising that lifecycle — catching the
+throw, backing off, rebuilding both objects — is the host's responsibility;
+neither `WebSocketMessageSource` nor `ContextReceiver` do it for you.
+
+This is the same shape as `ForwarderGroup.runWithRestart` on the produce side,
+with one crucial difference: `runWithRestart` retries `body()` — the *same*
+`ContextForwarder` instance — because a forwarder's underlying subscription
+survives a clean stream end. The receive side cannot do that; the socket
+itself is single-use, so each retry attempt must build **new**
+`WebSocketMessageSource` and `ContextReceiver` instances, not re-invoke the
+old ones. Copying `ForwarderGroup`'s shape verbatim — retrying a captured
+`receiver.run()` closure — reproduces exactly the permit-starvation stall
+this contract exists to prevent.
+
+```swift
+func runReceiverWithRestart(
+    endpoint: ConsumerEndpoint,
+    handler: some PublishedLanguageHandler,
+    restartDelay: Duration = .seconds(5),
+    logger: Logger
+) async {
+    while !Task.isCancelled {
+        // A fresh socket + a fresh receiver every attempt — never reuse
+        // either instance across a restart. This is what re-grants
+        // `initialPermits` against the new broker-side consumer session.
+        let source = WebSocketMessageSource(
+            endpoint: endpoint,
+            authorizationHeader: { "Bearer \(try await fetchAccessToken())" },
+            logger: logger
+        )
+        let receiver = ContextReceiver(source: source, handler: handler, logger: logger)
+
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask { try await source.run() }
+                group.addTask { try await receiver.run() }
+                try await group.next()
+                group.cancelAll()
+            }
+            if Task.isCancelled { return }
+            logger.warning("receiver stream ended — restarting in \(restartDelay)")
+        } catch {
+            if Task.isCancelled { return }
+            logger.error("receiver stopped: \(error) — restarting in \(restartDelay)")
+        }
+        try? await Task.sleep(for: restartDelay)
+    }
+}
+```
+
+### Running the live integration suite
+
+`Tests/ContextReceiverIntegrationTests/LivePulsarTests.swift` is gated on the `PULSAR_HTTP_URL` environment variable so a plain `swift test` never needs a broker. To run it locally:
+
+```bash
+docker compose -f docker-compose.pulsar.yml up -d
+until curl -sf http://localhost:8080/admin/v2/brokers/health >/dev/null; do sleep 2; done
+docker run --rm --network host -v "$PWD":/src -w /src \
+  -e PULSAR_HTTP_URL=http://localhost:8080 \
+  swift:6.2-noble \
+  bash -c 'swift test --filter ContextReceiverIntegrationTests'
+```
+
+This suite needs Linux (the transport under test only builds there) and a live broker, so it deliberately stays out of CI — `.github/workflows/swift-build-testing.yml` only runs the offline suites.
+
 ## Modules
 
 | Module | Purpose |
@@ -691,6 +807,10 @@ Tiers 1 and 2 can be mixed within a single definition. Hand-written `.js` files 
 | `ReadModelPersistence` | `ReadModelStore` protocol + in-memory store for read model snapshots |
 | `ReadModelPersistencePostgres` | PostgreSQL + JSONB backed `ReadModelStore` (optional dependency) |
 | `TestUtility` | Test helpers: `TestBundle`, stream cleanup utilities |
+| `PublishedLanguage` | `PublishedLanguageEvent` — the wire envelope shared by both sides of cross-context Pulsar events |
+| `ContextForwarder` | Produce side: `PulsarRESTPublisher`, `ForwarderGroup` — posts events over Pulsar's REST endpoint, no Pulsar SDK |
+| `ContextReceiver` | Consume side (portable): `ContextReceiver` runner, `PulsarMessageSource` transport seam, `DeadLetterMonitor` |
+| `ContextReceiverWebSocket` | Linux-only: `WebSocketMessageSource`, the concrete Pulsar WebSocket consumer transport |
 
 ## License
 

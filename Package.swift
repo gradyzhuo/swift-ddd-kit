@@ -14,6 +14,18 @@ let package = Package(
             name: "DDDKit",
             targets: ["DDDKit"]),
         .library(
+            name: "ContextForwarder",
+            targets: ["ContextForwarder"]),
+        .library(
+            name: "PublishedLanguage",
+            targets: ["PublishedLanguage"]),
+        .library(
+            name: "ContextReceiver",
+            targets: ["ContextReceiver"]),
+        .library(
+            name: "ContextReceiverWebSocket",
+            targets: ["ContextReceiverWebSocket"]),
+        .library(
             name: "TestUtility",
             targets: ["TestUtility"]),
         .library(
@@ -46,11 +58,30 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.3.0"),
+        .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.19.0"),
+        // Floor matches async-http-client's own declared floor (2.81.0); already
+        // resolved to 2.97.0 transitively, so this adds no new version constraint.
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.81.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.5.4"),
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.3"),
         .package(url: "https://github.com/apple/swift-async-algorithms.git", from: "1.0.4"),
         .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.21.0"),
+        // Pinned to upstream. Does not build on the macOS 26 SDK (missing @available
+        // on ByteBuffer.init(_uint8Span:)); Linux is verified clean on Swift 6.2.4.
+        // This is why the WebSocket transport is its own target — every other target
+        // and all unit tests stay buildable on macOS.
+        //
+        // Capped below 1.6.0 ON PURPOSE: 1.6.x declares swift-tools-version 6.1, and
+        // SwiftPM checks that at resolution time on every platform — so depending on it
+        // would raise this package's own floor from Swift 6.0 to 6.1 and break the
+        // Swift 6.0 job in .github/workflows. 1.5.0 is the newest tag still on
+        // tools-version 6.0. The only API we lose is the `writeTextMessage` convenience,
+        // and `write(.text(_:))` exists in both, so the call sites are version-agnostic.
+        // Raising this cap is a support-policy decision, not a routine bump.
+        .package(url: "https://github.com/hummingbird-project/swift-websocket.git", "1.5.0"..<"1.6.0"),
+        // HTTPFields carries the Authorization header into WebSocketClientConfiguration.
+        .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -193,6 +224,91 @@ let package = Package(
                 dependencies: [
                     .product(name: "Yams", package: "yams")
                 ]),
+        .target(
+            name: "PublishedLanguage"),
+        .target(
+            name: "ContextForwarder",
+            dependencies: [
+                "PublishedLanguage",
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "NIOCore", package: "swift-nio"),
+            ],
+            path: "Sources/ContextForwarder"
+        ),
+        .testTarget(
+            name: "ContextForwarderTests",
+            dependencies: [
+                "ContextForwarder", "PublishedLanguage",
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            path: "Tests/ContextForwarderTests"
+        ),
+        .testTarget(
+            name: "ContextForwarderIntegrationTests",
+            dependencies: [
+                "ContextForwarder", "PublishedLanguage",
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+            ],
+            path: "Tests/ContextForwarderIntegrationTests"
+        ),
+        .target(
+            name: "ContextReceiver",
+            dependencies: [
+                "PublishedLanguage",
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "NIOCore", package: "swift-nio"),
+            ],
+            path: "Sources/ContextReceiver"
+        ),
+        .testTarget(
+            name: "ContextReceiverTests",
+            dependencies: [
+                "ContextReceiver", "PublishedLanguage",
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            path: "Tests/ContextReceiverTests"
+        ),
+        .target(
+            name: "ContextReceiverWebSocket",
+            dependencies: [
+                "ContextReceiver",
+                .product(name: "Logging", package: "swift-log"),
+                // Platform-conditional so macOS never compiles swift-websocket (or its
+                // HTTPTypes header type) at all. Without the condition, `swift build`
+                // on macOS fails for the whole package — including for
+                // OpportunityContext developers who never touch the receiver.
+                .product(name: "WSClient", package: "swift-websocket", condition: .when(platforms: [.linux])),
+                .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(platforms: [.linux])),
+            ],
+            path: "Sources/ContextReceiverWebSocket"
+        ),
+        .testTarget(
+            name: "ContextReceiverWebSocketTests",
+            dependencies: [
+                "ContextReceiver",
+                .target(name: "ContextReceiverWebSocket", condition: .when(platforms: [.linux])),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(platforms: [.linux])),
+            ],
+            path: "Tests/ContextReceiverWebSocketTests"
+        ),
+        .testTarget(
+            name: "ContextReceiverIntegrationTests",
+            dependencies: [
+                "ContextReceiver",
+                "ContextForwarder",
+                "PublishedLanguage",
+                .target(name: "ContextReceiverWebSocket", condition: .when(platforms: [.linux])),
+                .product(name: "AsyncHTTPClient", package: "async-http-client"),
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "NIOCore", package: "swift-nio"),
+            ],
+            path: "Tests/ContextReceiverIntegrationTests"
+        ),
         .executableTarget(name: "generate",
                           dependencies: [
                             "DomainEventGenerator",

@@ -1,0 +1,14 @@
+services:
+  pulsar:
+    image: apachepulsar/pulsar:4.0.3
+    command: bin/pulsar standalone
+    ports:
+      - "6650:6650"   # binary protocol
+      - "8080:8080"   # REST admin + WebSocket
+    environment:
+      PULSAR_MEM: "-Xms512m -Xmx512m"
+    healthcheck:
+      test: ["CMD", "bin/pulsar-admin", "brokers", "healthcheck"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
