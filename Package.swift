@@ -58,6 +58,12 @@ let package = Package(
        .plugin(name: "GenerateKurrentDBProjectionsPlugin", targets: [
            "GenerateKurrentDBProjectionsPlugin"
        ]),
+       .plugin(name: "VariablesGeneratorPlugin", targets: [
+           "VariablesGeneratorPlugin"
+       ]),
+       .plugin(name: "NotificationGeneratorPlugin", targets: [
+           "NotificationGeneratorPlugin"
+       ]),
     ],
     dependencies: [
         .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.3.0"),
@@ -235,6 +241,23 @@ let package = Package(
                 "NotificationDefinition",
             ]),
         .target(
+            name: "NotificationDefinitionDemo",
+            dependencies: [
+                "NotificationDefinition",
+            ],
+            path: "Sources/NotificationDefinitionDemo",
+            plugins: [
+                "VariablesGeneratorPlugin",
+                "NotificationGeneratorPlugin",
+            ]),
+        .testTarget(
+            name: "NotificationDefinitionDemoTests",
+            dependencies: [
+                "NotificationDefinitionDemo",
+                "NotificationDefinition",
+            ],
+            path: "Tests/NotificationDefinitionDemoTests"),
+        .target(
             name: "PublishedLanguage"),
         .target(
             name: "ContextForwarder",
@@ -360,6 +383,18 @@ let package = Package(
             ]),
           dependencies: [
             "generate",
+          ]),
+        .plugin(
+          name: "VariablesGeneratorPlugin",
+          capability: .buildTool(),
+          dependencies: [
+            "generate"
+          ]),
+        .plugin(
+          name: "NotificationGeneratorPlugin",
+          capability: .buildTool(),
+          dependencies: [
+            "generate"
           ]),
     ]
 )

@@ -1,0 +1,16 @@
+QuotingCaseGroupName:
+  placeholder: QuotingCaseGroupName
+  inputs:
+    - quotingCaseGroupingId: String
+
+CollaboratorDescription:
+  placeholder: CollaboratorDescription
+  inputs:
+    - quotingCaseGroupingId: String
+    - collaboratorId: String
+
+QuotingCaseGroupCollaboratorRole:
+  placeholder: QuotingCaseGroupCollaboratorRole
+  inputs:
+    - quotingCaseGroupingId: String
+    - collaboratorId: String
