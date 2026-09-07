@@ -718,8 +718,8 @@ that your read-model layer implements:
 
 ```swift
 public protocol OpportunityNotificationVariables: Sendable {
-    func quotingCaseGroupName(quotingCaseGroupingId: String) async throws -> String
     func collaboratorDescription(quotingCaseGroupingId: String, collaboratorId: String) async throws -> String
+    func quotingCaseGroupName(quotingCaseGroupingId: String) async throws -> String
 }
 ```
 
@@ -747,6 +747,10 @@ CollaboratorAdded:
 (an undefined placeholder is a build error; a defined-but-unreferenced variable is a stderr
 warning) and generates, per event, a `Decodable` input struct plus a `render()` that resolves each
 distinct variable once and returns `[RenderedNotification]` in `notifications` order:
+
+Input binding (every variable input name and every `recipients` field name must be a property of
+the event) is a naming convention, not a build-time check against a co-located `event.yaml` — v1
+enforces it at runtime, via `Decodable` failure when an event's actual shape doesn't match.
 
 ```swift
 public struct CollaboratorAddedNotificationInput: Decodable { /* union of inputs ∪ recipients */ }
