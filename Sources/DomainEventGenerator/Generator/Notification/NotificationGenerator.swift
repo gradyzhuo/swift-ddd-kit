@@ -15,6 +15,15 @@ package enum NotificationGenerateError: Error, Equatable, Sendable {
     case undefinedPlaceholder(event: String, placeholder: String)
 }
 
+extension NotificationGenerateError: CustomStringConvertible {
+    package var description: String {
+        switch self {
+        case .undefinedPlaceholder(let event, let placeholder):
+            return "event '\(event)': placeholder '%\(placeholder)%' has no matching variable in variables.yaml"
+        }
+    }
+}
+
 package struct NotificationGenerator {
     let protocolName: String
     let events: [EventNotificationDefinition]

@@ -50,6 +50,26 @@ package enum NotificationParseError: Error, Equatable, Sendable {
     case emptyNotifications(event: String)
 }
 
+extension NotificationParseError: CustomStringConvertible {
+    package var description: String {
+        switch self {
+        case .unknownType(let event, let type):
+            if type.isEmpty {
+                return "event '\(event)': notification entry is missing its `type` key"
+            }
+            return "event '\(event)': unknown notification type '\(type)' (expected 'mail' or 'inApp')"
+        case .missingField(let event, let type, let field):
+            return "event '\(event)': notification type '\(type)' is missing required field '\(field)'"
+        case .extraField(let event, let type, let field):
+            return "event '\(event)': notification type '\(type)' has unexpected field '\(field)'"
+        case .emptyRecipients(let event):
+            return "event '\(event)': `recipients` must not be empty"
+        case .emptyNotifications(let event):
+            return "event '\(event)': `notifications` must not be empty"
+        }
+    }
+}
+
 /// Parses `notification.yaml` by walking Yams' `Node` tree directly (mirroring
 /// `VariablesParser`), so per-event/per-type error context is available while validating the
 /// closed type schemas and preserving `recipients`' declared YAML order.

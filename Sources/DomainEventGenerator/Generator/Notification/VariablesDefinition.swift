@@ -37,6 +37,21 @@ package enum VariablesParseError: Error, Equatable, Sendable {
     case unsupportedInputType(variable: String, input: String, type: String)
 }
 
+extension VariablesParseError: CustomStringConvertible {
+    package var description: String {
+        switch self {
+        case .missingPlaceholder(let variable):
+            return "variable '\(variable)': missing required `placeholder` key"
+        case .duplicatePlaceholder(let placeholder):
+            return "placeholder '\(placeholder)' is declared by more than one variable"
+        case .malformedInput(let variable):
+            return "variable '\(variable)': malformed `inputs` entry (expected an ordered list of single-key `name: SwiftType` maps)"
+        case .unsupportedInputType(let variable, let input, let type):
+            return "variable '\(variable)': input '\(input)' has unsupported type '\(type)' (only 'String' is supported)"
+        }
+    }
+}
+
 /// Parses `variables.yaml` by walking Yams' `Node` tree directly (rather than `Decodable`),
 /// mirroring `KurrentDBProjectionEventItem`'s single-key-map handling — this lets us surface
 /// typed, variable-scoped `VariablesParseError`s and preserve `inputs`' declared YAML order.
