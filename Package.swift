@@ -46,6 +46,9 @@ let package = Package(
         .library(
             name: "DomainEventGenerator",
             targets: ["DomainEventGenerator"]),
+        .library(
+            name: "NotificationDefinition",
+            targets: ["NotificationDefinition"]),
        .plugin(name: "DomainEventGeneratorPlugin", targets: [
            "DomainEventGeneratorPlugin"
        ]),
@@ -224,6 +227,13 @@ let package = Package(
                 dependencies: [
                     .product(name: "Yams", package: "yams")
                 ]),
+        .target(
+            name: "NotificationDefinition"),
+        .testTarget(
+            name: "NotificationDefinitionTests",
+            dependencies: [
+                "NotificationDefinition",
+            ]),
         .target(
             name: "PublishedLanguage"),
         .target(
