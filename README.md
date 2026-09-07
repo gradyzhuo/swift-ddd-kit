@@ -678,6 +678,119 @@ fromStreams(["$ce-Order"])
 
 Tiers 1 and 2 can be mixed within a single definition. Hand-written `.js` files in `projections/` coexist without conflict.
 
+## Notification Definition
+
+`NotificationDefinition` is a small runtime product plus two build-tool plugins that turn two
+YAML files into a compiled, typed notification pipeline: a variables protocol your read models
+implement, and a per-domain-event `render()` that resolves those variables and substitutes them
+into per-channel copy. The upstream context renders **before publishing** — the notification's
+copy, variables, and channel fan-out all live with the context that owns the event, not with a
+downstream consumer.
+
+Full schema, generated-shape, and wire-contract details:
+[`docs/superpowers/specs/2026-09-07-notification-definition-design.md`](docs/superpowers/specs/2026-09-07-notification-definition-design.md).
+A complete working example (both yamls, the generator config, a stub variables implementation,
+and render tests) lives in `Sources/NotificationDefinitionDemo` /
+`Tests/NotificationDefinitionDemoTests` — the demo is compiled and its tests run in CI, so any
+change that breaks the codegen chain fails the build.
+
+### `variables.yaml`
+
+Declares the variables your notification copy can reference. Each top-level key is a variable
+name; `placeholder` is the `%token%` matched in `notification.yaml` templates; `inputs` is an
+ordered list of `name: String` single-key maps that becomes the generated method's parameter list.
+
+```yaml
+QuotingCaseGroupName:
+  placeholder: QuotingCaseGroupName
+  inputs:
+    - quotingCaseGroupingId: String
+
+CollaboratorDescription:
+  placeholder: CollaboratorDescription
+  inputs:
+    - quotingCaseGroupingId: String
+    - collaboratorId: String
+```
+
+`VariablesGeneratorPlugin` turns this into a protocol (name from `notification-generator-config.yaml`)
+that your read-model layer implements:
+
+```swift
+public protocol OpportunityNotificationVariables: Sendable {
+    func quotingCaseGroupName(quotingCaseGroupingId: String) async throws -> String
+    func collaboratorDescription(quotingCaseGroupingId: String, collaboratorId: String) async throws -> String
+}
+```
+
+### `notification.yaml`
+
+Declares, per domain event type, who gets notified (`recipients`, a list of event field names)
+and what each channel says (`notifications`, a list of `{type, ...fields}` entries). The type
+schema is closed: `mail` → `subject` + `content`, `inApp` → `title` + `content`.
+
+```yaml
+CollaboratorAdded:
+  recipients:
+    - collaboratorId
+  notifications:
+    - type: mail
+      subject: 你已被加入案件「%QuotingCaseGroupName%」
+      content: |
+        你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」，%CollaboratorDescription%。
+    - type: inApp
+      title: 你已被加入案件「%QuotingCaseGroupName%」
+      content: 你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」。
+```
+
+`NotificationGeneratorPlugin` cross-validates every `%Placeholder%` token against `variables.yaml`
+(an undefined placeholder is a build error; a defined-but-unreferenced variable is a stderr
+warning) and generates, per event, a `Decodable` input struct plus a `render()` that resolves each
+distinct variable once and returns `[RenderedNotification]` in `notifications` order:
+
+```swift
+public struct CollaboratorAddedNotificationInput: Decodable { /* union of inputs ∪ recipients */ }
+
+public enum CollaboratorAddedNotification {
+    public static func recipients(input: CollaboratorAddedNotificationInput) -> [String]
+    public static func render(
+        input: CollaboratorAddedNotificationInput,
+        variables: some OpportunityNotificationVariables
+    ) async throws -> [RenderedNotification]
+}
+```
+
+### Wiring both plugins into a target
+
+```swift
+// Package.swift
+.target(
+    name: "MyTarget",
+    dependencies: [
+        .product(name: "NotificationDefinition", package: "swift-ddd-kit"),
+    ],
+    plugins: [
+        .plugin(name: "VariablesGeneratorPlugin", package: "swift-ddd-kit"),
+        .plugin(name: "NotificationGeneratorPlugin", package: "swift-ddd-kit"),
+    ]
+)
+```
+
+Both plugins look for `variables.yaml` and `notification-generator-config.yaml` among the
+target's source files (`NotificationGeneratorPlugin` also needs `notification.yaml`); the config
+file selects the access level and the generated protocol's name:
+
+```yaml
+# notification-generator-config.yaml
+accessModifier: public
+variablesProtocolName: OpportunityNotificationVariables
+```
+
+**Any target consuming generated notification code must depend on the `NotificationDefinition`
+product** — the generated `render()` imports it directly for `RenderedNotification`,
+`NotificationType`, and `PlaceholderSubstitution`. (`VariablesGeneratorPlugin`'s output has no such
+dependency — the variables protocol is deliberately runtime-independent.)
+
 ## Cross-Context Events (Pulsar)
 
 Two modules move Published Language events between bounded contexts over Apache Pulsar, without either side depending on a Pulsar client library:
@@ -811,6 +924,7 @@ This suite needs Linux (the transport under test only builds there) and a live b
 | `ContextForwarder` | Produce side: `PulsarRESTPublisher`, `ForwarderGroup` — posts events over Pulsar's REST endpoint, no Pulsar SDK |
 | `ContextReceiver` | Consume side (portable): `ContextReceiver` runner, `PulsarMessageSource` transport seam, `DeadLetterMonitor` |
 | `ContextReceiverWebSocket` | Linux-only: `WebSocketMessageSource`, the concrete Pulsar WebSocket consumer transport |
+| `NotificationDefinition` | Runtime types generated notification code depends on: `RenderedNotification`, `NotificationType`, `PlaceholderSubstitution` |
 
 ## License
 
