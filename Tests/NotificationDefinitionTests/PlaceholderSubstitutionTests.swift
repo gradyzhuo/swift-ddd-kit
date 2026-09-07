@@ -38,4 +38,13 @@ struct PlaceholderSubstitutionTests {
     @Test func textWithoutTokensPassesThrough() throws {
         #expect(try PlaceholderSubstitution.substitute("plain", values: [:]) == "plain")
     }
+
+    // Demo-style end-to-end check for the escaping finding: a template that already contains raw
+    // `"` and `\` characters (i.e. what a generated Swift string literal decodes to at runtime)
+    // must render verbatim — the substitution engine has no escaping logic of its own to trip on.
+    @Test func quotesAndBackslashesRenderVerbatim() throws {
+        let template = #"He said "hi" and used \ backslash, then %Name% replied."#
+        let out = try PlaceholderSubstitution.substitute(template, values: ["Name": "she"])
+        #expect(out == #"He said "hi" and used \ backslash, then she replied."#)
+    }
 }

@@ -18,6 +18,30 @@ public struct RenderedNotification: Equatable, Sendable {
     }
 }
 
+extension RenderedNotification {
+    /// Flattens `fields` to the cross-context Published Language payload key convention:
+    /// `"{type}.{field}"` (e.g. `["mail.subject": ..., "mail.content": ...]`). See spec §6.
+    public var payloadEntries: [String: String] {
+        Dictionary(uniqueKeysWithValues: fields.map { field, value in ("\(type.rawValue).\(field)", value) })
+    }
+}
+
+/// Parses/builds the `"{type}.{field}"` Published Language payload key convention (see spec §6),
+/// the inverse of ``RenderedNotification/payloadEntries``.
+public enum PayloadKey {
+    /// Parses `"{type}.{field}"` back into its type and field.
+    ///
+    /// - Returns: `nil` when `key` has no `.`, the field half is empty, or the prefix before the
+    ///   first `.` isn't a known ``NotificationType``.
+    public static func parse(_ key: String) -> (type: NotificationType, field: String)? {
+        guard let dotIndex = key.firstIndex(of: ".") else { return nil }
+        let typePrefix = String(key[key.startIndex..<dotIndex])
+        let field = String(key[key.index(after: dotIndex)...])
+        guard !field.isEmpty, let type = NotificationType(rawValue: typePrefix) else { return nil }
+        return (type, field)
+    }
+}
+
 /// Errors thrown by ``PlaceholderSubstitution/substitute(_:values:)``.
 public enum PlaceholderSubstitutionError: Error, Equatable {
     case missingValue(placeholder: String)

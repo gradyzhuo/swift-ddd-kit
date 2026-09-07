@@ -11,8 +11,19 @@ import Foundation
 import PackagePlugin
 
 enum VariablesGeneratorPluginError: Error {
-    case variablesDefinitionFileNotFound
-    case configFileNotFound
+    case variablesDefinitionFileNotFound(targetName: String)
+    case configFileNotFound(targetName: String)
+}
+
+extension VariablesGeneratorPluginError: CustomStringConvertible {
+    var description: String {
+        switch self {
+        case .variablesDefinitionFileNotFound(let targetName):
+            return "target '\(targetName)': variables.yaml not found — add it to the target's sources"
+        case .configFileNotFound(let targetName):
+            return "target '\(targetName)': notification-generator-config.yaml not found — add it to the target's sources"
+        }
+    }
 }
 
 @main struct VariablesGeneratorPlugin {
@@ -23,11 +34,11 @@ enum VariablesGeneratorPluginError: Error {
         targetName: String
     ) throws -> [Command] {
         guard let variablesSource = (sourceFiles.first { $0.url.lastPathComponent == "variables.yaml" }) else {
-            throw VariablesGeneratorPluginError.variablesDefinitionFileNotFound
+            throw VariablesGeneratorPluginError.variablesDefinitionFileNotFound(targetName: targetName)
         }
 
         guard let configSource = (sourceFiles.first { $0.url.lastPathComponent == "notification-generator-config.yaml" }) else {
-            throw VariablesGeneratorPluginError.configFileNotFound
+            throw VariablesGeneratorPluginError.configFileNotFound(targetName: targetName)
         }
 
         // generated directory target

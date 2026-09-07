@@ -44,6 +44,7 @@ package struct EventNotificationDefinition: Equatable {
 
 package enum NotificationParseError: Error, Equatable, Sendable {
     case unknownType(event: String, type: String)
+    case duplicateType(event: String, type: String)
     case missingField(event: String, type: String, field: String)
     case extraField(event: String, type: String, field: String)
     case emptyRecipients(event: String)
@@ -58,6 +59,8 @@ extension NotificationParseError: CustomStringConvertible {
                 return "event '\(event)': notification entry is missing its `type` key"
             }
             return "event '\(event)': unknown notification type '\(type)' (expected 'mail' or 'inApp')"
+        case .duplicateType(let event, let type):
+            return "event '\(event)': notification type '\(type)' is declared more than once"
         case .missingField(let event, let type, let field):
             return "event '\(event)': notification type '\(type)' is missing required field '\(field)'"
         case .extraField(let event, let type, let field):
@@ -90,11 +93,15 @@ package enum NotificationDefinitionParser {
 
         for (keyNode, valueNode) in mapping {
             let eventName = keyNode.string ?? ""
+            try IdentifierValidation.validate(eventName, kind: .eventName)
             let eventMapping = valueNode.mapping
 
             let recipients: [String] = eventMapping?["recipients"]?.sequence?.compactMap { $0.string } ?? []
             guard !recipients.isEmpty else {
                 throw NotificationParseError.emptyRecipients(event: eventName)
+            }
+            for recipient in recipients {
+                try IdentifierValidation.validate(recipient, kind: .recipient)
             }
 
             let notificationsSequence = eventMapping?["notifications"]?.sequence ?? []
@@ -103,12 +110,16 @@ package enum NotificationDefinitionParser {
             }
 
             var notifications: [NotificationEntry] = []
+            var seenTypes: Set<String> = []
             for entryNode in notificationsSequence {
                 let entryMapping = entryNode.mapping
                 let type = entryMapping?["type"]?.string ?? ""
 
                 guard let schemaFields = Self.typeSchemas[type] else {
                     throw NotificationParseError.unknownType(event: eventName, type: type)
+                }
+                guard seenTypes.insert(type).inserted else {
+                    throw NotificationParseError.duplicateType(event: eventName, type: type)
                 }
 
                 let allowedKeys = Set(schemaFields).union(["type"])

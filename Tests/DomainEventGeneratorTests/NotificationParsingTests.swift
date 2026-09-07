@@ -61,6 +61,25 @@ struct NotificationParsingTests {
         }
     }
 
+    @Test("duplicate notification type in the same event throws duplicateType")
+    func duplicateTypeThrows() {
+        let yaml = """
+        SomeEvent:
+          recipients:
+            - userId
+          notifications:
+            - type: mail
+              subject: hi
+              content: body
+            - type: mail
+              subject: hi again
+              content: body again
+        """
+        #expect(throws: NotificationParseError.duplicateType(event: "SomeEvent", type: "mail")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
     @Test("mail entry missing content throws missingField")
     func missingFieldThrows() {
         let yaml = """
@@ -203,5 +222,25 @@ struct PlaceholderExtractorTests {
     @Test("non-token percent signs are ignored")
     func nonTokenPercentSignsIgnored() {
         #expect(PlaceholderExtractor.placeholders(in: "50%% off %A% 100% sure") == ["A"])
+    }
+}
+
+@Suite("NotificationDefinitionParser identifier validation")
+struct NotificationDefinitionParserIdentifierValidationTests {
+
+    @Test("a recipient field name that isn't a valid Swift identifier throws invalidIdentifier")
+    func invalidRecipientThrows() {
+        let yaml = """
+        SomeEvent:
+          recipients:
+            - "%Foo%"
+          notifications:
+            - type: mail
+              subject: hi
+              content: body
+        """
+        #expect(throws: IdentifierValidationError.invalidIdentifier(kind: .recipient, name: "%Foo%")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
     }
 }

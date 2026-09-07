@@ -119,4 +119,17 @@ struct VariablesParsingTests {
             _ = try VariablesParser.parse(yaml: yaml)
         }
     }
+
+    @Test("an input named after a Swift keyword throws invalidIdentifier")
+    func reservedInputNameThrows() {
+        let yaml = """
+        QuotingCaseGroupName:
+          placeholder: QuotingCaseGroupName
+          inputs:
+            - case: String
+        """
+        #expect(throws: IdentifierValidationError.invalidIdentifier(kind: .inputName, name: "case")) {
+            _ = try VariablesParser.parse(yaml: yaml)
+        }
+    }
 }

@@ -76,6 +76,8 @@ package enum VariablesParser {
                 throw VariablesParseError.duplicatePlaceholder(placeholder: placeholder)
             }
 
+            try IdentifierValidation.validateLowerCamel(variableName, kind: .variableName)
+
             var inputs: [(name: String, type: String)] = []
             if let inputsSequence = variableMapping["inputs"]?.sequence {
                 for inputItem in inputsSequence {
@@ -89,6 +91,7 @@ package enum VariablesParser {
                         throw VariablesParseError.unsupportedInputType(
                             variable: variableName, input: inputName, type: inputType)
                     }
+                    try IdentifierValidation.validate(inputName, kind: .inputName)
                     inputs.append((name: inputName, type: inputType))
                 }
             }

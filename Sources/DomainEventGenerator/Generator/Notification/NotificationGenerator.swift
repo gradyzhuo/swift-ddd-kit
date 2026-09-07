@@ -75,6 +75,19 @@ package struct NotificationGenerator {
                 }
             }
 
+            // Every placeholder becomes a `let <lowerCamel(placeholder)> = ...` local in the
+            // generated `render()` — validate that transform is a legal, non-reserved Swift
+            // identifier, and that no two distinct placeholders collide on it.
+            var localNamesByPlaceholder: [String: String] = [:]
+            for placeholder in orderedPlaceholders {
+                try IdentifierValidation.validateLowerCamel(placeholder, kind: .placeholder)
+                let localName = IdentifierValidation.lowerCamel(placeholder)
+                if let existing = localNamesByPlaceholder[localName] {
+                    throw IdentifierValidationError.identifierCollision(a: existing, b: placeholder)
+                }
+                localNamesByPlaceholder[localName] = placeholder
+            }
+
             var matchedVariables: [VariableDefinition] = []
             for placeholder in orderedPlaceholders {
                 guard let variable = variablesByPlaceholder[placeholder] else {
@@ -112,6 +125,13 @@ package struct NotificationGenerator {
         for property in properties {
             lines.append("    \(access) let \(property): String")
         }
+        lines.append("")
+        let parameterList = properties.map { "\($0): String" }.joined(separator: ", ")
+        lines.append("    \(access) init(\(parameterList)) {")
+        for property in properties {
+            lines.append("        self.\(property) = \(property)")
+        }
+        lines.append("    }")
         lines.append("}")
         return lines.joined(separator: "\n")
     }
@@ -135,11 +155,14 @@ package struct NotificationGenerator {
         // render(input:variables:)
         lines.append(
             "    \(access) static func render(input: \(event.eventName)NotificationInput, variables: some \(protocolName)) async throws -> [RenderedNotification] {")
-        lines.append("        let inputs: [String: String] = [")
-        for property in properties {
-            lines.append("            \"\(property)\": input.\(property),")
+
+        if !placeholders.isEmpty {
+            lines.append("        let inputs: [String: String] = [")
+            for property in properties {
+                lines.append("            \"\(property)\": input.\(property),")
+            }
+            lines.append("        ]")
         }
-        lines.append("        ]")
 
         for placeholder in placeholders {
             let letName = Self.lowerCamel(placeholder)
