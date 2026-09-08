@@ -34,6 +34,13 @@ struct GeneratorConfiguration: Codable {
     let aggregateRootName: String?
 }
 
+/// Configuration for the `variables`/`notification` subcommands (notification-definition
+/// framework). Mirrors `event-generator-config.yaml` conventions per spec §3.
+struct NotificationGeneratorConfiguration: Codable {
+    let accessModifier: AccessLevel
+    let variablesProtocolName: String
+}
+
 @main
 struct GenerateCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
@@ -44,7 +51,9 @@ struct GenerateCommand: ParsableCommand {
             GenerateEventMapperCommand.self,
             GenerateEventFilterCommand.self,
             GenerateModelCommand.self,
-            GenerateKurrentDBProjectionCommand.self
+            GenerateKurrentDBProjectionCommand.self,
+            GenerateVariablesCommand.self,
+            GenerateNotificationCommand.self
         ])
 }
 
