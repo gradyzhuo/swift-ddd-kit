@@ -91,6 +91,10 @@ let package = Package(
         .package(url: "https://github.com/hummingbird-project/swift-websocket.git", "1.5.0"..<"1.6.0"),
         // HTTPFields carries the Authorization header into WebSocketClientConfiguration.
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
+        // Pure-Swift Markdown parser (cmark under the hood, vendored/built from source —
+        // no OpenSSL-style Linux landmine). Used by NotificationDefinition's Markdown→safe-HTML
+        // renderer; see docs/superpowers/specs/2026-09-09-markdown-notification-content-design.md.
+        .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.6.0"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -234,7 +238,10 @@ let package = Package(
                     .product(name: "Yams", package: "yams")
                 ]),
         .target(
-            name: "NotificationDefinition"),
+            name: "NotificationDefinition",
+            dependencies: [
+                .product(name: "Markdown", package: "swift-markdown")
+            ]),
         .testTarget(
             name: "NotificationDefinitionTests",
             dependencies: [

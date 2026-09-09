@@ -43,10 +43,12 @@ struct DemoRenderTests {
         let mail = rendered[0]
 
         #expect(mail.fields["subject"] == "你已被加入案件「6666」")
-        // The mail `content` field is authored as a `content: |` block scalar in
-        // notification.yaml, which YAML clip-chomps to exactly one trailing `\n` —
-        // preserved verbatim through generation and substitution (see task-3-report.md).
-        #expect(mail.fields["content"] == "你以「編輯者」角色被加入案件「6666」，歡迎加入團隊。\n")
+        // The mail `content` field is authored as Markdown (a `content: |` block scalar in
+        // notification.yaml) and rendered to safe HTML by the generated `render()` — see
+        // docs/superpowers/specs/2026-09-09-markdown-notification-content-design.md §3-4.
+        // The single paragraph becomes one `<p>` element; the YAML block scalar's trailing
+        // `\n` is consumed by Markdown block parsing, not preserved in the rendered HTML.
+        #expect(mail.fields["content"] == "<p>你以「編輯者」角色被加入案件「6666」，歡迎加入團隊。</p>")
     }
 
     @Test func inAppFieldsAreSubstitutedExactly() async throws {
@@ -58,8 +60,8 @@ struct DemoRenderTests {
         let inApp = rendered[1]
 
         #expect(inApp.fields["title"] == "你已被加入案件「6666」")
-        // Single-line `content:` scalar — no trailing newline, unlike the mail variant above.
-        #expect(inApp.fields["content"] == "你以「編輯者」角色被加入案件「6666」。")
+        // Single-line `content:` scalar, also rendered to safe HTML (one `<p>` element).
+        #expect(inApp.fields["content"] == "<p>你以「編輯者」角色被加入案件「6666」。</p>")
     }
 
     @Test func recipientsIsCollaboratorId() throws {
