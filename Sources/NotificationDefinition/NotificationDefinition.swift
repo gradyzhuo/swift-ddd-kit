@@ -143,9 +143,12 @@ extension PlaceholderSubstitution {
     static func escapeMarkdown(_ value: String) -> String {
         // CommonMark's full punctuation-escape set, plus `<`/`>` (HTML tag delimiters) since the
         // substituted Markdown is subsequently rendered to HTML — an unescaped `<script>` must
-        // not reach the parser as a raw-HTML node's literal delimiter-free text.
+        // not reach the parser as a raw-HTML node's literal delimiter-free text — and `~`/`|`
+        // (GFM strikethrough/table-cell delimiters): a value containing `~~x~~` or `a|b` must
+        // stay literal text, never become a live `<del>` or inject an extra table cell.
         let escapable: Set<Character> = [
             "\\", "`", "*", "_", "{", "}", "[", "]", "(", ")", "#", "+", "-", ".", "!", "<", ">",
+            "~", "|",
         ]
         var result = ""
         result.reserveCapacity(value.count)

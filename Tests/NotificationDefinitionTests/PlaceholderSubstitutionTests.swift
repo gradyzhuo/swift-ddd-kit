@@ -118,4 +118,29 @@ struct PlaceholderSubstitutionMarkdownEscapingTests {
         let out = try PlaceholderSubstitution.substitute("Case %Name%", values: ["Name": "A & B < C"])
         #expect(out == "Case A & B < C")
     }
+
+    // Hardening: `~` (GFM strikethrough) and `|` (GFM table-cell delimiter) only gained live
+    // syntax meaning once `MarkdownRendering` grew full GFM support — a substituted value must
+    // not be able to use them to inject structure (a live `<del>`, or an extra table cell),
+    // even though this isn't an XSS vector.
+    @Test func tildeAndPipeInValueAreBackslashEscaped() throws {
+        let out = try PlaceholderSubstitution.substitute("%V%", values: ["V": "a|b ~~c~~"], escaping: .markdown)
+        #expect(out == #"a\|b \~\~c\~\~"#)
+    }
+
+    @Test func tildeAndPipeInValueStayLiteralInsideATableCell() throws {
+        let value = "a|b ~~c~~"
+        let escaped = try PlaceholderSubstitution.substitute("%V%", values: ["V": value], escaping: .markdown)
+        let markdown = """
+        | H |
+        |---|
+        | \(escaped) |
+        """
+        let html = MarkdownRendering.html(from: markdown)
+        // Literal text, not a live strikethrough and not an extra table cell.
+        #expect(!html.contains("<del>"))
+        #expect(html.contains("<td>a|b ~~c~~</td>"))
+        // Exactly one <td> in the body row — the `|` didn't split it into two cells.
+        #expect(html.components(separatedBy: "<td>").count - 1 == 1)
+    }
 }
