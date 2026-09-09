@@ -133,17 +133,82 @@ struct MarkdownRenderingTests {
         #expect(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"))
     }
 
-    // MARK: - Excluded constructs (images, headings) render as inert text, never as markup.
+    // MARK: - Headings.
 
-    @Test func imageIsNotEmittedAsImgTag() {
-        let html = MarkdownRendering.html(from: "![alt text](https://example.com/x.png)")
+    @Test func h1Heading() {
+        #expect(MarkdownRendering.html(from: "# H1") == "<h1>H1</h1>")
+    }
+
+    @Test func h6Heading() {
+        #expect(MarkdownRendering.html(from: "###### H6") == "<h6>H6</h6>")
+    }
+
+    @Test func headingTextContentIsEscaped() {
+        #expect(MarkdownRendering.html(from: "# Tom & Jerry <script>") == "<h1>Tom &amp; Jerry &lt;script&gt;</h1>")
+    }
+
+    // MARK: - Images: same http(s)-only safety rule as links, and an attribute allow-list of
+    // exactly `src`/`alt` — this is what makes an injected `onerror=`/extra attribute impossible.
+
+    @Test func httpsImageRendersAsImgTag() {
+        #expect(
+            MarkdownRendering.html(from: "![cat](https://example.com/c.png)")
+                == "<p><img src=\"https://example.com/c.png\" alt=\"cat\"></p>")
+    }
+
+    @Test func imageEmitsOnlySrcAndAltAttributes() {
+        let html = MarkdownRendering.html(from: "![cat](https://example.com/c.png)")
+        // No other attribute name can appear — the emitter has no code path that writes one.
+        #expect(!html.contains("onerror"))
+        #expect(!html.contains("width"))
+        #expect(!html.contains("height"))
+        #expect(html.contains("<img src=\"https://example.com/c.png\" alt=\"cat\">"))
+    }
+
+    @Test func javascriptSchemeImageIsNeutralized() {
+        let html = MarkdownRendering.html(from: "![x](javascript:alert(1))")
+        #expect(!html.contains("<img"))
+        #expect(!html.contains("javascript:"))
+    }
+
+    @Test func dataSchemeImageIsNeutralized() {
+        let html = MarkdownRendering.html(from: "![x](data:text/html,evil)")
+        #expect(!html.contains("<img"))
+        #expect(!html.contains("data:"))
+    }
+
+    @Test func relativeImageSrcIsNeutralized() {
+        let html = MarkdownRendering.html(from: "![x](/rel)")
         #expect(!html.contains("<img"))
     }
 
-    @Test func headingIsNotEmittedAsHeadingTag() {
-        let html = MarkdownRendering.html(from: "# Heading")
-        #expect(!html.contains("<h1>"))
-        #expect(html.contains("Heading"))
+    @Test func imageAltTextInjectionIsAttributeEscaped() {
+        // Alt text containing quote+tag syntax must never be able to break out of the `alt="..."`
+        // attribute or introduce a live tag.
+        let html = MarkdownRendering.html(from: #"![">\<script>](https://example.com/x.png)"#)
+        #expect(!html.contains("<script>"))
+        #expect(!html.contains("onerror"))
+        // Exactly one live tag (the `<img>` itself) — no attribute breakout introduced a second.
+        #expect(html.contains("<img src=\"https://example.com/x.png\" alt="))
+    }
+
+    @Test func imageSrcWithEmbeddedQuoteIsAttributeEscaped() {
+        // A destination containing a literal `"` (no injected extra attribute is possible: the
+        // emitter only ever writes `src`/`alt`, and the quote itself is attribute-escaped).
+        let html = MarkdownRendering.html(from: #"![x](https://example.com/a"b.png)"#)
+        #expect(!html.contains("onerror"))
+        if let range = html.range(of: "src=\"") {
+            let afterSrc = html[range.upperBound...]
+            guard let closingQuote = afterSrc.range(of: "\"") else {
+                Issue.record("no closing quote found for src attribute")
+                return
+            }
+            let srcValue = afterSrc[afterSrc.startIndex..<closingQuote.lowerBound]
+            // The raw `"` must have been escaped to `&quot;`, not left as a literal delimiter.
+            #expect(!srcValue.contains("\""))
+        } else {
+            Issue.record("no <img src=\"...\"> attribute found")
+        }
     }
 
     // MARK: - Text escaping.

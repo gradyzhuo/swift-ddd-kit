@@ -19,10 +19,13 @@ import Markdown
 /// Only the following constructs are emitted as live HTML markup:
 /// paragraph (`<p>`), emphasis (`<em>`), strong (`<strong>`), line/soft break (`<br>`),
 /// link (`<a href="...">`, only when the destination starts with `http://`/`https://`),
-/// unordered/ordered lists (`<ul>`/`<ol>`/`<li>`), inline code (`<code>`), and blockquote
-/// (`<blockquote>`). Every text node is HTML-escaped. Anything else — including raw HTML
-/// blocks/inline, images, headings, and fenced/indented code blocks — is rendered as escaped,
-/// inert text (never dropped, never passed through as markup).
+/// unordered/ordered lists (`<ul>`/`<ol>`/`<li>`), inline code (`<code>`), blockquote
+/// (`<blockquote>`), headings (`<h1>`-`<h6>`), and images (`<img src="..." alt="...">`, only
+/// when the source starts with `http://`/`https://`, and with ONLY `src`/`alt` attributes — no
+/// width/height/`onerror`/anything else). Every text node is HTML-escaped, and every attribute
+/// value is attribute-escaped. Anything else — including raw HTML blocks/inline and
+/// fenced/indented code blocks — is rendered as escaped, inert text (never dropped, never
+/// passed through as markup).
 public enum MarkdownRendering {
 
     /// Parses `markdown` and renders it to safe HTML using the allow-list emitter.
@@ -99,6 +102,31 @@ private struct SafeHTMLEmitter: MarkupVisitor {
 
     mutating func visitBlockQuote(_ blockQuote: BlockQuote) -> String {
         "<blockquote>\(children(of: blockQuote))</blockquote>"
+    }
+
+    mutating func visitHeading(_ heading: Heading) -> String {
+        // ATX heading levels are always 1-6; clamp defensively since `level` is a plain Int.
+        let level = min(max(heading.level, 1), 6)
+        return "<h\(level)>\(children(of: heading))</h\(level)>"
+    }
+
+    mutating func visitImage(_ image: Image) -> String {
+        // The alt text must be PLAIN text for the attribute, never HTML — collect it the same
+        // way disallowed constructs collect their literal text, not via `children(of:)` (which
+        // renders live HTML for allow-listed nested markup).
+        var altCollector = PlainTextCollector()
+        let altText = altCollector.visit(image)
+
+        guard let source = image.source, let safeSrc = SafeURL.httpOrHTTPS(source) else {
+            // Unsafe/absent src (e.g. `javascript:`, `data:`, relative, or no source at all):
+            // neutralize entirely — no `<img>`, nothing that could carry an unsafe src. Render
+            // the alt text (if any) as escaped inert text instead.
+            return HTMLEscaping.escape(altText)
+        }
+
+        // ONLY `src` and `alt` — this is what makes an injected `onerror=`/extra attribute
+        // impossible: there is no code path that emits any other attribute name.
+        return "<img src=\"\(HTMLEscaping.escapeAttribute(safeSrc))\" alt=\"\(HTMLEscaping.escapeAttribute(altText))\">"
     }
 
     mutating func visitText(_ text: Text) -> String {
