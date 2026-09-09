@@ -51,14 +51,10 @@ struct MarkdownRenderingTests {
         #expect(MarkdownRendering.html(from: "> quoted") == "<blockquote><p>quoted</p></blockquote>")
     }
 
-    // MARK: - Code blocks: not on the allow list, but MUST NOT silently vanish.
+    // MARK: - Code blocks: allow-listed as `<pre><code>`, content always HTML-escaped.
 
-    @Test func fencedCodeBlockContentSurvivesAsEscapedText() {
-        let html = MarkdownRendering.html(from: "```\nsecret\n```")
-        #expect(!html.isEmpty)
-        #expect(html.contains("secret"))
-        // Not passed through as a live <pre>/<code> block — no unescaped markup wrapper.
-        #expect(!html.contains("<pre"))
+    @Test func fencedCodeBlockContentSurvivesAsPreCode() {
+        #expect(MarkdownRendering.html(from: "```\nsecret\n```") == "<pre><code>secret\n</code></pre>")
     }
 
     @Test func fencedCodeBlockWithHTMLSpecialCharsIsEscaped() {
@@ -67,8 +63,9 @@ struct MarkdownRenderingTests {
         #expect(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"))
     }
 
-    @Test func indentedCodeBlockContentSurvivesAsEscapedText() {
+    @Test func indentedCodeBlockContentSurvivesAsPreCode() {
         let html = MarkdownRendering.html(from: "    secret indented code")
+        #expect(html.contains("<pre><code>"))
         #expect(html.contains("secret indented code"))
     }
 
@@ -215,5 +212,77 @@ struct MarkdownRenderingTests {
 
     @Test func ampersandAndAngleBracketsInPlainTextAreEscaped() {
         #expect(MarkdownRendering.html(from: "Tom & Jerry") == "<p>Tom &amp; Jerry</p>")
+    }
+
+    // MARK: - GFM: strikethrough, task lists, tables, thematic break, nested lists.
+
+    @Test func strikethrough() {
+        #expect(MarkdownRendering.html(from: "~~gone~~") == "<p><del>gone</del></p>")
+    }
+
+    @Test func taskListCheckedAndUnchecked() {
+        let html = MarkdownRendering.html(from: "- [ ] todo\n- [x] done")
+        #expect(html.contains(#"<input type="checkbox" disabled> "#))
+        #expect(html.contains(#"<input type="checkbox" checked disabled> "#))
+        #expect(html.contains("todo"))
+        #expect(html.contains("done"))
+    }
+
+    @Test func thematicBreakBecomesHr() {
+        #expect(MarkdownRendering.html(from: "a\n\n---\n\nb") == "<p>a</p><hr><p>b</p>")
+    }
+
+    @Test func nestedUnorderedList() {
+        let html = MarkdownRendering.html(from: "- a\n  - nested\n- b")
+        #expect(html.contains("<ul><li>"))
+        // The nested list is itself an allow-listed <ul>, not flattened away or escaped.
+        #expect(html.contains("<ul><li><p>nested</p></li></ul>"))
+    }
+
+    @Test func tableWithAlignment() {
+        let markdown = """
+        | Left | Center | Right |
+        |:-----|:------:|------:|
+        | a | b | c |
+        """
+        let html = MarkdownRendering.html(from: markdown)
+        #expect(html.hasPrefix("<table><thead><tr>"))
+        #expect(html.contains(#"<th style="text-align:left">Left</th>"#))
+        #expect(html.contains(#"<th style="text-align:center">Center</th>"#))
+        #expect(html.contains(#"<th style="text-align:right">Right</th>"#))
+        #expect(html.contains(#"<td style="text-align:left">a</td>"#))
+        #expect(html.contains(#"<td style="text-align:center">b</td>"#))
+        #expect(html.contains(#"<td style="text-align:right">c</td>"#))
+        #expect(html.contains("<tbody>"))
+        #expect(html.hasSuffix("</table>"))
+    }
+
+    @Test func tableCellContentIsEscaped() {
+        let markdown = """
+        | H |
+        |---|
+        | <script>alert(1)</script> |
+        """
+        let html = MarkdownRendering.html(from: markdown)
+        #expect(!html.contains("<script>"))
+        #expect(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"))
+    }
+
+    // MARK: - Injection: raw HTML written directly in the (trusted) template source must still
+    // never execute, regardless of how "real" it looks (an <img onerror=...> is exactly the
+    // classic raw-HTML XSS payload).
+
+    @Test func rawImgWithOnerrorInSourceIsEscapedNotLive() {
+        let html = MarkdownRendering.html(from: #"<img src=x onerror=alert(1)>"#)
+        // The text survives (visible, inert) but there is no live `<img` tag — the `onerror`
+        // text is just escaped literal characters, not a parsed attribute a browser could run.
+        #expect(!html.contains("<img"))
+        #expect(html.contains("&lt;img src=x onerror=alert(1)&gt;"))
+    }
+
+    @Test func rawScriptTagInSourceIsEscapedNotLive() {
+        let html = MarkdownRendering.html(from: "<script>alert(document.cookie)</script>")
+        #expect(!html.contains("<script>"))
+        #expect(html.contains("&lt;script&gt;alert(document.cookie)&lt;/script&gt;"))
     }
 }
