@@ -18,11 +18,11 @@ import Markdown
 ///
 /// Only the following constructs are emitted as live HTML markup:
 /// paragraph (`<p>`), emphasis (`<em>`), strong (`<strong>`), line/soft break (`<br>`),
-/// link (`<a href="...">`, only when the destination's scheme is `http`/`https`),
+/// link (`<a href="...">`, only when the destination starts with `http://`/`https://`),
 /// unordered/ordered lists (`<ul>`/`<ol>`/`<li>`), inline code (`<code>`), and blockquote
 /// (`<blockquote>`). Every text node is HTML-escaped. Anything else — including raw HTML
-/// blocks/inline, images, and headings — is rendered as escaped, inert text; it is never
-/// passed through as markup.
+/// blocks/inline, images, headings, and fenced/indented code blocks — is rendered as escaped,
+/// inert text (never dropped, never passed through as markup).
 public enum MarkdownRendering {
 
     /// Parses `markdown` and renders it to safe HTML using the allow-list emitter.
@@ -145,6 +145,10 @@ private struct PlainTextCollector: MarkupVisitor {
         inlineCode.code
     }
 
+    mutating func visitCodeBlock(_ codeBlock: CodeBlock) -> String {
+        codeBlock.code
+    }
+
     mutating func visitHTMLBlock(_ html: HTMLBlock) -> String {
         html.rawHTML
     }
@@ -180,12 +184,13 @@ enum HTMLEscaping {
 
 /// Validates a link destination's scheme is `http`/`https` before it may become a live `href`.
 enum SafeURL {
-    /// Returns `destination` unchanged if its scheme is `http` or `https` (case-insensitive),
-    /// `nil` otherwise (relative URLs, `javascript:`, `data:`, `mailto:`, malformed, ...).
+    /// Returns `destination` unchanged if it STARTS WITH `http://` or `https://`
+    /// (case-insensitive), `nil` otherwise (relative URLs, `javascript:`, `data:`, `mailto:`,
+    /// malformed, or a scheme-confusable value like `http:javascript:alert(1)` whose text
+    /// before the first colon reads "http" but which isn't actually an http(s) URL).
     static func httpOrHTTPS(_ destination: String) -> String? {
-        guard let schemeEnd = destination.firstIndex(of: ":") else { return nil }
-        let scheme = destination[destination.startIndex..<schemeEnd].lowercased()
-        guard scheme == "http" || scheme == "https" else { return nil }
+        let lowercased = destination.lowercased()
+        guard lowercased.hasPrefix("http://") || lowercased.hasPrefix("https://") else { return nil }
         return destination
     }
 }

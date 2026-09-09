@@ -51,6 +51,27 @@ struct MarkdownRenderingTests {
         #expect(MarkdownRendering.html(from: "> quoted") == "<blockquote><p>quoted</p></blockquote>")
     }
 
+    // MARK: - Code blocks: not on the allow list, but MUST NOT silently vanish.
+
+    @Test func fencedCodeBlockContentSurvivesAsEscapedText() {
+        let html = MarkdownRendering.html(from: "```\nsecret\n```")
+        #expect(!html.isEmpty)
+        #expect(html.contains("secret"))
+        // Not passed through as a live <pre>/<code> block — no unescaped markup wrapper.
+        #expect(!html.contains("<pre"))
+    }
+
+    @Test func fencedCodeBlockWithHTMLSpecialCharsIsEscaped() {
+        let html = MarkdownRendering.html(from: "```\n<script>alert(1)</script>\n```")
+        #expect(!html.contains("<script>"))
+        #expect(html.contains("&lt;script&gt;alert(1)&lt;/script&gt;"))
+    }
+
+    @Test func indentedCodeBlockContentSurvivesAsEscapedText() {
+        let html = MarkdownRendering.html(from: "    secret indented code")
+        #expect(html.contains("secret indented code"))
+    }
+
     @Test func httpsLinkRendersAsAnchor() {
         #expect(
             MarkdownRendering.html(from: "[前往查看](https://example.com)")
@@ -81,6 +102,15 @@ struct MarkdownRenderingTests {
     @Test func relativeLinkIsNeutralized() {
         let html = MarkdownRendering.html(from: "[relative](/some/path)")
         #expect(!html.contains("<a"))
+    }
+
+    @Test func schemeConfusableDestinationIsNeutralized() {
+        // The text before the first colon reads "http", but this isn't an http(s) URL —
+        // `SafeURL.httpOrHTTPS` must require the destination to actually START WITH
+        // "http://"/"https://", not just have "http"/"https" as the substring before ":".
+        let html = MarkdownRendering.html(from: "[click](http:javascript:alert(1))")
+        #expect(!html.contains("<a"))
+        #expect(!html.contains("javascript:alert(1)\""))
     }
 
     // MARK: - Raw HTML in the (trusted) template is never passed through.
