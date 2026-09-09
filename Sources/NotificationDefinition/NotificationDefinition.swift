@@ -108,3 +108,53 @@ public enum PlaceholderSubstitution {
         return result
     }
 }
+
+/// How ``PlaceholderSubstitution/substitute(_:values:escaping:)`` treats each `values` entry
+/// before substituting it into the template.
+public enum PlaceholderEscaping: Sendable {
+    /// Values are substituted verbatim (today's behavior — see `substitute(_:values:)`).
+    case none
+    /// Values are Markdown-escaped before substitution, so a value like `[x](y)` or `<script>`
+    /// is inert literal text in the resulting Markdown rather than link/tag syntax. Use this for
+    /// fields whose substituted result is subsequently rendered with ``MarkdownRendering``.
+    case markdown
+}
+
+extension PlaceholderSubstitution {
+
+    /// Like ``substitute(_:values:)``, but first escapes every value in `values` per `escaping`.
+    ///
+    /// The TEMPLATE itself is always trusted, author-written Markdown and is never escaped —
+    /// only the substituted VALUES are, so untrusted data cannot inject Markdown syntax (or,
+    /// once rendered by ``MarkdownRendering``, HTML markup). See
+    /// docs/superpowers/specs/2026-09-09-markdown-notification-content-design.md §3.
+    public static func substitute(_ template: String, values: [String: String], escaping: PlaceholderEscaping) throws -> String {
+        switch escaping {
+        case .none:
+            return try substitute(template, values: values)
+        case .markdown:
+            return try substitute(template, values: values.mapValues(escapeMarkdown))
+        }
+    }
+
+    /// Backslash-escapes every Markdown-significant character in `value` so a Markdown parser
+    /// treats it as literal text, never as syntax (emphasis, links, headings, lists, code
+    /// spans, HTML tags, ...).
+    static func escapeMarkdown(_ value: String) -> String {
+        // CommonMark's full punctuation-escape set, plus `<`/`>` (HTML tag delimiters) since the
+        // substituted Markdown is subsequently rendered to HTML — an unescaped `<script>` must
+        // not reach the parser as a raw-HTML node's literal delimiter-free text.
+        let escapable: Set<Character> = [
+            "\\", "`", "*", "_", "{", "}", "[", "]", "(", ")", "#", "+", "-", ".", "!", "<", ">",
+        ]
+        var result = ""
+        result.reserveCapacity(value.count)
+        for character in value {
+            if escapable.contains(character) {
+                result.append("\\")
+            }
+            result.append(character)
+        }
+        return result
+    }
+}

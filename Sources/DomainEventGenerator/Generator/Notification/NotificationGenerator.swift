@@ -185,8 +185,22 @@ package struct NotificationGenerator {
             for field in entry.fields {
                 let escapedTemplate = Self.escapeSwiftStringLiteral(field.template)
                 let valuesArgument = placeholders.isEmpty ? "[:]" : "values"
-                lines.append(
-                    "                    \"\(field.name)\": try PlaceholderSubstitution.substitute(\"\(escapedTemplate)\", values: \(valuesArgument)),")
+                // `content` fields carry Markdown, rendered to safe HTML here — the trust
+                // boundary (trusted template vs. untrusted %placeholder% values) is only
+                // visible at this point, so both halves of the safety story happen together:
+                // Markdown-escape the substituted values, then render the merged Markdown to
+                // an allow-listed HTML subset. `subject`/`title` stay plain text (e.g. an email
+                // subject or inbox heading): no Markdown, no HTML-escaping — see
+                // docs/superpowers/specs/2026-09-09-markdown-notification-content-design.md §3-4.
+                if field.name == "content" {
+                    lines.append(
+                        "                    \"\(field.name)\": MarkdownRendering.html(from: try PlaceholderSubstitution.substitute(\"\(escapedTemplate)\", values: \(valuesArgument), escaping: .markdown)),"
+                    )
+                } else {
+                    lines.append(
+                        "                    \"\(field.name)\": try PlaceholderSubstitution.substitute(\"\(escapedTemplate)\", values: \(valuesArgument)),"
+                    )
+                }
             }
             lines.append("                ]")
             lines.append("            ),")
