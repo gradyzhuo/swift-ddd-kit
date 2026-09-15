@@ -727,7 +727,9 @@ public protocol OpportunityNotificationVariables: Sendable {
 
 Declares, per domain event type, who gets notified (`recipients`, a list of event field names)
 and what each channel says (`notifications`, a list of `{type, ...fields}` entries). The type
-schema is closed: `mail` → `subject` + `content`, `inApp` → `title` + `content`.
+schema is closed: `mail` → `subject` + `content`, `inApp` → `title` + `content`. Every entry also
+takes an optional `render: markdown | plaintext` key, defaulting per channel type when omitted
+(`mail` → `markdown`, `inApp` → `plaintext`):
 
 ```yaml
 CollaboratorAdded:
@@ -742,6 +744,27 @@ CollaboratorAdded:
       title: 你已被加入案件「%QuotingCaseGroupName%」
       content: 你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」。
 ```
+
+Neither entry declares `render:` above, so each gets its channel type's default (`mail` →
+`markdown`, `inApp` → `plaintext`). Both directions are legal on both types — e.g. an inApp entry
+that wants a link can opt in with `render: markdown`:
+
+```yaml
+    - type: inApp
+      render: markdown        # override the inApp default
+      title: ...
+      content: 前往查看：[案件連結](https://mendesky.jwcpas.net/quoting-cases)
+```
+
+`render: markdown` parses `content` as Markdown and emits safe allow-listed HTML (escaping
+substituted values first, see below). `render: plaintext` skips Markdown parsing entirely and
+substitutes `%Placeholder%` values into the literal string with no escaping — there is no markup
+context for them to escape into. `subject`/`title` are always plain-substituted regardless of
+`render`. An inApp entry's resolved `render` value is also carried on the wire as a `"render"` key
+in its `fields` (see `RenderedNotification.payloadEntries` below → `inApp.render`); mail never gets
+this field — its render choice is fully resolved into HTML before publishing, so downstream
+consumers need no `render` awareness for mail. Full rationale:
+[`docs/superpowers/specs/2026-09-15-inapp-render-format-design.md`](docs/superpowers/specs/2026-09-15-inapp-render-format-design.md).
 
 `NotificationGeneratorPlugin` cross-validates every `%Placeholder%` token against `variables.yaml`
 (an undefined placeholder is a build error; a defined-but-unreferenced variable is a stderr

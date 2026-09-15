@@ -10,19 +10,38 @@
 import Foundation
 import Yams
 
+/// Whether a notification entry's `content` is authored in Markdown (parsed and rendered to
+/// safe HTML) or plaintext (substituted verbatim, no markdown parsing, no escaping). See spec:
+/// docs/superpowers/specs/2026-09-15-inapp-render-format-design.md §2-3.
+package enum NotificationRenderFormat: String, Equatable, Sendable {
+    case markdown
+    case plaintext
+}
+
+extension NotificationRenderFormat {
+    /// The render format a channel entry gets when its `render:` key is omitted — `mail` keeps
+    /// today's markdown behavior, `inApp` defaults to the new plaintext behavior. See spec §2.
+    package static func defaultFormat(forType type: String) -> NotificationRenderFormat {
+        type == "mail" ? .markdown : .plaintext
+    }
+}
+
 /// One channel entry (`mail`/`inApp`) for a single event, with its fields in the type's
 /// canonical schema order (`mail`: subject, content; `inApp`: title, content).
 package struct NotificationEntry: Equatable {
     package let type: String
+    package let render: NotificationRenderFormat
     package let fields: [(name: String, template: String)]
 
-    package init(type: String, fields: [(name: String, template: String)]) {
+    package init(type: String, render: NotificationRenderFormat, fields: [(name: String, template: String)]) {
         self.type = type
+        self.render = render
         self.fields = fields
     }
 
     package static func == (lhs: NotificationEntry, rhs: NotificationEntry) -> Bool {
         lhs.type == rhs.type
+            && lhs.render == rhs.render
             && lhs.fields.count == rhs.fields.count
             && zip(lhs.fields, rhs.fields).allSatisfy { $0.name == $1.name && $0.template == $1.template }
     }
@@ -47,6 +66,7 @@ package enum NotificationParseError: Error, Equatable, Sendable {
     case duplicateType(event: String, type: String)
     case missingField(event: String, type: String, field: String)
     case extraField(event: String, type: String, field: String)
+    case invalidRenderFormat(event: String, type: String, value: String)
     case emptyRecipients(event: String)
     case emptyNotifications(event: String)
 }
@@ -65,6 +85,8 @@ extension NotificationParseError: CustomStringConvertible {
             return "event '\(event)': notification type '\(type)' is missing required field '\(field)'"
         case .extraField(let event, let type, let field):
             return "event '\(event)': notification type '\(type)' has unexpected field '\(field)'"
+        case .invalidRenderFormat(let event, let type, let value):
+            return "event '\(event)': notification type '\(type)' has invalid `render` value '\(value)' (expected 'markdown' or 'plaintext')"
         case .emptyRecipients(let event):
             return "event '\(event)': `recipients` must not be empty"
         case .emptyNotifications(let event):
@@ -122,7 +144,7 @@ package enum NotificationDefinitionParser {
                     throw NotificationParseError.duplicateType(event: eventName, type: type)
                 }
 
-                let allowedKeys = Set(schemaFields).union(["type"])
+                let allowedKeys = Set(schemaFields).union(["type", "render"])
                 if let entryMapping {
                     for (fieldKeyNode, _) in entryMapping {
                         guard let fieldKey = fieldKeyNode.string else { continue }
@@ -130,6 +152,16 @@ package enum NotificationDefinitionParser {
                             throw NotificationParseError.extraField(event: eventName, type: type, field: fieldKey)
                         }
                     }
+                }
+
+                let render: NotificationRenderFormat
+                if let renderValue = entryMapping?["render"]?.string {
+                    guard let parsed = NotificationRenderFormat(rawValue: renderValue) else {
+                        throw NotificationParseError.invalidRenderFormat(event: eventName, type: type, value: renderValue)
+                    }
+                    render = parsed
+                } else {
+                    render = NotificationRenderFormat.defaultFormat(forType: type)
                 }
 
                 var fields: [(name: String, template: String)] = []
@@ -140,7 +172,7 @@ package enum NotificationDefinitionParser {
                     fields.append((name: fieldName, template: template))
                 }
 
-                notifications.append(NotificationEntry(type: type, fields: fields))
+                notifications.append(NotificationEntry(type: type, render: render, fields: fields))
             }
 
             definitions.append(
