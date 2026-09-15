@@ -185,14 +185,18 @@ package struct NotificationGenerator {
             for field in entry.fields {
                 let escapedTemplate = Self.escapeSwiftStringLiteral(field.template)
                 let valuesArgument = placeholders.isEmpty ? "[:]" : "values"
-                // `content` fields carry Markdown, rendered to safe HTML here — the trust
-                // boundary (trusted template vs. untrusted %placeholder% values) is only
-                // visible at this point, so both halves of the safety story happen together:
-                // Markdown-escape the substituted values, then render the merged Markdown to
-                // an allow-listed HTML subset. `subject`/`title` stay plain text (e.g. an email
-                // subject or inbox heading): no Markdown, no HTML-escaping — see
-                // docs/superpowers/specs/2026-09-09-markdown-notification-content-design.md §3-4.
-                if field.name == "content" {
+                // `content` fields' handling depends on the entry's resolved `render` value —
+                // the trust boundary (trusted template vs. untrusted %placeholder% values) is
+                // only visible at this point:
+                //   - markdown: Markdown-escape the substituted values, then render the merged
+                //     Markdown to an allow-listed HTML subset.
+                //   - plaintext: skip Markdown parsing entirely; substitute values verbatim,
+                //     with no escaping — there is no markup context for them to escape into.
+                // `subject`/`title` are never Markdown-rendered regardless of `render` (e.g. an
+                // email subject or inbox heading): always plain substitution, no escaping.
+                // See docs/superpowers/specs/2026-09-09-markdown-notification-content-design.md
+                // §3-4 and docs/superpowers/specs/2026-09-15-inapp-render-format-design.md §3.
+                if field.name == "content", entry.render == .markdown {
                     lines.append(
                         "                    \"\(field.name)\": MarkdownRendering.html(from: try PlaceholderSubstitution.substitute(\"\(escapedTemplate)\", values: \(valuesArgument), escaping: .markdown)),"
                     )
@@ -201,6 +205,12 @@ package struct NotificationGenerator {
                         "                    \"\(field.name)\": try PlaceholderSubstitution.substitute(\"\(escapedTemplate)\", values: \(valuesArgument)),"
                     )
                 }
+            }
+            if entry.type == "inApp" {
+                // Wire model: inApp carries its resolved render format alongside title/content
+                // (mail's render choice is fully resolved into HTML upstream, so mail never
+                // gets this field) — see spec §4-5.
+                lines.append("                    \"render\": \"\(entry.render.rawValue)\",")
             }
             lines.append("                ]")
             lines.append("            ),")

@@ -199,6 +199,89 @@ struct NotificationParsingTests {
     }
 }
 
+@Suite("Notification YAML render: parsing")
+struct NotificationRenderParsingTests {
+
+    @Test("mail entry defaults render to markdown when omitted")
+    func mailDefaultsToMarkdown() throws {
+        let yaml = """
+        SomeEvent:
+          recipients:
+            - userId
+          notifications:
+            - type: mail
+              subject: hi
+              content: body
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        #expect(definitions[0].notifications[0].render == .markdown)
+    }
+
+    @Test("inApp entry defaults render to plaintext when omitted")
+    func inAppDefaultsToPlaintext() throws {
+        let yaml = """
+        SomeEvent:
+          recipients:
+            - userId
+          notifications:
+            - type: inApp
+              title: hi
+              content: body
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        #expect(definitions[0].notifications[0].render == .plaintext)
+    }
+
+    @Test("mail entry may explicitly declare render: plaintext")
+    func mailExplicitPlaintext() throws {
+        let yaml = """
+        SomeEvent:
+          recipients:
+            - userId
+          notifications:
+            - type: mail
+              render: plaintext
+              subject: hi
+              content: body
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        #expect(definitions[0].notifications[0].render == .plaintext)
+    }
+
+    @Test("inApp entry may explicitly declare render: markdown")
+    func inAppExplicitMarkdown() throws {
+        let yaml = """
+        SomeEvent:
+          recipients:
+            - userId
+          notifications:
+            - type: inApp
+              render: markdown
+              title: hi
+              content: body
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        #expect(definitions[0].notifications[0].render == .markdown)
+    }
+
+    @Test("invalid render value throws invalidRenderFormat")
+    func invalidRenderValueThrows() {
+        let yaml = """
+        SomeEvent:
+          recipients:
+            - userId
+          notifications:
+            - type: mail
+              render: html
+              subject: hi
+              content: body
+        """
+        #expect(throws: NotificationParseError.invalidRenderFormat(event: "SomeEvent", type: "mail", value: "html")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+}
+
 @Suite("PlaceholderExtractor")
 struct PlaceholderExtractorTests {
 

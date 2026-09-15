@@ -11,11 +11,11 @@ struct NotificationGeneratorTests {
         eventName: "CollaboratorAdded",
         recipients: ["collaboratorId"],
         notifications: [
-            NotificationEntry(type: "mail", fields: [
+            NotificationEntry(type: "mail", render: .markdown, fields: [
                 (name: "subject", template: "你已被加入案件「%QuotingCaseGroupName%」"),
                 (name: "content", template: "你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」，%CollaboratorDescription%。"),
             ]),
-            NotificationEntry(type: "inApp", fields: [
+            NotificationEntry(type: "inApp", render: .markdown, fields: [
                 (name: "title", template: "你已被加入案件「%QuotingCaseGroupName%」"),
                 (name: "content", template: "你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」。"),
             ]),
@@ -129,7 +129,7 @@ struct NotificationGeneratorTests {
             eventName: "SomeEvent",
             recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", fields: [
+                NotificationEntry(type: "mail", render: .markdown, fields: [
                     (name: "subject", template: "Hi %Ghost%"),
                     (name: "content", template: "body"),
                 ]),
@@ -172,12 +172,12 @@ struct NotificationGeneratorTests {
         let eventB = EventNotificationDefinition(
             eventName: "BEvent",
             recipients: ["userId"],
-            notifications: [NotificationEntry(type: "mail", fields: [(name: "subject", template: "s"), (name: "content", template: "c")])]
+            notifications: [NotificationEntry(type: "mail", render: .markdown, fields: [(name: "subject", template: "s"), (name: "content", template: "c")])]
         )
         let eventA = EventNotificationDefinition(
             eventName: "AEvent",
             recipients: ["userId"],
-            notifications: [NotificationEntry(type: "mail", fields: [(name: "subject", template: "s"), (name: "content", template: "c")])]
+            notifications: [NotificationEntry(type: "mail", render: .markdown, fields: [(name: "subject", template: "s"), (name: "content", template: "c")])]
         )
         let generator = NotificationGenerator(protocolName: "V", events: [eventB, eventA], variables: [])
         let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
@@ -214,7 +214,7 @@ struct NotificationGeneratorTests {
             eventName: "SomeEvent",
             recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", fields: [
+                NotificationEntry(type: "mail", render: .markdown, fields: [
                     (name: "subject", template: "static subject"),
                     (name: "content", template: "static body, no placeholders"),
                 ]),
@@ -234,7 +234,7 @@ struct NotificationGeneratorTests {
             eventName: "SomeEvent",
             recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", fields: [
+                NotificationEntry(type: "mail", render: .markdown, fields: [
                     (name: "subject", template: "Hi %123%"),
                     (name: "content", template: "body"),
                 ]),
@@ -252,7 +252,7 @@ struct NotificationGeneratorTests {
             eventName: "SomeEvent",
             recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", fields: [
+                NotificationEntry(type: "mail", render: .markdown, fields: [
                     (name: "subject", template: "Hi %Inputs%"),
                     (name: "content", template: "body"),
                 ]),
@@ -270,7 +270,7 @@ struct NotificationGeneratorTests {
             eventName: "SomeEvent",
             recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", fields: [
+                NotificationEntry(type: "mail", render: .markdown, fields: [
                     (name: "subject", template: "Hi %FooBar%"),
                     (name: "content", template: "Bye %fooBar%"),
                 ]),
@@ -292,7 +292,7 @@ struct NotificationGeneratorTests {
             eventName: "SomeEvent",
             recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", fields: [
+                NotificationEntry(type: "mail", render: .markdown, fields: [
                     (name: "subject", template: #"He said "hi" and used \ backslash."#),
                     (name: "content", template: "body"),
                 ]),
@@ -303,5 +303,80 @@ struct NotificationGeneratorTests {
 
         let expectedLine = #""subject": try PlaceholderSubstitution.substitute("He said \"hi\" and used \\ backslash.", values: [:]),"#
         #expect(output.contains(expectedLine))
+    }
+
+    @Test("markdown content field is rendered through MarkdownRendering.html with markdown escaping")
+    func markdownContentUsesMarkdownRendering() throws {
+        let event = EventNotificationDefinition(
+            eventName: "SomeEvent",
+            recipients: ["userId"],
+            notifications: [
+                NotificationEntry(type: "mail", render: .markdown, fields: [
+                    (name: "subject", template: "s"),
+                    (name: "content", template: "body"),
+                ]),
+            ]
+        )
+        let generator = NotificationGenerator(protocolName: "V", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        let expectedLine = #""content": MarkdownRendering.html(from: try PlaceholderSubstitution.substitute("body", values: [:], escaping: .markdown)),"#
+        #expect(output.contains(expectedLine))
+    }
+
+    @Test("plaintext content field skips MarkdownRendering and substitutes with no escaping")
+    func plaintextContentSkipsMarkdownRendering() throws {
+        let event = EventNotificationDefinition(
+            eventName: "SomeEvent",
+            recipients: ["userId"],
+            notifications: [
+                NotificationEntry(type: "inApp", render: .plaintext, fields: [
+                    (name: "title", template: "t"),
+                    (name: "content", template: "body"),
+                ]),
+            ]
+        )
+        let generator = NotificationGenerator(protocolName: "V", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(!output.contains("MarkdownRendering"))
+        let expectedLine = #""content": try PlaceholderSubstitution.substitute("body", values: [:]),"#
+        #expect(output.contains(expectedLine))
+    }
+
+    @Test("inApp entry emits an inApp.render wire field with its resolved render value")
+    func inAppEmitsRenderField() throws {
+        let event = EventNotificationDefinition(
+            eventName: "SomeEvent",
+            recipients: ["userId"],
+            notifications: [
+                NotificationEntry(type: "inApp", render: .plaintext, fields: [
+                    (name: "title", template: "t"),
+                    (name: "content", template: "body"),
+                ]),
+            ]
+        )
+        let generator = NotificationGenerator(protocolName: "V", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains(#""render": "plaintext","#))
+    }
+
+    @Test("mail entry never emits a render wire field")
+    func mailNeverEmitsRenderField() throws {
+        let event = EventNotificationDefinition(
+            eventName: "SomeEvent",
+            recipients: ["userId"],
+            notifications: [
+                NotificationEntry(type: "mail", render: .plaintext, fields: [
+                    (name: "subject", template: "s"),
+                    (name: "content", template: "body"),
+                ]),
+            ]
+        )
+        let generator = NotificationGenerator(protocolName: "V", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(!output.contains(#""render":"#))
     }
 }

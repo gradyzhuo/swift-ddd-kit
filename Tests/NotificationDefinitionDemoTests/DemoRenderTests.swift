@@ -49,6 +49,9 @@ struct DemoRenderTests {
         // The single paragraph becomes one `<p>` element; the YAML block scalar's trailing
         // `\n` is consumed by Markdown block parsing, not preserved in the rendered HTML.
         #expect(mail.fields["content"] == "<p>你以「編輯者」角色被加入案件「6666」，歡迎加入團隊。</p>")
+        // mail never carries a `render` wire field — its render choice is fully resolved into
+        // HTML upstream (see spec §4).
+        #expect(mail.fields["render"] == nil)
     }
 
     @Test func inAppFieldsAreSubstitutedExactly() async throws {
@@ -60,8 +63,13 @@ struct DemoRenderTests {
         let inApp = rendered[1]
 
         #expect(inApp.fields["title"] == "你已被加入案件「6666」")
-        // Single-line `content:` scalar, also rendered to safe HTML (one `<p>` element).
-        #expect(inApp.fields["content"] == "<p>你以「編輯者」角色被加入案件「6666」。</p>")
+        // notification.yaml declares no `render:` key for this entry, so it gets the new
+        // per-channel default: inApp -> plaintext (see
+        // docs/superpowers/specs/2026-09-15-inapp-render-format-design.md §2). Plaintext skips
+        // Markdown parsing entirely, so the substituted string comes back verbatim, no `<p>`
+        // wrapping.
+        #expect(inApp.fields["content"] == "你以「編輯者」角色被加入案件「6666」。")
+        #expect(inApp.fields["render"] == "plaintext")
     }
 
     @Test func recipientsIsCollaboratorId() throws {

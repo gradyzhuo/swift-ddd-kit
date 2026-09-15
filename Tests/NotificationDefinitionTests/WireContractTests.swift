@@ -15,6 +15,13 @@ struct RenderedNotificationPayloadEntriesTests {
         let notification = RenderedNotification(type: .inApp, fields: ["title": "Hi", "content": "Body"])
         #expect(notification.payloadEntries == ["inApp.title": "Hi", "inApp.content": "Body"])
     }
+
+    @Test("flattens an inApp notification's render field to \"inApp.render\"")
+    func flattensInAppRenderField() {
+        let notification = RenderedNotification(
+            type: .inApp, fields: ["title": "Hi", "content": "Body", "render": "plaintext"])
+        #expect(notification.payloadEntries["inApp.render"] == "plaintext")
+    }
 }
 
 @Suite("PayloadKey.parse")
