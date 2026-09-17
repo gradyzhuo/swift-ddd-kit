@@ -61,10 +61,12 @@ struct VariablesProtocolGeneratorTests {
             guard let collaboratorId = inputs["collaboratorId"] else { throw VariablesRuntimeError.missingInput(placeholder: "CollaboratorDescription", input: "collaboratorId") }
             """))
 
-        // resolving calls forward to the protocol methods
-        #expect(output.contains("return try await quotingCaseGroupName(quotingCaseGroupingId: quotingCaseGroupingId)"))
+        // resolving calls forward to the protocol methods, qualified with `self.` so a
+        // same-named local `guard let` binding never shadows the method call (see
+        // `callSiteDoesNotShadowLocalGuardLetBinding` below for the case that requires this)
+        #expect(output.contains("return try await self.quotingCaseGroupName(quotingCaseGroupingId: quotingCaseGroupingId)"))
         #expect(output.contains(
-            "return try await collaboratorDescription(quotingCaseGroupingId: quotingCaseGroupingId, collaboratorId: collaboratorId)"))
+            "return try await self.collaboratorDescription(quotingCaseGroupingId: quotingCaseGroupingId, collaboratorId: collaboratorId)"))
 
         // default case throws unknownPlaceholder
         #expect(output.contains("default: throw VariablesRuntimeError.unknownPlaceholder(placeholder)"))
@@ -98,6 +100,30 @@ struct VariablesProtocolGeneratorTests {
 
         #expect(output.contains("func staticGreeting() async throws -> String"))
         #expect(output.contains("case \"StaticGreeting\":"))
-        #expect(output.contains("return try await staticGreeting()"))
+        #expect(output.contains("return try await self.staticGreeting()"))
+    }
+
+    @Test("call site does not shadow a local guard-let binding with the same name as the variable")
+    func callSiteDoesNotShadowLocalGuardLetBinding() {
+        // Regression for a real bug: when a variable's lowerCamelCased name equals its
+        // sole input's name, the `guard let` above binds a local constant of that name,
+        // which shadows the protocol method of the same name at an unqualified call site
+        // — `quotingCaseGroupingId(quotingCaseGroupingId:)` resolves to the just-bound
+        // `String`, not the method, and fails to compile ("cannot call value of
+        // non-function type 'String'"). Qualifying with `self.` fixes it.
+        let variables = [
+            VariableDefinition(
+                name: "QuotingCaseGroupingId",
+                placeholder: "QuotingCaseGroupingId",
+                inputs: [(name: "quotingCaseGroupingId", type: "String")]
+            )
+        ]
+        let generator = VariablesProtocolGenerator(protocolName: "V", variables: variables)
+        let output = generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains(
+            "return try await self.quotingCaseGroupingId(quotingCaseGroupingId: quotingCaseGroupingId)"))
+        #expect(!output.contains(
+            "return try await quotingCaseGroupingId(quotingCaseGroupingId: quotingCaseGroupingId)"))
     }
 }

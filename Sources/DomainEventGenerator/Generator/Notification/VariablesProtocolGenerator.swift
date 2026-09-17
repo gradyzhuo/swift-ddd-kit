@@ -57,7 +57,10 @@ package struct VariablesProtocolGenerator {
                     "{ throw VariablesRuntimeError.missingInput(placeholder: \"\(variable.placeholder)\", input: \"\(input.name)\") }")
             }
             let arguments = variable.inputs.map { "\($0.name): \($0.name)" }.joined(separator: ", ")
-            seamLines.append("            return try await \(Self.lowerCamel(variable.name))(\(arguments))")
+            // `self.` qualifier is required: when a variable's name matches its sole input's
+            // name, the `guard let` above binds a local constant of that name, which would
+            // otherwise shadow the protocol method of the same name at this call site.
+            seamLines.append("            return try await self.\(Self.lowerCamel(variable.name))(\(arguments))")
         }
         seamLines.append("        default: throw VariablesRuntimeError.unknownPlaceholder(placeholder)")
         seamLines.append("        }")
