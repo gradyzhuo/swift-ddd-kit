@@ -26,16 +26,30 @@ extension NotificationRenderFormat {
     }
 }
 
+/// A single `recipients:` list entry — either a plain event-field name (unchanged, `.field`) or a
+/// `%recipients:X%` token naming a `type: recipients` variable in `variables.yaml` (`.variable`,
+/// resolved and validated at generation time — see NotificationGenerator). Conforms to
+/// `ExpressibleByStringLiteral` so every existing `recipients: ["someField"]` array literal in
+/// this repo keeps compiling unchanged, producing `.field("someField")` exactly as before.
+package enum RecipientSource: Equatable, Sendable, ExpressibleByStringLiteral {
+    case field(String)
+    case variable(String)
+
+    package init(stringLiteral value: String) {
+        self = .field(value)
+    }
+}
+
 /// One channel entry (`mail`/`inApp`) for a single event, with its fields in the type's
 /// canonical schema order (`mail`: subject, content; `inApp`: title, content).
 package struct NotificationEntry: Equatable {
     package let type: String
     package let render: NotificationRenderFormat
-    package let recipients: [String]
+    package let recipients: [RecipientSource]
     package let fields: [(name: String, template: String)]
 
     package init(
-        type: String, render: NotificationRenderFormat, recipients: [String],
+        type: String, render: NotificationRenderFormat, recipients: [RecipientSource],
         fields: [(name: String, template: String)]
     ) {
         self.type = type
@@ -110,6 +124,22 @@ package enum NotificationDefinitionParser {
         "inApp": ["title", "content"],
     ]
 
+    /// Grammar: `%recipients:([A-Za-z0-9_]+)%`, mirroring `PlaceholderExtractor`'s
+    /// `%[A-Za-z0-9_]+%` content-placeholder grammar. Safe to force-unwrap: fixed valid literal.
+    private static let recipientsTokenRegex = try! NSRegularExpression(pattern: "^%recipients:([A-Za-z0-9_]+)%$")
+
+    /// `nil` when `raw` isn't shaped like a `%recipients:X%` token — the caller then falls back to
+    /// treating `raw` as a plain field-name identifier.
+    private static func recipientsVariableToken(_ raw: String) -> String? {
+        let nsRaw = raw as NSString
+        let fullRange = NSRange(location: 0, length: nsRaw.length)
+        guard let match = recipientsTokenRegex.firstMatch(in: raw, range: fullRange),
+              match.numberOfRanges > 1 else {
+            return nil
+        }
+        return nsRaw.substring(with: match.range(at: 1))
+    }
+
     package static func parse(yaml: String) throws -> [EventNotificationDefinition] {
         guard let root = try Yams.compose(yaml: yaml), let mapping = root.mapping else {
             return []
@@ -140,12 +170,18 @@ package enum NotificationDefinitionParser {
                     throw NotificationParseError.duplicateType(event: eventName, type: type)
                 }
 
-                let recipients: [String] = entryMapping?["recipients"]?.sequence?.compactMap { $0.string } ?? []
-                guard !recipients.isEmpty else {
+                let rawRecipients: [String] = entryMapping?["recipients"]?.sequence?.compactMap { $0.string } ?? []
+                guard !rawRecipients.isEmpty else {
                     throw NotificationParseError.emptyRecipients(event: eventName, type: type)
                 }
-                for recipient in recipients {
-                    try IdentifierValidation.validate(recipient, kind: .recipient)
+                var recipients: [RecipientSource] = []
+                for raw in rawRecipients {
+                    if let variableName = Self.recipientsVariableToken(raw) {
+                        recipients.append(.variable(variableName))
+                    } else {
+                        try IdentifierValidation.validate(raw, kind: .recipient)
+                        recipients.append(.field(raw))
+                    }
                 }
 
                 let allowedKeys = Set(schemaFields).union(["type", "render", "recipients"])

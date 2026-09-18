@@ -198,6 +198,71 @@ struct NotificationParsingTests {
             _ = try NotificationDefinitionParser.parse(yaml: yaml)
         }
     }
+
+    @Test("a %recipients:X% token parses as RecipientSource.variable")
+    func recipientsTokenParsesAsVariable() throws {
+        let yaml = """
+        AssignedMemberAdded:
+          notifications:
+            - type: mail
+              recipients:
+                - "%recipients:AssignedDepartmentMembers%"
+              subject: hi
+              content: hi
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        let entry = try #require(definitions.first?.notifications.first)
+        #expect(entry.recipients == [.variable("AssignedDepartmentMembers")])
+    }
+
+    @Test("a plain identifier still parses as RecipientSource.field")
+    func plainIdentifierParsesAsField() throws {
+        let yaml = """
+        AssignedMemberAdded:
+          notifications:
+            - type: mail
+              recipients:
+                - memberIds
+              subject: hi
+              content: hi
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        let entry = try #require(definitions.first?.notifications.first)
+        #expect(entry.recipients == [.field("memberIds")])
+    }
+
+    @Test("a recipients list mixing a plain identifier and a %recipients:X% token parses both, in order")
+    func mixedRecipientsListParsesBoth() throws {
+        let yaml = """
+        AssignedMemberAdded:
+          notifications:
+            - type: mail
+              recipients:
+                - memberIds
+                - "%recipients:AssignedDepartmentMembers%"
+              subject: hi
+              content: hi
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        let entry = try #require(definitions.first?.notifications.first)
+        #expect(entry.recipients == [.field("memberIds"), .variable("AssignedDepartmentMembers")])
+    }
+
+    @Test("an ill-formed %recipients: token falls through to plain identifier validation and throws")
+    func illFormedTokenFallsThroughToIdentifierValidation() {
+        let yaml = """
+        AssignedMemberAdded:
+          notifications:
+            - type: mail
+              recipients:
+                - "%recipients:%"
+              subject: hi
+              content: hi
+        """
+        #expect(throws: IdentifierValidationError.self) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
 }
 
 @Suite("Notification YAML render: parsing")
