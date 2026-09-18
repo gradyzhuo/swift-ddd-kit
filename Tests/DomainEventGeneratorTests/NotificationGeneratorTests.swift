@@ -448,4 +448,135 @@ struct NotificationGeneratorTests {
         #expect(output.contains("let departmentLeadId: String"))
         #expect(output.contains("let memberIds: String"))
     }
+
+    @Test("existing all-plain-field recipients render exactly as before mixed-recipients support existed")
+    func plainRecipientsRenderUnchanged() throws {
+        // Regression guard for the Global Constraint: token-free entries must not change output.
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables",
+            events: [Self.collaboratorAddedEvent],
+            variables: Self.variables
+        )
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains(
+            "RenderedNotification(\n                type: NotificationType(rawValue: \"mail\")!,\n                recipients: [input.collaboratorId],"))
+    }
+
+    @Test("a %recipients:X% token generates an awaited variable call concatenated with plain fields")
+    func mixedRecipientsGenerateAwaitedCall() throws {
+        let event = EventNotificationDefinition(
+            eventName: "AssignedMemberAdded",
+            notifications: [
+                NotificationEntry(
+                    type: "mail", render: .markdown,
+                    recipients: ["memberIds", .variable("AssignedDepartmentMembers")],
+                    fields: [(name: "subject", template: "hi"), (name: "content", template: "hi")]
+                ),
+            ]
+        )
+        let variables = [
+            VariableDefinition(
+                name: "AssignedDepartmentMembers", placeholder: "AssignedDepartmentMembers",
+                type: .recipients,
+                inputs: [(name: "quotingCaseGroupingId", type: "String"), (name: "eventMetadata", type: "Data")]
+            ),
+        ]
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables", events: [event], variables: variables)
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains(
+            "recipients: [input.memberIds] + (try await variables.assignedDepartmentMembers(quotingCaseGroupingId: input.quotingCaseGroupingId, eventMetadata: input.eventMetadata)),"))
+        // eventMetadata must be typed Data on the generated Input struct, not String.
+        #expect(output.contains("internal let eventMetadata: Data"))
+        #expect(output.contains("internal let quotingCaseGroupingId: String"))
+    }
+
+    @Test("a recipients list with only a %recipients:X% token (no plain fields) still generates valid code")
+    func tokenOnlyRecipientsGenerate() throws {
+        let event = EventNotificationDefinition(
+            eventName: "AssignedMemberAdded",
+            notifications: [
+                NotificationEntry(
+                    type: "mail", render: .markdown,
+                    recipients: [.variable("AssignedDepartmentMembers")],
+                    fields: [(name: "subject", template: "hi"), (name: "content", template: "hi")]
+                ),
+            ]
+        )
+        let variables = [
+            VariableDefinition(
+                name: "AssignedDepartmentMembers", placeholder: "AssignedDepartmentMembers",
+                type: .recipients,
+                inputs: [(name: "quotingCaseGroupingId", type: "String")]
+            ),
+        ]
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables", events: [event], variables: variables)
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains(
+            "recipients: [] + (try await variables.assignedDepartmentMembers(quotingCaseGroupingId: input.quotingCaseGroupingId)),"))
+    }
+
+    @Test("a %recipients:X% token naming an undeclared variable throws undefinedRecipientsVariable")
+    func undefinedRecipientsVariableThrows() {
+        let event = EventNotificationDefinition(
+            eventName: "AssignedMemberAdded",
+            notifications: [
+                NotificationEntry(
+                    type: "mail", render: .markdown,
+                    recipients: [.variable("NoSuchVariable")],
+                    fields: [(name: "subject", template: "hi"), (name: "content", template: "hi")]
+                ),
+            ]
+        )
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [])
+        #expect(throws: NotificationGenerateError.undefinedRecipientsVariable(event: "AssignedMemberAdded", variable: "NoSuchVariable")) {
+            _ = try generator.render(accessLevel: .internal)
+        }
+    }
+
+    @Test("a %recipients:X% token naming a type: environment variable throws recipientsVariableWrongType")
+    func recipientsTokenOnEnvironmentVariableThrows() {
+        let event = EventNotificationDefinition(
+            eventName: "AssignedMemberAdded",
+            notifications: [
+                NotificationEntry(
+                    type: "mail", render: .markdown,
+                    recipients: [.variable("QuotingCaseGroupName")],
+                    fields: [(name: "subject", template: "hi"), (name: "content", template: "hi")]
+                ),
+            ]
+        )
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: Self.variables)
+        #expect(throws: NotificationGenerateError.recipientsVariableWrongType(event: "AssignedMemberAdded", variable: "QuotingCaseGroupName")) {
+            _ = try generator.render(accessLevel: .internal)
+        }
+    }
+
+    @Test("a type: recipients variable's placeholder used in a text template throws recipientsVariableUsedAsPlaceholder")
+    func recipientsVariableUsedAsPlaceholderThrows() {
+        let event = EventNotificationDefinition(
+            eventName: "AssignedMemberAdded",
+            notifications: [
+                NotificationEntry(
+                    type: "mail", render: .markdown,
+                    recipients: ["memberIds"],
+                    fields: [(name: "subject", template: "%AssignedDepartmentMembers%"), (name: "content", template: "hi")]
+                ),
+            ]
+        )
+        let variables = [
+            VariableDefinition(
+                name: "AssignedDepartmentMembers", placeholder: "AssignedDepartmentMembers",
+                type: .recipients, inputs: []
+            ),
+        ]
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: variables)
+        #expect(throws: NotificationGenerateError.recipientsVariableUsedAsPlaceholder(event: "AssignedMemberAdded", placeholder: "AssignedDepartmentMembers")) {
+            _ = try generator.render(accessLevel: .internal)
+        }
+    }
 }

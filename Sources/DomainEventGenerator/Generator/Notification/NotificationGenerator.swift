@@ -13,6 +13,9 @@ import Foundation
 
 package enum NotificationGenerateError: Error, Equatable, Sendable {
     case undefinedPlaceholder(event: String, placeholder: String)
+    case recipientsVariableUsedAsPlaceholder(event: String, placeholder: String)
+    case undefinedRecipientsVariable(event: String, variable: String)
+    case recipientsVariableWrongType(event: String, variable: String)
 }
 
 extension NotificationGenerateError: CustomStringConvertible {
@@ -20,6 +23,12 @@ extension NotificationGenerateError: CustomStringConvertible {
         switch self {
         case .undefinedPlaceholder(let event, let placeholder):
             return "event '\(event)': placeholder '%\(placeholder)%' has no matching variable in variables.yaml"
+        case .recipientsVariableUsedAsPlaceholder(let event, let placeholder):
+            return "event '\(event)': '%\(placeholder)%' is a type: recipients variable and cannot be used inside a text template — use %recipients:\(placeholder)% in a recipients: list instead"
+        case .undefinedRecipientsVariable(let event, let variable):
+            return "event '\(event)': %recipients:\(variable)% has no matching variable in variables.yaml"
+        case .recipientsVariableWrongType(let event, let variable):
+            return "event '\(event)': %recipients:\(variable)% names a type: environment variable — only type: recipients variables can be used in a recipients: list"
         }
     }
 }
@@ -55,6 +64,7 @@ package struct NotificationGenerator {
     package func render(accessLevel: AccessLevel) throws -> [String] {
         let access = accessLevel.rawValue
         let variablesByPlaceholder = Dictionary(uniqueKeysWithValues: variables.map { ($0.placeholder, $0) })
+        let variablesByName = Dictionary(uniqueKeysWithValues: variables.map { ($0.name, $0) })
         let sortedEvents = events.sorted { $0.eventName < $1.eventName }
 
         var lines: [String] = ["import NotificationDefinition"]
@@ -93,23 +103,55 @@ package struct NotificationGenerator {
                 guard let variable = variablesByPlaceholder[placeholder] else {
                     throw NotificationGenerateError.undefinedPlaceholder(event: event.eventName, placeholder: placeholder)
                 }
+                guard variable.type == .environment else {
+                    throw NotificationGenerateError.recipientsVariableUsedAsPlaceholder(event: event.eventName, placeholder: placeholder)
+                }
                 matchedVariables.append(variable)
             }
 
             let sortedPlaceholders = orderedPlaceholders.sorted()
 
-            var propertyNames: Set<String> = []
+            // Every `%recipients:X%` token referenced by this event's recipients: lists, matched
+            // and type-checked against variables.yaml — mirrors matchedVariables above.
+            var matchedRecipientsVariables: [VariableDefinition] = []
+            var seenRecipientsVariableNames: Set<String> = []
             for notification in event.notifications {
                 for recipient in notification.recipients {
-                    propertyNames.insert(recipient)
+                    guard case .variable(let variableName) = recipient else { continue }
+                    guard let variable = variablesByName[variableName] else {
+                        throw NotificationGenerateError.undefinedRecipientsVariable(event: event.eventName, variable: variableName)
+                    }
+                    guard variable.type == .recipients else {
+                        throw NotificationGenerateError.recipientsVariableWrongType(event: event.eventName, variable: variableName)
+                    }
+                    if seenRecipientsVariableNames.insert(variableName).inserted {
+                        matchedRecipientsVariables.append(variable)
+                    }
+                }
+            }
+
+            // Every Input struct property, with its Swift type — almost always "String", except
+            // a type: recipients variable's `$event.metadata` input, typed "Data".
+            var propertyTypes: [String: String] = [:]
+            for notification in event.notifications {
+                for recipient in notification.recipients {
+                    if case .field(let name) = recipient {
+                        propertyTypes[name] = "String"
+                    }
                 }
             }
             for variable in matchedVariables {
                 for input in variable.inputs {
-                    propertyNames.insert(input.name)
+                    propertyTypes[input.name] = input.type
                 }
             }
-            let sortedProperties = propertyNames.sorted()
+            for variable in matchedRecipientsVariables {
+                for input in variable.inputs {
+                    propertyTypes[input.name] = input.type
+                }
+            }
+            let sortedProperties: [(name: String, type: String)] =
+                propertyTypes.keys.sorted().map { (name: $0, type: propertyTypes[$0]!) }
 
             lines.append(Self.renderInputStruct(access: access, event: event, properties: sortedProperties))
             lines.append(
@@ -118,23 +160,26 @@ package struct NotificationGenerator {
                     protocolName: protocolName,
                     event: event,
                     properties: sortedProperties,
-                    placeholders: sortedPlaceholders
+                    placeholders: sortedPlaceholders,
+                    variablesByName: variablesByName
                 ))
         }
 
         return lines
     }
 
-    private static func renderInputStruct(access: String, event: EventNotificationDefinition, properties: [String]) -> String {
+    private static func renderInputStruct(
+        access: String, event: EventNotificationDefinition, properties: [(name: String, type: String)]
+    ) -> String {
         var lines = ["\(access) struct \(event.eventName)NotificationInput: Decodable {"]
         for property in properties {
-            lines.append("    \(access) let \(property): String")
+            lines.append("    \(access) let \(property.name): \(property.type)")
         }
         lines.append("")
-        let parameterList = properties.map { "\($0): String" }.joined(separator: ", ")
+        let parameterList = properties.map { "\($0.name): \($0.type)" }.joined(separator: ", ")
         lines.append("    \(access) init(\(parameterList)) {")
         for property in properties {
-            lines.append("        self.\(property) = \(property)")
+            lines.append("        self.\(property.name) = \(property.name)")
         }
         lines.append("    }")
         lines.append("}")
@@ -145,8 +190,9 @@ package struct NotificationGenerator {
         access: String,
         protocolName: String,
         event: EventNotificationDefinition,
-        properties: [String],
-        placeholders: [String]
+        properties: [(name: String, type: String)],
+        placeholders: [String],
+        variablesByName: [String: VariableDefinition]
     ) -> String {
         var lines = ["\(access) enum \(event.eventName)Notification {"]
 
@@ -155,9 +201,12 @@ package struct NotificationGenerator {
             "    \(access) static func render(input: \(event.eventName)NotificationInput, variables: some \(protocolName)) async throws -> [RenderedNotification] {")
 
         if !placeholders.isEmpty {
+            // Only String-typed properties can populate the __value seam's [String: String]
+            // inputs dictionary — a type: recipients variable's Data-typed eventMetadata (if any
+            // property happens to be named that) never participates in text-template resolution.
             lines.append("        let inputs: [String: String] = [")
-            for property in properties {
-                lines.append("            \"\(property)\": input.\(property),")
+            for property in properties where property.type == "String" {
+                lines.append("            \"\(property.name)\": input.\(property.name),")
             }
             lines.append("        ]")
         }
@@ -177,10 +226,30 @@ package struct NotificationGenerator {
 
         lines.append("        return [")
         for entry in event.notifications {
-            let recipientExpressions = entry.recipients.map { "input.\($0)" }.joined(separator: ", ")
+            let fieldRecipients: [String] = entry.recipients.compactMap {
+                guard case .field(let name) = $0 else { return nil }
+                return "input.\(name)"
+            }
+            let variableRecipients: [String] = entry.recipients.compactMap { source in
+                guard case .variable(let variableName) = source, let variable = variablesByName[variableName] else {
+                    return nil
+                }
+                let arguments = variable.inputs.map { "\($0.name): input.\($0.name)" }.joined(separator: ", ")
+                return "try await variables.\(Self.lowerCamel(variable.name))(\(arguments))"
+            }
+            let recipientsExpression: String
+            if variableRecipients.isEmpty {
+                // Unchanged from before mixed-recipients support existed — keeps every
+                // token-free notification.yaml's generated code byte-identical.
+                recipientsExpression = "[\(fieldRecipients.joined(separator: ", "))]"
+            } else {
+                var parts = ["[\(fieldRecipients.joined(separator: ", "))]"]
+                parts.append(contentsOf: variableRecipients.map { "(\($0))" })
+                recipientsExpression = parts.joined(separator: " + ")
+            }
             lines.append("            RenderedNotification(")
             lines.append("                type: NotificationType(rawValue: \"\(entry.type)\")!,")
-            lines.append("                recipients: [\(recipientExpressions)],")
+            lines.append("                recipients: \(recipientsExpression),")
             lines.append("                fields: [")
             for field in entry.fields {
                 let escapedTemplate = Self.escapeSwiftStringLiteral(field.template)
