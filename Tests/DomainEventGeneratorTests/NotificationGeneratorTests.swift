@@ -9,13 +9,12 @@ struct NotificationGeneratorTests {
     // CollaboratorDescription appears once.
     static let collaboratorAddedEvent = EventNotificationDefinition(
         eventName: "CollaboratorAdded",
-        recipients: ["collaboratorId"],
         notifications: [
-            NotificationEntry(type: "mail", render: .markdown, fields: [
+            NotificationEntry(type: "mail", render: .markdown, recipients: ["collaboratorId"], fields: [
                 (name: "subject", template: "你已被加入案件「%QuotingCaseGroupName%」"),
                 (name: "content", template: "你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」，%CollaboratorDescription%。"),
             ]),
-            NotificationEntry(type: "inApp", render: .markdown, fields: [
+            NotificationEntry(type: "inApp", render: .markdown, recipients: ["collaboratorId"], fields: [
                 (name: "title", template: "你已被加入案件「%QuotingCaseGroupName%」"),
                 (name: "content", template: "你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」。"),
             ]),
@@ -63,7 +62,7 @@ struct NotificationGeneratorTests {
         #expect(output.contains("self.quotingCaseGroupingId = quotingCaseGroupingId"))
     }
 
-    @Test("recipients() returns the recipients fields' values in yaml order")
+    @Test("each RenderedNotification embeds its own entry's recipients, in yaml order")
     func rendersRecipients() throws {
         let generator = NotificationGenerator(
             protocolName: "OpportunityNotificationVariables",
@@ -72,8 +71,11 @@ struct NotificationGeneratorTests {
         )
         let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
 
-        #expect(output.contains("internal static func recipients(input: CollaboratorAddedNotificationInput) -> [String] {"))
-        #expect(output.contains("[input.collaboratorId]"))
+        #expect(!output.contains("static func recipients(input:"))
+        #expect(output.contains(
+            "RenderedNotification(\n                type: NotificationType(rawValue: \"mail\")!,\n                recipients: [input.collaboratorId],"))
+        #expect(output.contains(
+            "RenderedNotification(\n                type: NotificationType(rawValue: \"inApp\")!,\n                recipients: [input.collaboratorId],"))
     }
 
     @Test("each distinct placeholder is resolved exactly once despite repeated occurrences")
@@ -127,9 +129,8 @@ struct NotificationGeneratorTests {
     func undefinedPlaceholderThrows() {
         let event = EventNotificationDefinition(
             eventName: "SomeEvent",
-            recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", render: .markdown, fields: [
+                NotificationEntry(type: "mail", render: .markdown, recipients: ["userId"], fields: [
                     (name: "subject", template: "Hi %Ghost%"),
                     (name: "content", template: "body"),
                 ]),
@@ -163,7 +164,7 @@ struct NotificationGeneratorTests {
 
         #expect(output.contains("public struct CollaboratorAddedNotificationInput: Decodable {"))
         #expect(output.contains("public enum CollaboratorAddedNotification {"))
-        #expect(output.contains("public static func recipients(input: CollaboratorAddedNotificationInput) -> [String] {"))
+        #expect(!output.contains("static func recipients(input:"))
         #expect(output.contains("public static func render(input: CollaboratorAddedNotificationInput, variables: some OpportunityNotificationVariables) async throws -> [RenderedNotification]"))
     }
 
@@ -171,13 +172,11 @@ struct NotificationGeneratorTests {
     func eventsSortedByName() throws {
         let eventB = EventNotificationDefinition(
             eventName: "BEvent",
-            recipients: ["userId"],
-            notifications: [NotificationEntry(type: "mail", render: .markdown, fields: [(name: "subject", template: "s"), (name: "content", template: "c")])]
+            notifications: [NotificationEntry(type: "mail", render: .markdown, recipients: ["userId"], fields: [(name: "subject", template: "s"), (name: "content", template: "c")])]
         )
         let eventA = EventNotificationDefinition(
             eventName: "AEvent",
-            recipients: ["userId"],
-            notifications: [NotificationEntry(type: "mail", render: .markdown, fields: [(name: "subject", template: "s"), (name: "content", template: "c")])]
+            notifications: [NotificationEntry(type: "mail", render: .markdown, recipients: ["userId"], fields: [(name: "subject", template: "s"), (name: "content", template: "c")])]
         )
         let generator = NotificationGenerator(protocolName: "V", events: [eventB, eventA], variables: [])
         let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
@@ -212,9 +211,8 @@ struct NotificationGeneratorTests {
     func emptyPlaceholdersOmitsInputsLocal() throws {
         let event = EventNotificationDefinition(
             eventName: "SomeEvent",
-            recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", render: .markdown, fields: [
+                NotificationEntry(type: "mail", render: .markdown, recipients: ["userId"], fields: [
                     (name: "subject", template: "static subject"),
                     (name: "content", template: "static body, no placeholders"),
                 ]),
@@ -232,9 +230,8 @@ struct NotificationGeneratorTests {
     func invalidPlaceholderThrows() {
         let event = EventNotificationDefinition(
             eventName: "SomeEvent",
-            recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", render: .markdown, fields: [
+                NotificationEntry(type: "mail", render: .markdown, recipients: ["userId"], fields: [
                     (name: "subject", template: "Hi %123%"),
                     (name: "content", template: "body"),
                 ]),
@@ -250,9 +247,8 @@ struct NotificationGeneratorTests {
     func placeholderCollidingWithInputsLocalThrows() {
         let event = EventNotificationDefinition(
             eventName: "SomeEvent",
-            recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", render: .markdown, fields: [
+                NotificationEntry(type: "mail", render: .markdown, recipients: ["userId"], fields: [
                     (name: "subject", template: "Hi %Inputs%"),
                     (name: "content", template: "body"),
                 ]),
@@ -268,9 +264,8 @@ struct NotificationGeneratorTests {
     func placeholderCollisionThrows() {
         let event = EventNotificationDefinition(
             eventName: "SomeEvent",
-            recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", render: .markdown, fields: [
+                NotificationEntry(type: "mail", render: .markdown, recipients: ["userId"], fields: [
                     (name: "subject", template: "Hi %FooBar%"),
                     (name: "content", template: "Bye %fooBar%"),
                 ]),
@@ -290,9 +285,8 @@ struct NotificationGeneratorTests {
     func escapesQuotesAndBackslashes() throws {
         let event = EventNotificationDefinition(
             eventName: "SomeEvent",
-            recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", render: .markdown, fields: [
+                NotificationEntry(type: "mail", render: .markdown, recipients: ["userId"], fields: [
                     (name: "subject", template: #"He said "hi" and used \ backslash."#),
                     (name: "content", template: "body"),
                 ]),
@@ -309,9 +303,8 @@ struct NotificationGeneratorTests {
     func markdownContentUsesMarkdownRendering() throws {
         let event = EventNotificationDefinition(
             eventName: "SomeEvent",
-            recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", render: .markdown, fields: [
+                NotificationEntry(type: "mail", render: .markdown, recipients: ["userId"], fields: [
                     (name: "subject", template: "s"),
                     (name: "content", template: "body"),
                 ]),
@@ -328,9 +321,8 @@ struct NotificationGeneratorTests {
     func plaintextContentSkipsMarkdownRendering() throws {
         let event = EventNotificationDefinition(
             eventName: "SomeEvent",
-            recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "inApp", render: .plaintext, fields: [
+                NotificationEntry(type: "inApp", render: .plaintext, recipients: ["userId"], fields: [
                     (name: "title", template: "t"),
                     (name: "content", template: "body"),
                 ]),
@@ -348,9 +340,8 @@ struct NotificationGeneratorTests {
     func inAppEmitsRenderField() throws {
         let event = EventNotificationDefinition(
             eventName: "SomeEvent",
-            recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "inApp", render: .plaintext, fields: [
+                NotificationEntry(type: "inApp", render: .plaintext, recipients: ["userId"], fields: [
                     (name: "title", template: "t"),
                     (name: "content", template: "body"),
                 ]),
@@ -366,9 +357,8 @@ struct NotificationGeneratorTests {
     func mailNeverEmitsRenderField() throws {
         let event = EventNotificationDefinition(
             eventName: "SomeEvent",
-            recipients: ["userId"],
             notifications: [
-                NotificationEntry(type: "mail", render: .plaintext, fields: [
+                NotificationEntry(type: "mail", render: .plaintext, recipients: ["userId"], fields: [
                     (name: "subject", template: "s"),
                     (name: "content", template: "body"),
                 ]),
@@ -378,5 +368,84 @@ struct NotificationGeneratorTests {
         let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
 
         #expect(!output.contains(#""render":"#))
+    }
+
+    @Test("recipients live per notification-type entry, not per event")
+    func recipientsPerEntry() throws {
+        let yaml = """
+        AssignedMemberAdded:
+          notifications:
+            - type: mail
+              recipients:
+                - departmentLeadId
+              subject: s
+              content: c
+            - type: inApp
+              recipients:
+                - memberIds
+              title: t
+              content: c
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        let event = try #require(definitions.first)
+        #expect(event.notifications[0].recipients == ["departmentLeadId"])
+        #expect(event.notifications[1].recipients == ["memberIds"])
+    }
+
+    @Test("an entry with empty recipients throws, naming that entry's type")
+    func emptyRecipientsPerEntryThrows() throws {
+        let yaml = """
+        AssignedMemberAdded:
+          notifications:
+            - type: mail
+              recipients: []
+              subject: s
+              content: c
+        """
+        #expect(throws: NotificationParseError.emptyRecipients(event: "AssignedMemberAdded", type: "mail")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("a missing recipients key on an entry throws the same emptyRecipients error")
+    func missingRecipientsKeyThrows() throws {
+        let yaml = """
+        AssignedMemberAdded:
+          notifications:
+            - type: inApp
+              title: t
+              content: c
+        """
+        #expect(throws: NotificationParseError.emptyRecipients(event: "AssignedMemberAdded", type: "inApp")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("generated render() embeds each entry's own recipients, no standalone recipients(input:) function")
+    func generatedRenderEmbedsPerEntryRecipients() throws {
+        let events = try NotificationDefinitionParser.parse(yaml: """
+        AssignedMemberAdded:
+          notifications:
+            - type: mail
+              recipients:
+                - departmentLeadId
+              subject: s
+              content: c
+            - type: inApp
+              recipients:
+                - memberIds
+              title: t
+              content: c
+        """)
+        let generator = NotificationGenerator(protocolName: "V", events: events, variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains(
+            "RenderedNotification(\n                type: NotificationType(rawValue: \"mail\")!,\n                recipients: [input.departmentLeadId],"))
+        #expect(output.contains(
+            "RenderedNotification(\n                type: NotificationType(rawValue: \"inApp\")!,\n                recipients: [input.memberIds],"))
+        #expect(!output.contains("static func recipients(input:"))
+        #expect(output.contains("let departmentLeadId: String"))
+        #expect(output.contains("let memberIds: String"))
     }
 }

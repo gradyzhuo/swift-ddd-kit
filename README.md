@@ -725,22 +725,26 @@ public protocol OpportunityNotificationVariables: Sendable {
 
 ### `notification.yaml`
 
-Declares, per domain event type, who gets notified (`recipients`, a list of event field names)
-and what each channel says (`notifications`, a list of `{type, ...fields}` entries). The type
-schema is closed: `mail` → `subject` + `content`, `inApp` → `title` + `content`. Every entry also
-takes an optional `render: markdown | plaintext` key, defaulting per channel type when omitted
-(`mail` → `markdown`, `inApp` → `plaintext`):
+Declares, per domain event type, what each channel says (`notifications`, a list of
+`{type, recipients, ...fields}` entries) and who gets notified for that entry (`recipients`, a
+list of event field names, declared per notification-type/channel entry — mail and inApp can
+notify different people for the same event). The type schema is closed: `mail` → `subject` +
+`content`, `inApp` → `title` + `content`. Every entry also takes an optional
+`render: markdown | plaintext` key, defaulting per channel type when omitted (`mail` → `markdown`,
+`inApp` → `plaintext`):
 
 ```yaml
 CollaboratorAdded:
-  recipients:
-    - collaboratorId
   notifications:
     - type: mail
+      recipients:
+        - collaboratorId
       subject: 你已被加入案件「%QuotingCaseGroupName%」
       content: |
         你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」，%CollaboratorDescription%。
     - type: inApp
+      recipients:
+        - collaboratorId
       title: 你已被加入案件「%QuotingCaseGroupName%」
       content: 你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」。
 ```
@@ -776,10 +780,9 @@ the event) is a naming convention, not a build-time check against a co-located `
 enforces it at runtime, via `Decodable` failure when an event's actual shape doesn't match.
 
 ```swift
-public struct CollaboratorAddedNotificationInput: Decodable { /* union of inputs ∪ recipients */ }
+public struct CollaboratorAddedNotificationInput: Decodable { /* union of inputs ∪ every entry's recipients */ }
 
 public enum CollaboratorAddedNotification {
-    public static func recipients(input: CollaboratorAddedNotificationInput) -> [String]
     public static func render(
         input: CollaboratorAddedNotificationInput,
         variables: some OpportunityNotificationVariables

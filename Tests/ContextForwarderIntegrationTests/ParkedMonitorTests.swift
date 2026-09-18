@@ -53,7 +53,7 @@ struct ParkedMonitorTests {
             // Body doesn't match — decodeBody throws .permanent.
             struct Expected: Decodable { let required: String }
             _ = try record.decodeBody(Expected.self)
-            return nil
+            return []
         })
 
         try await forwarder.ensureSubscription()

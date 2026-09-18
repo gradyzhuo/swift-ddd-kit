@@ -42,12 +42,12 @@ struct ForwarderLoopTests {
             groupName: group
         ).register(ForwardingRule(eventTypes: ["CollaboratorAdded"]) { record in
             let decoded = try record.decodeBody(TestBody.self)
-            return PublishedLanguageEvent(
+            return [PublishedLanguageEvent(
                 eventId: record.eventId,
                 eventType: "OpportunityCollaboratorAdded.v1",
                 occurredAt: try record.decodeOccurred(),
                 recipientIds: [decoded.collaboratorId],
-                payload: ["role": decoded.role])
+                payload: ["role": decoded.role])]
         })
 
         // ensureSubscription() creates the group at its default cursor (.end)

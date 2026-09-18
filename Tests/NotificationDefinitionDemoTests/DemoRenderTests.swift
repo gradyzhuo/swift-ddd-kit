@@ -72,12 +72,15 @@ struct DemoRenderTests {
         #expect(inApp.fields["render"] == "plaintext")
     }
 
-    @Test func recipientsIsCollaboratorId() throws {
+    @Test func recipientsIsCollaboratorId() async throws {
         let input = try makeInput(json: """
         {"collaboratorId": "collaborator-42", "quotingCaseGroupingId": "case-1"}
         """)
 
-        #expect(CollaboratorAddedNotification.recipients(input: input) == [input.collaboratorId])
+        let rendered = try await CollaboratorAddedNotification.render(input: input, variables: DemoVariables())
+
+        #expect(rendered[0].recipients == [input.collaboratorId])
+        #expect(rendered[1].recipients == [input.collaboratorId])
     }
 
     @Test func decodingFailsWhenAnInputIsMissing() {

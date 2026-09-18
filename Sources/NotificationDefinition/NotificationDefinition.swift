@@ -10,10 +10,12 @@ public enum NotificationType: String, Codable, Sendable, CaseIterable {
 /// the Published Language event's `payload` (see spec §6).
 public struct RenderedNotification: Equatable, Sendable {
     public let type: NotificationType
+    public let recipients: [String]
     public let fields: [String: String]
 
-    public init(type: NotificationType, fields: [String: String]) {
+    public init(type: NotificationType, recipients: [String], fields: [String: String]) {
         self.type = type
+        self.recipients = recipients
         self.fields = fields
     }
 }

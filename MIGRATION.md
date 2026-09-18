@@ -324,3 +324,76 @@ it via structured concurrency.
 - Event-type resolution on read uses the KurrentDB-native `eventType` field
   (populated from `DomainEvent.eventType` at write time). The metadata payload
   carries no type discriminator — generated mappers switch on `eventData.eventType`.
+
+## 2026-09 — notification.yaml recipients Move to Per-Type Entries
+
+`recipients` is no longer declared once per domain event in `notification.yaml` — it moves into
+each `notifications:` entry, since mail and inApp can notify different people for the same event.
+The generated standalone `recipients(input:)` function is removed; each `RenderedNotification`
+returned by `render(input:variables:)` now carries its own `recipients`. `ForwardingRule.translate`
+also changes shape: it now returns `[PublishedLanguageEvent]` instead of `PublishedLanguageEvent?`.
+
+### `notification.yaml` shape
+
+Before:
+
+```yaml
+CollaboratorAdded:
+  recipients:
+    - collaboratorId
+  notifications:
+    - type: mail
+      subject: 你已被加入案件「%QuotingCaseGroupName%」
+      content: ...
+    - type: inApp
+      title: 你已被加入案件「%QuotingCaseGroupName%」
+      content: ...
+```
+
+After:
+
+```yaml
+CollaboratorAdded:
+  notifications:
+    - type: mail
+      recipients:
+        - collaboratorId
+      subject: 你已被加入案件「%QuotingCaseGroupName%」
+      content: ...
+    - type: inApp
+      recipients:
+        - collaboratorId
+      title: 你已被加入案件「%QuotingCaseGroupName%」
+      content: ...
+```
+
+### Generated code call sites
+
+The generated `recipients(input:)` function is gone. Read `.recipients` off each
+`RenderedNotification` that `render(input:variables:)` returns instead:
+
+```diff
+- let recipientIds = CollaboratorAddedNotification.recipients(input: input)
++ let rendered = try await CollaboratorAddedNotification.render(input: input, variables: variables)
++ // each `rendered` element carries its own `.recipients`
+```
+
+### `ForwardingRule.translate` signature
+
+```diff
+- translate: @escaping @Sendable (ForwardedRecord) async throws -> PublishedLanguageEvent?
++ translate: @escaping @Sendable (ForwardedRecord) async throws -> [PublishedLanguageEvent]
+```
+
+Update hand-written rules accordingly:
+
+```diff
+- guard body.role != "viewer" else { return nil }
+- return PublishedLanguageEvent(eventId: record.eventId, ...)
++ guard body.role != "viewer" else { return [] }
++ return [PublishedLanguageEvent(eventId: record.eventId, ...)]
+```
+
+A rule that now produces one event per notification channel must give each a stable-across-retries,
+mutually-distinct `eventId` (e.g. `"\(record.eventId)#mail"`, `"\(record.eventId)#inApp"`) —
+downstream consumers dedup on `eventId`, and a retry re-publishes every event `translate` returns.

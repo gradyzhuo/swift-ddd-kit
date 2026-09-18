@@ -31,17 +31,23 @@ extension NotificationRenderFormat {
 package struct NotificationEntry: Equatable {
     package let type: String
     package let render: NotificationRenderFormat
+    package let recipients: [String]
     package let fields: [(name: String, template: String)]
 
-    package init(type: String, render: NotificationRenderFormat, fields: [(name: String, template: String)]) {
+    package init(
+        type: String, render: NotificationRenderFormat, recipients: [String],
+        fields: [(name: String, template: String)]
+    ) {
         self.type = type
         self.render = render
+        self.recipients = recipients
         self.fields = fields
     }
 
     package static func == (lhs: NotificationEntry, rhs: NotificationEntry) -> Bool {
         lhs.type == rhs.type
             && lhs.render == rhs.render
+            && lhs.recipients == rhs.recipients
             && lhs.fields.count == rhs.fields.count
             && zip(lhs.fields, rhs.fields).allSatisfy { $0.name == $1.name && $0.template == $1.template }
     }
@@ -51,12 +57,10 @@ package struct NotificationEntry: Equatable {
 /// per-channel copy that references `%Placeholder%` tokens resolved against `variables.yaml`.
 package struct EventNotificationDefinition: Equatable {
     package let eventName: String
-    package let recipients: [String]
     package let notifications: [NotificationEntry]
 
-    package init(eventName: String, recipients: [String], notifications: [NotificationEntry]) {
+    package init(eventName: String, notifications: [NotificationEntry]) {
         self.eventName = eventName
-        self.recipients = recipients
         self.notifications = notifications
     }
 }
@@ -67,7 +71,7 @@ package enum NotificationParseError: Error, Equatable, Sendable {
     case missingField(event: String, type: String, field: String)
     case extraField(event: String, type: String, field: String)
     case invalidRenderFormat(event: String, type: String, value: String)
-    case emptyRecipients(event: String)
+    case emptyRecipients(event: String, type: String)
     case emptyNotifications(event: String)
 }
 
@@ -87,8 +91,8 @@ extension NotificationParseError: CustomStringConvertible {
             return "event '\(event)': notification type '\(type)' has unexpected field '\(field)'"
         case .invalidRenderFormat(let event, let type, let value):
             return "event '\(event)': notification type '\(type)' has invalid `render` value '\(value)' (expected 'markdown' or 'plaintext')"
-        case .emptyRecipients(let event):
-            return "event '\(event)': `recipients` must not be empty"
+        case .emptyRecipients(let event, let type):
+            return "event '\(event)': notification type '\(type)' has empty `recipients`"
         case .emptyNotifications(let event):
             return "event '\(event)': `notifications` must not be empty"
         }
@@ -118,14 +122,6 @@ package enum NotificationDefinitionParser {
             try IdentifierValidation.validate(eventName, kind: .eventName)
             let eventMapping = valueNode.mapping
 
-            let recipients: [String] = eventMapping?["recipients"]?.sequence?.compactMap { $0.string } ?? []
-            guard !recipients.isEmpty else {
-                throw NotificationParseError.emptyRecipients(event: eventName)
-            }
-            for recipient in recipients {
-                try IdentifierValidation.validate(recipient, kind: .recipient)
-            }
-
             let notificationsSequence = eventMapping?["notifications"]?.sequence ?? []
             guard !notificationsSequence.isEmpty else {
                 throw NotificationParseError.emptyNotifications(event: eventName)
@@ -144,7 +140,15 @@ package enum NotificationDefinitionParser {
                     throw NotificationParseError.duplicateType(event: eventName, type: type)
                 }
 
-                let allowedKeys = Set(schemaFields).union(["type", "render"])
+                let recipients: [String] = entryMapping?["recipients"]?.sequence?.compactMap { $0.string } ?? []
+                guard !recipients.isEmpty else {
+                    throw NotificationParseError.emptyRecipients(event: eventName, type: type)
+                }
+                for recipient in recipients {
+                    try IdentifierValidation.validate(recipient, kind: .recipient)
+                }
+
+                let allowedKeys = Set(schemaFields).union(["type", "render", "recipients"])
                 if let entryMapping {
                     for (fieldKeyNode, _) in entryMapping {
                         guard let fieldKey = fieldKeyNode.string else { continue }
@@ -172,11 +176,10 @@ package enum NotificationDefinitionParser {
                     fields.append((name: fieldName, template: template))
                 }
 
-                notifications.append(NotificationEntry(type: type, render: render, fields: fields))
+                notifications.append(NotificationEntry(type: type, render: render, recipients: recipients, fields: fields))
             }
 
-            definitions.append(
-                EventNotificationDefinition(eventName: eventName, recipients: recipients, notifications: notifications))
+            definitions.append(EventNotificationDefinition(eventName: eventName, notifications: notifications))
         }
 
         return definitions
