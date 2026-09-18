@@ -9,7 +9,7 @@ import Logging
 ///
 /// **Ack granularity is per delivery, not per rule** (accepted trade-off): all
 /// rules matching a record are attempted, then ONE disposition covers the whole
-/// record. A retry therefore re-publishes rules that already succeeded —
+/// record. A retry therefore re-publishes events that already succeeded —
 /// consumers dedup on `eventId`, which absorbs it. A record is parked only when
 /// every failure is permanent, so a healthy rule is never stranded by a broken
 /// sibling.
@@ -162,7 +162,7 @@ public struct ContextForwarder: Sendable {
     /// transient failure retries (redelivery is the transient rule's only path
     /// to success; a permanent one just fails again, bounded by
     /// `maxRetryCount`), else any permanent failure parks, else the record is
-    /// acked. A retry re-publishes rules that already succeeded on this
+    /// acked. A retry re-publishes events that already succeeded on this
     /// delivery — consumers dedup on `eventId`, which absorbs it. Records
     /// matching no rule are acked immediately (skip).
     private func consume() async throws {

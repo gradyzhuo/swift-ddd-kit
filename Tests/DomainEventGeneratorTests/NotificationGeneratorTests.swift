@@ -445,5 +445,7 @@ struct NotificationGeneratorTests {
         #expect(output.contains(
             "RenderedNotification(\n                type: NotificationType(rawValue: \"inApp\")!,\n                recipients: [input.memberIds],"))
         #expect(!output.contains("static func recipients(input:"))
+        #expect(output.contains("let departmentLeadId: String"))
+        #expect(output.contains("let memberIds: String"))
     }
 }
