@@ -1,11 +1,13 @@
 CollaboratorAdded:
-  recipients:
-    - collaboratorId
   notifications:
     - type: mail
+      recipients:
+        - collaboratorId
       subject: 你已被加入案件「%QuotingCaseGroupName%」
       content: |
         你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」，%CollaboratorDescription%。
     - type: inApp
+      recipients:
+        - collaboratorId
       title: 你已被加入案件「%QuotingCaseGroupName%」
       content: 你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」。

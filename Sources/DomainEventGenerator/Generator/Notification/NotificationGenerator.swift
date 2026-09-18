@@ -98,7 +98,12 @@ package struct NotificationGenerator {
 
             let sortedPlaceholders = orderedPlaceholders.sorted()
 
-            var propertyNames: Set<String> = Set(event.recipients)
+            var propertyNames: Set<String> = []
+            for notification in event.notifications {
+                for recipient in notification.recipients {
+                    propertyNames.insert(recipient)
+                }
+            }
             for variable in matchedVariables {
                 for input in variable.inputs {
                     propertyNames.insert(input.name)
@@ -147,7 +152,13 @@ package struct NotificationGenerator {
 
         // recipients(input:)
         lines.append("    \(access) static func recipients(input: \(event.eventName)NotificationInput) -> [String] {")
-        let recipientExpressions = event.recipients.map { "input.\($0)" }.joined(separator: ", ")
+        var allRecipients: Set<String> = []
+        for notification in event.notifications {
+            for recipient in notification.recipients {
+                allRecipients.insert(recipient)
+            }
+        }
+        let recipientExpressions = allRecipients.sorted().map { "input.\($0)" }.joined(separator: ", ")
         lines.append("        [\(recipientExpressions)]")
         lines.append("    }")
         lines.append("")
