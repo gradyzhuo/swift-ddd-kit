@@ -44,19 +44,31 @@ package struct NotificationGenerator {
         self.variables = variables
     }
 
-    /// Variables defined in `variables.yaml` but never referenced by any event's templates.
-    /// Not part of the generated code — the CLI layer prints these as `warning:` lines.
+    /// Variables defined in `variables.yaml` but never referenced by any event's templates or
+    /// `%recipients:X%` tokens. Not part of the generated code — the CLI layer prints these as
+    /// `warning:` lines.
     package var unreferencedVariables: [String] {
         var referencedPlaceholders: Set<String> = []
+        var referencedRecipientsVariableNames: Set<String> = []
         for event in events {
             for entry in event.notifications {
                 for field in entry.fields {
                     referencedPlaceholders.formUnion(PlaceholderExtractor.placeholders(in: field.template))
                 }
+                for recipient in entry.recipients {
+                    if case .variable(let variableName) = recipient {
+                        referencedRecipientsVariableNames.insert(variableName)
+                    }
+                }
             }
         }
         return variables
-            .filter { !referencedPlaceholders.contains($0.placeholder) }
+            .filter { variable in
+                let referencedAsPlaceholder = referencedPlaceholders.contains(variable.placeholder)
+                let referencedAsRecipientsToken =
+                    variable.type == .recipients && referencedRecipientsVariableNames.contains(variable.name)
+                return !referencedAsPlaceholder && !referencedAsRecipientsToken
+            }
             .map { $0.name }
             .sorted()
     }

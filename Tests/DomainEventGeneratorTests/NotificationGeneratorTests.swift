@@ -579,4 +579,69 @@ struct NotificationGeneratorTests {
             _ = try generator.render(accessLevel: .internal)
         }
     }
+
+    @Test("a type: recipients variable referenced via a %recipients:X% token is not reported as unreferenced")
+    func recipientsVariableReferencedViaTokenIsNotUnreferenced() {
+        let event = EventNotificationDefinition(
+            eventName: "AssignedMemberAdded",
+            notifications: [
+                NotificationEntry(
+                    type: "mail", render: .markdown,
+                    recipients: ["memberIds", .variable("AssignedDepartmentMembers")],
+                    fields: [(name: "subject", template: "hi"), (name: "content", template: "hi")]
+                ),
+            ]
+        )
+        let variables = [
+            VariableDefinition(
+                name: "AssignedDepartmentMembers", placeholder: "AssignedDepartmentMembers",
+                type: .recipients,
+                inputs: [(name: "quotingCaseGroupingId", type: "String")]
+            ),
+        ]
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables", events: [event], variables: variables)
+        #expect(generator.unreferencedVariables == [])
+    }
+
+    @Test("a Data-typed eventMetadata property is excluded from the [String: String] inputs literal used for text-template resolution")
+    func eventMetadataExcludedFromInputsDictionary() throws {
+        let event = EventNotificationDefinition(
+            eventName: "AssignedMemberAdded",
+            notifications: [
+                NotificationEntry(
+                    type: "mail", render: .markdown,
+                    recipients: ["memberIds", .variable("AssignedDepartmentMembers")],
+                    fields: [
+                        (name: "subject", template: "hi %QuotingCaseGroupName%"),
+                        (name: "content", template: "hi"),
+                    ]
+                ),
+            ]
+        )
+        let variables = [
+            VariableDefinition(
+                name: "QuotingCaseGroupName", placeholder: "QuotingCaseGroupName",
+                inputs: [(name: "quotingCaseGroupingId", type: "String")]
+            ),
+            VariableDefinition(
+                name: "AssignedDepartmentMembers", placeholder: "AssignedDepartmentMembers",
+                type: .recipients,
+                inputs: [(name: "eventMetadata", type: "Data")]
+            ),
+        ]
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables", events: [event], variables: variables)
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        // The `inputs` dictionary IS emitted (a placeholder is present)...
+        #expect(output.contains("let inputs: [String: String] = ["))
+        // ...and includes the String-typed properties...
+        #expect(output.contains("\"quotingCaseGroupingId\": input.quotingCaseGroupingId,"))
+        #expect(output.contains("\"memberIds\": input.memberIds,"))
+        // ...but the Data-typed eventMetadata property must never appear as a [String: String]
+        // dictionary entry (it would fail to compile) — the only place `eventMetadata` may
+        // legitimately appear is the struct declaration/init and the awaited variable call.
+        #expect(!output.contains("\"eventMetadata\": input.eventMetadata,"))
+    }
 }
