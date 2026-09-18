@@ -699,6 +699,9 @@ change that breaks the codegen chain fails the build.
 Declares the variables your notification copy can reference. Each top-level key is a variable
 name; `placeholder` is the `%token%` matched in `notification.yaml` templates; `inputs` is an
 ordered list of `name: String` single-key maps that becomes the generated method's parameter list.
+An optional `type` key selects what kind of value the variable resolves — `environment` (the
+default, a `String`) or `recipients` (a `[String]`, used to compute part of a `recipients:` list —
+see the `notification.yaml` section below):
 
 ```yaml
 QuotingCaseGroupName:
@@ -711,13 +714,29 @@ CollaboratorDescription:
   inputs:
     - quotingCaseGroupingId: String
     - collaboratorId: String
+
+AssignedDepartmentMembers:
+  type: recipients
+  placeholder: AssignedDepartmentMembers
+  inputs:
+    - quotingCaseGroupingId: String
+    - $event.metadata
 ```
 
+`$event.metadata` is a reserved `inputs:` entry, written as a bare scalar (not a `name: Type`
+map) rather than declared like an ordinary input. It always generates a `Data`-typed
+`eventMetadata` parameter — the event's raw custom metadata bytes, for a read model that needs more
+than the event's own fields to resolve recipients (e.g. looking up a department roster keyed by
+something only present in metadata). It's only legal on `type: recipients` variables; declaring it
+on a `type: environment` variable is a build-time error.
+
 `VariablesGeneratorPlugin` turns this into a protocol (name from `notification-generator-config.yaml`)
-that your read-model layer implements:
+that your read-model layer implements — note `recipients` variables return `[String]`, everything
+else returns `String`:
 
 ```swift
 public protocol OpportunityNotificationVariables: Sendable {
+    func assignedDepartmentMembers(quotingCaseGroupingId: String, eventMetadata: Data) async throws -> [String]
     func collaboratorDescription(quotingCaseGroupingId: String, collaboratorId: String) async throws -> String
     func quotingCaseGroupName(quotingCaseGroupingId: String) async throws -> String
 }
@@ -726,12 +745,38 @@ public protocol OpportunityNotificationVariables: Sendable {
 ### `notification.yaml`
 
 Declares, per domain event type, what each channel says (`notifications`, a list of
-`{type, recipients, ...fields}` entries) and who gets notified for that entry (`recipients`, a
-list of event field names, declared per notification-type/channel entry — mail and inApp can
-notify different people for the same event). The type schema is closed: `mail` → `subject` +
-`content`, `inApp` → `title` + `content`. Every entry also takes an optional
-`render: markdown | plaintext` key, defaulting per channel type when omitted (`mail` → `markdown`,
-`inApp` → `plaintext`):
+`{type, recipients, ...fields}` entries) and who gets notified for that entry (`recipients`,
+declared per notification-type/channel entry — mail and inApp can notify different people for the
+same event). The type schema is closed: `mail` → `subject` + `content`, `inApp` → `title` +
+`content`. Every entry also takes an optional `render: markdown | plaintext` key, defaulting per
+channel type when omitted (`mail` → `markdown`, `inApp` → `plaintext`):
+
+A `recipients:` list entry can be either a plain event field name, or a `%recipients:X%` token
+naming a `type: recipients` variable from `variables.yaml` — `X` contributes its resolved
+`[String]`, flattened into the same list. Both forms can appear in the same list:
+
+```yaml
+AssignedMemberAdded:
+  notifications:
+    - type: mail
+      recipients:
+        - leadId
+        - "%recipients:AssignedDepartmentMembers%"
+      subject: 已指派成員給案件「%QuotingCaseGroupName%」
+      content: 案件「%QuotingCaseGroupName%」已完成成員指派。
+```
+
+The `%recipients:X%` token **must be quoted** — `%` is a reserved YAML indicator character and
+can't start an unquoted scalar, so `- %recipients:AssignedDepartmentMembers%` fails to parse as
+YAML at all; write `- "%recipients:AssignedDepartmentMembers%"` instead. This is unlike a
+`%Placeholder%` reference inside `subject:`/`content:` text (e.g. `%QuotingCaseGroupName%` above),
+which never sits at the start of the YAML scalar and so needs no quoting.
+
+Variable kinds are strictly separated and cross-checked at generation time: a `type: recipients`
+variable's placeholder can never be used inside a text template (`%AssignedDepartmentMembers%` in
+`subject`/`content`/`title` is a build error — use the `%recipients:X%` token in a `recipients:`
+list instead), and a `type: environment` variable can never be targeted by a `%recipients:X%`
+token (only `type: recipients` variables are valid there).
 
 ```yaml
 CollaboratorAdded:
