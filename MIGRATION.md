@@ -324,3 +324,13 @@ it via structured concurrency.
 - Event-type resolution on read uses the KurrentDB-native `eventType` field
   (populated from `DomainEvent.eventType` at write time). The metadata payload
   carries no type discriminator — generated mappers switch on `eventData.eventType`.
+
+## 1.4.0 — `ForwardingRule.translate` returns an array
+
+```diff
+- ForwardingRule(eventTypes: ["X"]) { record in try makeEvent(record) }      // PublishedLanguageEvent?
++ ForwardingRule(eventTypes: ["X"]) { record in [try makeEvent(record)] }    // [PublishedLanguageEvent]
+```
+
+Return `[]` where you returned `nil`. When one record yields several events, give each a
+stable, distinct `eventId` (see `ForwardingRule`'s doc comment).
