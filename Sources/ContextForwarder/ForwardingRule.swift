@@ -1,7 +1,7 @@
 import PublishedLanguage
 
 /// One declarative forwarding registration: which raw event types to inspect,
-/// and how to turn one into a Published Language event. Returning nil skips
+/// and how to turn one into Published Language events. Returning an empty array skips
 /// the record (inspected, judged not notification-worthy). The closure runs
 /// in the host process — recipient/parameter resolution against the host's
 /// own read models plugs in HERE.
@@ -11,11 +11,11 @@ import PublishedLanguage
 /// transient and redelivered.
 public struct ForwardingRule: Sendable {
     public let eventTypes: Set<String>
-    public let translate: @Sendable (ForwardedRecord) async throws -> PublishedLanguageEvent?
+    public let translate: @Sendable (ForwardedRecord) async throws -> [PublishedLanguageEvent]
 
     public init(
         eventTypes: Set<String>,
-        translate: @escaping @Sendable (ForwardedRecord) async throws -> PublishedLanguageEvent?
+        translate: @escaping @Sendable (ForwardedRecord) async throws -> [PublishedLanguageEvent]
     ) {
         self.eventTypes = eventTypes
         self.translate = translate

@@ -174,7 +174,7 @@ public struct ContextForwarder: Sendable {
             var failures: [any Error] = []
             for rule in rules where rule.eventTypes.contains(record.eventType) {
                 do {
-                    if let published = try await rule.translate(record) {
+                    for published in try await rule.translate(record) {
                         try await publisher.publish(published)
                         logger.info("\(stream)/\(groupName): forwarded \(record.eventType) -> \(published.eventType) (\(published.eventId))")
                     }
