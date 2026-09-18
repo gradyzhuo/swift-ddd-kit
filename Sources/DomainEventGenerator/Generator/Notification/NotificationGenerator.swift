@@ -3,9 +3,9 @@
 //  DomainEventGenerator
 //
 //  Renders, per event declared in `notification.yaml`, a Decodable input struct and an enum
-//  with `recipients(input:)` + `render(input:variables:)`, cross-validated against
-//  `variables.yaml`. Consumes the `__value(of:inputs:)` seam emitted by
-//  `VariablesProtocolGenerator` verbatim.
+//  with `render(input:variables:)`, cross-validated against `variables.yaml`. Each returned
+//  `RenderedNotification` carries its own entry's `recipients`. Consumes the `__value(of:inputs:)`
+//  seam emitted by `VariablesProtocolGenerator` verbatim.
 //  See spec: docs/superpowers/specs/2026-09-07-notification-definition-design.md §4
 //
 
@@ -150,19 +150,6 @@ package struct NotificationGenerator {
     ) -> String {
         var lines = ["\(access) enum \(event.eventName)Notification {"]
 
-        // recipients(input:)
-        lines.append("    \(access) static func recipients(input: \(event.eventName)NotificationInput) -> [String] {")
-        var allRecipients: Set<String> = []
-        for notification in event.notifications {
-            for recipient in notification.recipients {
-                allRecipients.insert(recipient)
-            }
-        }
-        let recipientExpressions = allRecipients.sorted().map { "input.\($0)" }.joined(separator: ", ")
-        lines.append("        [\(recipientExpressions)]")
-        lines.append("    }")
-        lines.append("")
-
         // render(input:variables:)
         lines.append(
             "    \(access) static func render(input: \(event.eventName)NotificationInput, variables: some \(protocolName)) async throws -> [RenderedNotification] {")
@@ -190,8 +177,10 @@ package struct NotificationGenerator {
 
         lines.append("        return [")
         for entry in event.notifications {
+            let recipientExpressions = entry.recipients.map { "input.\($0)" }.joined(separator: ", ")
             lines.append("            RenderedNotification(")
             lines.append("                type: NotificationType(rawValue: \"\(entry.type)\")!,")
+            lines.append("                recipients: [\(recipientExpressions)],")
             lines.append("                fields: [")
             for field in entry.fields {
                 let escapedTemplate = Self.escapeSwiftStringLiteral(field.template)

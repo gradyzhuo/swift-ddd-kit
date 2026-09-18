@@ -62,7 +62,7 @@ struct NotificationGeneratorTests {
         #expect(output.contains("self.quotingCaseGroupingId = quotingCaseGroupingId"))
     }
 
-    @Test("recipients() returns the recipients fields' values in yaml order")
+    @Test("each RenderedNotification embeds its own entry's recipients, in yaml order")
     func rendersRecipients() throws {
         let generator = NotificationGenerator(
             protocolName: "OpportunityNotificationVariables",
@@ -71,8 +71,11 @@ struct NotificationGeneratorTests {
         )
         let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
 
-        #expect(output.contains("internal static func recipients(input: CollaboratorAddedNotificationInput) -> [String] {"))
-        #expect(output.contains("[input.collaboratorId]"))
+        #expect(!output.contains("static func recipients(input:"))
+        #expect(output.contains(
+            "RenderedNotification(\n                type: NotificationType(rawValue: \"mail\")!,\n                recipients: [input.collaboratorId],"))
+        #expect(output.contains(
+            "RenderedNotification(\n                type: NotificationType(rawValue: \"inApp\")!,\n                recipients: [input.collaboratorId],"))
     }
 
     @Test("each distinct placeholder is resolved exactly once despite repeated occurrences")
@@ -161,7 +164,7 @@ struct NotificationGeneratorTests {
 
         #expect(output.contains("public struct CollaboratorAddedNotificationInput: Decodable {"))
         #expect(output.contains("public enum CollaboratorAddedNotification {"))
-        #expect(output.contains("public static func recipients(input: CollaboratorAddedNotificationInput) -> [String] {"))
+        #expect(!output.contains("static func recipients(input:"))
         #expect(output.contains("public static func render(input: CollaboratorAddedNotificationInput, variables: some OpportunityNotificationVariables) async throws -> [RenderedNotification]"))
     }
 
@@ -416,5 +419,31 @@ struct NotificationGeneratorTests {
         #expect(throws: NotificationParseError.emptyRecipients(event: "AssignedMemberAdded", type: "inApp")) {
             _ = try NotificationDefinitionParser.parse(yaml: yaml)
         }
+    }
+
+    @Test("generated render() embeds each entry's own recipients, no standalone recipients(input:) function")
+    func generatedRenderEmbedsPerEntryRecipients() throws {
+        let events = try NotificationDefinitionParser.parse(yaml: """
+        AssignedMemberAdded:
+          notifications:
+            - type: mail
+              recipients:
+                - departmentLeadId
+              subject: s
+              content: c
+            - type: inApp
+              recipients:
+                - memberIds
+              title: t
+              content: c
+        """)
+        let generator = NotificationGenerator(protocolName: "V", events: events, variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains(
+            "RenderedNotification(\n                type: NotificationType(rawValue: \"mail\")!,\n                recipients: [input.departmentLeadId],"))
+        #expect(output.contains(
+            "RenderedNotification(\n                type: NotificationType(rawValue: \"inApp\")!,\n                recipients: [input.memberIds],"))
+        #expect(!output.contains("static func recipients(input:"))
     }
 }
