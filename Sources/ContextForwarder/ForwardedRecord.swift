@@ -12,12 +12,21 @@ public struct ForwardedRecord: Sendable {
     public let streamName: String
     public let eventId: String
     public let data: Data
+    /// Raw KurrentDB `customMetadata` bytes for this event — schema-agnostic (each context
+    /// defines its own metadata shape and decodes this itself; see e.g. `$event.metadata` in
+    /// swift-ddd-kit's notification-definition variables framework). Empty `Data()` when the
+    /// source event carried none, or for a hand-constructed record that doesn't set it.
+    public let customMetadata: Data
 
-    public init(eventType: String, streamName: String, eventId: String, data: Data) {
+    public init(
+        eventType: String, streamName: String, eventId: String, data: Data,
+        customMetadata: Data = Data()
+    ) {
         self.eventType = eventType
         self.streamName = streamName
         self.eventId = eventId
         self.data = data
+        self.customMetadata = customMetadata
     }
 
     /// Decodes the payload. A decode failure is `ForwardingError.permanent`:

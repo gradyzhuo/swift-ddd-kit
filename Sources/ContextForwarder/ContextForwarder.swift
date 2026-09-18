@@ -259,6 +259,7 @@ extension ForwardedRecord {
             eventType: record.eventType,
             streamName: record.streamIdentifier.name,
             eventId: record.id.uuidString,
-            data: record.data)
+            data: record.data,
+            customMetadata: record.customMetadata)
     }
 }
