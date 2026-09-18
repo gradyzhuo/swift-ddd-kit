@@ -126,4 +126,41 @@ struct VariablesProtocolGeneratorTests {
         #expect(!output.contains(
             "return try await quotingCaseGroupingId(quotingCaseGroupingId: quotingCaseGroupingId)"))
     }
+
+    @Test("type: recipients variable generates a protocol method returning [String]")
+    func recipientsVariableReturnsStringArray() {
+        let variables = [
+            VariableDefinition(
+                name: "AssignedDepartmentMembers", placeholder: "AssignedDepartmentMembers",
+                type: .recipients,
+                inputs: [(name: "quotingCaseGroupingId", type: "String"), (name: "eventMetadata", type: "Data")]
+            ),
+        ]
+        let generator = VariablesProtocolGenerator(protocolName: "OpportunityNotificationVariables", variables: variables)
+        let output = generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains(
+            "func assignedDepartmentMembers(quotingCaseGroupingId: String, eventMetadata: Data) async throws -> [String]"))
+    }
+
+    @Test("type: recipients variables are excluded from the __value dispatch seam")
+    func recipientsVariableExcludedFromSeam() {
+        let variables = [
+            VariableDefinition(
+                name: "AssignedDepartmentMembers", placeholder: "AssignedDepartmentMembers",
+                type: .recipients,
+                inputs: [(name: "quotingCaseGroupingId", type: "String")]
+            ),
+            VariableDefinition(
+                name: "QuotingCaseGroupName", placeholder: "QuotingCaseGroupName",
+                inputs: [(name: "quotingCaseGroupingId", type: "String")]
+            ),
+        ]
+        let generator = VariablesProtocolGenerator(protocolName: "OpportunityNotificationVariables", variables: variables)
+        let output = generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains("case \"QuotingCaseGroupName\":"))
+        #expect(!output.contains("case \"AssignedDepartmentMembers\":"))
+        #expect(!output.contains("self.assignedDepartmentMembers"))
+    }
 }

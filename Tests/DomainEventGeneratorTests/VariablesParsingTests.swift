@@ -132,4 +132,100 @@ struct VariablesParsingTests {
             _ = try VariablesParser.parse(yaml: yaml)
         }
     }
+
+    @Test("type is optional and defaults to environment")
+    func typeDefaultsToEnvironment() throws {
+        let yaml = """
+        QuotingCaseGroupName:
+          placeholder: QuotingCaseGroupName
+          inputs:
+            - quotingCaseGroupingId: String
+        """
+        let variables = try VariablesParser.parse(yaml: yaml)
+        #expect(variables[0].type == .environment)
+    }
+
+    @Test("type: recipients parses")
+    func typeRecipientsParses() throws {
+        let yaml = """
+        AssignedDepartmentMembers:
+          type: recipients
+          placeholder: AssignedDepartmentMembers
+          inputs:
+            - quotingCaseGroupingId: String
+        """
+        let variables = try VariablesParser.parse(yaml: yaml)
+        #expect(variables[0].type == .recipients)
+    }
+
+    @Test("unknown type value throws invalidType")
+    func unknownTypeThrows() {
+        let yaml = """
+        SomeVariable:
+          type: bogus
+          placeholder: SomeVariable
+        """
+        #expect(throws: VariablesParseError.invalidType(variable: "SomeVariable", type: "bogus")) {
+            _ = try VariablesParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("$event.metadata parses as a bare reserved input with type Data")
+    func eventMetadataParses() throws {
+        let yaml = """
+        AssignedDepartmentMembers:
+          type: recipients
+          placeholder: AssignedDepartmentMembers
+          inputs:
+            - quotingCaseGroupingId: String
+            - $event.metadata
+        """
+        let variables = try VariablesParser.parse(yaml: yaml)
+        #expect(variables[0].inputs.count == 2)
+        #expect(variables[0].inputs[0].name == "quotingCaseGroupingId")
+        #expect(variables[0].inputs[0].type == "String")
+        #expect(variables[0].inputs[1].name == "eventMetadata")
+        #expect(variables[0].inputs[1].type == "Data")
+    }
+
+    @Test("$event.metadata on a type: environment variable throws metadataOnNonRecipientsVariable")
+    func eventMetadataOnEnvironmentThrows() {
+        let yaml = """
+        QuotingCaseGroupName:
+          placeholder: QuotingCaseGroupName
+          inputs:
+            - quotingCaseGroupingId: String
+            - $event.metadata
+        """
+        #expect(throws: VariablesParseError.metadataOnNonRecipientsVariable(variable: "QuotingCaseGroupName")) {
+            _ = try VariablesParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("$event.metadata with an explicit type suffix throws explicitMetadataType")
+    func eventMetadataExplicitTypeThrows() {
+        let yaml = """
+        AssignedDepartmentMembers:
+          type: recipients
+          placeholder: AssignedDepartmentMembers
+          inputs:
+            - $event.metadata: Data
+        """
+        #expect(throws: VariablesParseError.explicitMetadataType(variable: "AssignedDepartmentMembers")) {
+            _ = try VariablesParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("a bare scalar input other than $event.metadata is still malformedInput")
+    func otherBareScalarStillMalformed() {
+        let yaml = """
+        SomeVariable:
+          placeholder: SomeVariable
+          inputs:
+            - justAName
+        """
+        #expect(throws: VariablesParseError.malformedInput(variable: "SomeVariable")) {
+            _ = try VariablesParser.parse(yaml: yaml)
+        }
+    }
 }

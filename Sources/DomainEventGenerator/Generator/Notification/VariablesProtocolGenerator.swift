@@ -28,7 +28,8 @@ package struct VariablesProtocolGenerator {
         // 1. The protocol.
         var protocolLines = ["\(access) protocol \(protocolName): Sendable {"]
         for variable in sortedVariables {
-            protocolLines.append("    func \(Self.lowerCamel(variable.name))(\(Self.parameterList(variable.inputs))) async throws -> String")
+            let returnType = variable.type == .recipients ? "[String]" : "String"
+            protocolLines.append("    func \(Self.lowerCamel(variable.name))(\(Self.parameterList(variable.inputs))) async throws -> \(returnType)")
         }
         protocolLines.append("}")
         lines.append(protocolLines.joined(separator: "\n"))
@@ -46,10 +47,15 @@ package struct VariablesProtocolGenerator {
         // which is fine here in isolation, but putting the access level explicitly on `__value`
         // avoids relying on that implicit-access behavior and keeps the emitted extension
         // syntactically identical regardless of accessLevel. Semantics are unchanged either way.
+        // `type: recipients` variables never resolve through this string-keyed seam — they're
+        // called directly from NotificationGenerator's render() (§3.2's correction) — and their
+        // inputs may include a non-String `eventMetadata: Data`, which this seam's
+        // `[String: String]` cannot carry anyway.
+        let seamVariables = sortedVariables.filter { $0.type == .environment }
         var seamLines = ["extension \(protocolName) {"]
         seamLines.append("    \(access) func __value(of placeholder: String, inputs: [String: String]) async throws -> String {")
         seamLines.append("        switch placeholder {")
-        for variable in sortedVariables {
+        for variable in seamVariables {
             seamLines.append("        case \"\(variable.placeholder)\":")
             for input in variable.inputs {
                 seamLines.append(
