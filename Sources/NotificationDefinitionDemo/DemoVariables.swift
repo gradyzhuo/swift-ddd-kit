@@ -8,6 +8,8 @@
 //  not to model a real read model.
 //
 
+import Foundation
+
 public struct DemoVariables: DemoNotificationVariables {
 
     public init() {}
@@ -22,5 +24,9 @@ public struct DemoVariables: DemoNotificationVariables {
 
     public func quotingCaseGroupCollaboratorRole(quotingCaseGroupingId: String, collaboratorId: String) async throws -> String {
         "編輯者"
+    }
+
+    public func assignedDepartmentMembers(quotingCaseGroupingId: String, eventMetadata: Data) async throws -> [String] {
+        ["dept-member-1", "dept-member-2"]
     }
 }

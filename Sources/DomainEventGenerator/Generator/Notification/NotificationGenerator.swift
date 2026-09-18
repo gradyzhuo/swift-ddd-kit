@@ -13,7 +13,7 @@ import Foundation
 
 package enum NotificationGenerateError: Error, Equatable, Sendable {
     case undefinedPlaceholder(event: String, placeholder: String)
-    case recipientsVariableUsedAsPlaceholder(event: String, placeholder: String)
+    case recipientsVariableUsedAsPlaceholder(event: String, placeholder: String, variableName: String)
     case undefinedRecipientsVariable(event: String, variable: String)
     case recipientsVariableWrongType(event: String, variable: String)
 }
@@ -23,8 +23,8 @@ extension NotificationGenerateError: CustomStringConvertible {
         switch self {
         case .undefinedPlaceholder(let event, let placeholder):
             return "event '\(event)': placeholder '%\(placeholder)%' has no matching variable in variables.yaml"
-        case .recipientsVariableUsedAsPlaceholder(let event, let placeholder):
-            return "event '\(event)': '%\(placeholder)%' is a type: recipients variable and cannot be used inside a text template — use %recipients:\(placeholder)% in a recipients: list instead"
+        case .recipientsVariableUsedAsPlaceholder(let event, let placeholder, let variableName):
+            return "event '\(event)': '%\(placeholder)%' is a type: recipients variable and cannot be used inside a text template — use %recipients:\(variableName)% in a recipients: list instead"
         case .undefinedRecipientsVariable(let event, let variable):
             return "event '\(event)': %recipients:\(variable)% has no matching variable in variables.yaml"
         case .recipientsVariableWrongType(let event, let variable):
@@ -79,7 +79,10 @@ package struct NotificationGenerator {
         let variablesByName = Dictionary(uniqueKeysWithValues: variables.map { ($0.name, $0) })
         let sortedEvents = events.sorted { $0.eventName < $1.eventName }
 
-        var lines: [String] = ["import NotificationDefinition"]
+        // `import Foundation` is required unconditionally: a `type: recipients` variable's
+        // `$event.metadata` input generates a `Data`-typed Input struct property, and that type
+        // isn't otherwise visible to generated code that only imports NotificationDefinition.
+        var lines: [String] = ["import Foundation", "import NotificationDefinition"]
 
         for event in sortedEvents {
             // Distinct placeholders referenced by this event, in first-appearance order across
@@ -116,7 +119,8 @@ package struct NotificationGenerator {
                     throw NotificationGenerateError.undefinedPlaceholder(event: event.eventName, placeholder: placeholder)
                 }
                 guard variable.type == .environment else {
-                    throw NotificationGenerateError.recipientsVariableUsedAsPlaceholder(event: event.eventName, placeholder: placeholder)
+                    throw NotificationGenerateError.recipientsVariableUsedAsPlaceholder(
+                        event: event.eventName, placeholder: placeholder, variableName: variable.name)
                 }
                 matchedVariables.append(variable)
             }
@@ -216,22 +220,27 @@ package struct NotificationGenerator {
             // Only String-typed properties can populate the __value seam's [String: String]
             // inputs dictionary — a type: recipients variable's Data-typed eventMetadata (if any
             // property happens to be named that) never participates in text-template resolution.
-            lines.append("        let inputs: [String: String] = [")
-            for property in properties where property.type == "String" {
-                lines.append("            \"\(property.name)\": input.\(property.name),")
+            let stringProperties = properties.filter { $0.type == "String" }
+            if stringProperties.isEmpty {
+                lines.append("        let inputs: [String: String] = [:]")
+            } else {
+                lines.append("        let inputs: [String: String] = [")
+                for property in stringProperties {
+                    lines.append("            \"\(property.name)\": input.\(property.name),")
+                }
+                lines.append("        ]")
             }
-            lines.append("        ]")
         }
 
         for placeholder in placeholders {
-            let letName = Self.lowerCamel(placeholder)
+            let letName = IdentifierValidation.lowerCamel(placeholder)
             lines.append("        let \(letName) = try await variables.__value(of: \"\(placeholder)\", inputs: inputs)")
         }
 
         if !placeholders.isEmpty {
             lines.append("        let values: [String: String] = [")
             for placeholder in placeholders {
-                lines.append("            \"\(placeholder)\": \(Self.lowerCamel(placeholder)),")
+                lines.append("            \"\(placeholder)\": \(IdentifierValidation.lowerCamel(placeholder)),")
             }
             lines.append("        ]")
         }
@@ -247,7 +256,7 @@ package struct NotificationGenerator {
                     return nil
                 }
                 let arguments = variable.inputs.map { "\($0.name): input.\($0.name)" }.joined(separator: ", ")
-                return "try await variables.\(Self.lowerCamel(variable.name))(\(arguments))"
+                return "try await variables.\(IdentifierValidation.lowerCamel(variable.name))(\(arguments))"
             }
             let recipientsExpression: String
             if variableRecipients.isEmpty {
@@ -301,11 +310,6 @@ package struct NotificationGenerator {
         lines.append("}")
 
         return lines.joined(separator: "\n")
-    }
-
-    private static func lowerCamel(_ name: String) -> String {
-        guard let first = name.first else { return name }
-        return first.lowercased() + name.dropFirst()
     }
 
     private static func escapeSwiftStringLiteral(_ text: String) -> String {

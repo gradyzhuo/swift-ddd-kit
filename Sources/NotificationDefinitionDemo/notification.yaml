@@ -11,3 +11,12 @@ CollaboratorAdded:
         - collaboratorId
       title: 你已被加入案件「%QuotingCaseGroupName%」
       content: 你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」。
+
+AssignedMemberAdded:
+  notifications:
+    - type: mail
+      recipients:
+        - leadId
+        - "%recipients:AssignedDepartmentMembers%"
+      subject: 已指派成員給案件「%QuotingCaseGroupName%」
+      content: 案件「%QuotingCaseGroupName%」已完成成員指派。

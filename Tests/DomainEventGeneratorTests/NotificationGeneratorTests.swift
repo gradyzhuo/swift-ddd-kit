@@ -575,7 +575,7 @@ struct NotificationGeneratorTests {
             ),
         ]
         let generator = NotificationGenerator(protocolName: "P", events: [event], variables: variables)
-        #expect(throws: NotificationGenerateError.recipientsVariableUsedAsPlaceholder(event: "AssignedMemberAdded", placeholder: "AssignedDepartmentMembers")) {
+        #expect(throws: NotificationGenerateError.recipientsVariableUsedAsPlaceholder(event: "AssignedMemberAdded", placeholder: "AssignedDepartmentMembers", variableName: "AssignedDepartmentMembers")) {
             _ = try generator.render(accessLevel: .internal)
         }
     }
@@ -643,5 +643,44 @@ struct NotificationGeneratorTests {
         // dictionary entry (it would fail to compile) — the only place `eventMetadata` may
         // legitimately appear is the struct declaration/init and the awaited variable call.
         #expect(!output.contains("\"eventMetadata\": input.eventMetadata,"))
+    }
+
+    @Test("zero String-typed properties with a text placeholder present emits a valid empty [String: String] literal")
+    func emptyInputsDictionaryEmitsValidEmptyLiteral() throws {
+        // A text-template placeholder resolved by an environment variable that takes no inputs
+        // at all, and every recipients entry using a %recipients:X% token whose variable's only
+        // input is $event.metadata (Data-typed) — so the union of Input struct properties has
+        // zero String-typed members, while `placeholders` is still non-empty.
+        let event = EventNotificationDefinition(
+            eventName: "AssignedMemberAdded",
+            notifications: [
+                NotificationEntry(
+                    type: "mail", render: .markdown,
+                    recipients: [.variable("AssignedDepartmentMembers")],
+                    fields: [
+                        (name: "subject", template: "%StaticGreeting%"),
+                        (name: "content", template: "hi"),
+                    ]
+                ),
+            ]
+        )
+        let variables = [
+            VariableDefinition(
+                name: "StaticGreeting", placeholder: "StaticGreeting",
+                type: .environment, inputs: []
+            ),
+            VariableDefinition(
+                name: "AssignedDepartmentMembers", placeholder: "AssignedDepartmentMembers",
+                type: .recipients,
+                inputs: [(name: "eventMetadata", type: "Data")]
+            ),
+        ]
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables", events: [event], variables: variables)
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains("let inputs: [String: String] = [:]"))
+        #expect(!output.contains("let inputs: [String: String] = [\n        ]"))
+        #expect(!output.contains("let inputs: [String: String] = [\n"))
     }
 }

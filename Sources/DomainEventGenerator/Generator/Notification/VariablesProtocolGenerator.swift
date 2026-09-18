@@ -23,13 +23,16 @@ package struct VariablesProtocolGenerator {
         let access = accessLevel.rawValue
         let sortedVariables = variables.sorted { $0.name < $1.name }
 
-        var lines: [String] = []
+        // `import Foundation` is required unconditionally: a `type: recipients` variable's
+        // `$event.metadata` input generates a `Data`-typed protocol parameter, which isn't
+        // otherwise visible to this generated file.
+        var lines: [String] = ["import Foundation"]
 
         // 1. The protocol.
         var protocolLines = ["\(access) protocol \(protocolName): Sendable {"]
         for variable in sortedVariables {
             let returnType = variable.type == .recipients ? "[String]" : "String"
-            protocolLines.append("    func \(Self.lowerCamel(variable.name))(\(Self.parameterList(variable.inputs))) async throws -> \(returnType)")
+            protocolLines.append("    func \(IdentifierValidation.lowerCamel(variable.name))(\(Self.parameterList(variable.inputs))) async throws -> \(returnType)")
         }
         protocolLines.append("}")
         lines.append(protocolLines.joined(separator: "\n"))
@@ -66,7 +69,7 @@ package struct VariablesProtocolGenerator {
             // `self.` qualifier is required: when a variable's name matches its sole input's
             // name, the `guard let` above binds a local constant of that name, which would
             // otherwise shadow the protocol method of the same name at this call site.
-            seamLines.append("            return try await self.\(Self.lowerCamel(variable.name))(\(arguments))")
+            seamLines.append("            return try await self.\(IdentifierValidation.lowerCamel(variable.name))(\(arguments))")
         }
         seamLines.append("        default: throw VariablesRuntimeError.unknownPlaceholder(placeholder)")
         seamLines.append("        }")
@@ -81,8 +84,4 @@ package struct VariablesProtocolGenerator {
         inputs.map { "\($0.name): \($0.type)" }.joined(separator: ", ")
     }
 
-    private static func lowerCamel(_ name: String) -> String {
-        guard let first = name.first else { return name }
-        return first.lowercased() + name.dropFirst()
-    }
 }

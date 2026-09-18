@@ -92,4 +92,25 @@ struct DemoRenderTests {
             _ = try makeInput(json: json)
         }
     }
+
+    // Exercises this branch's new codegen shapes end-to-end: a `type: recipients` variable
+    // whose inputs include `$event.metadata` (Data), and a recipients: list mixing a plain
+    // field (`leadId`) with a `%recipients:AssignedDepartmentMembers%` token. Proves the
+    // generated Swift for these shapes actually compiles and runs, not just that the generated
+    // *string* looks right.
+    @Test func mixedRecipientsCombinesPlainFieldAndVariableCall() async throws {
+        // `Data` decodes from a base64-encoded JSON string by default.
+        let base64Metadata = Data("test-metadata".utf8).base64EncodedString()
+        let json = """
+        {"leadId": "lead-1", "quotingCaseGroupingId": "case-1", "eventMetadata": "\(base64Metadata)"}
+        """
+        let input = try JSONDecoder().decode(AssignedMemberAddedNotificationInput.self, from: Data(json.utf8))
+
+        let rendered = try await AssignedMemberAddedNotification.render(input: input, variables: DemoVariables())
+
+        #expect(rendered.count == 1)
+        let mail = rendered[0]
+        #expect(mail.type == .mail)
+        #expect(mail.recipients == ["lead-1", "dept-member-1", "dept-member-2"])
+    }
 }

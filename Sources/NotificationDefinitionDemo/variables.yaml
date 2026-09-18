@@ -14,3 +14,10 @@ QuotingCaseGroupCollaboratorRole:
   inputs:
     - quotingCaseGroupingId: String
     - collaboratorId: String
+
+AssignedDepartmentMembers:
+  type: recipients
+  placeholder: AssignedDepartmentMembers
+  inputs:
+    - quotingCaseGroupingId: String
+    - $event.metadata
