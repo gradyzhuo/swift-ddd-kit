@@ -6,24 +6,22 @@ import Yams
 @Suite("Notification YAML Parsing")
 struct NotificationParsingTests {
 
-    // Spec §4 sample, updated for per-entry recipients.
+    // Spec sample, updated for per-entry protocol `id`.
     static let specSampleYAML = """
     CollaboratorAdded:
       notifications:
-        - type: mail
-          recipients:
-            - collaboratorId
+        - id: collaborator-added-mail
+          type: mail
           subject: 你已被加入案件「%QuotingCaseGroupName%」
           content: |
             你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」，%CollaboratorDescription%。
-        - type: inApp
-          recipients:
-            - collaboratorId
+        - id: collaborator-added-in-app
+          type: inApp
           title: 你已被加入案件「%QuotingCaseGroupName%」
           content: 你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」。
     """
 
-    @Test("spec §4 sample decodes: recipients per-entry, both notification types, exact fields")
+    @Test("spec sample decodes: id per-entry, both notification types, exact fields")
     func specSampleDecodes() throws {
         let definitions = try NotificationDefinitionParser.parse(yaml: Self.specSampleYAML)
         #expect(definitions.count == 1)
@@ -33,8 +31,8 @@ struct NotificationParsingTests {
         #expect(definition.notifications.count == 2)
 
         let mail = definition.notifications[0]
+        #expect(mail.id == "collaborator-added-mail")
         #expect(mail.type == "mail")
-        #expect(mail.recipients == ["collaboratorId"])
         #expect(mail.fields.map(\.name) == ["subject", "content"])
         #expect(mail.fields[0].template == "你已被加入案件「%QuotingCaseGroupName%」")
         #expect(mail.fields[1].template.contains("%QuotingCaseGroupCollaboratorRole%"))
@@ -42,8 +40,8 @@ struct NotificationParsingTests {
         #expect(mail.fields[1].template.contains("%CollaboratorDescription%"))
 
         let inApp = definition.notifications[1]
+        #expect(inApp.id == "collaborator-added-in-app")
         #expect(inApp.type == "inApp")
-        #expect(inApp.recipients == ["collaboratorId"])
         #expect(inApp.fields.map(\.name) == ["title", "content"])
         #expect(inApp.fields[0].template == "你已被加入案件「%QuotingCaseGroupName%」")
         #expect(inApp.fields[1].template == "你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」。")
@@ -54,9 +52,8 @@ struct NotificationParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: push
-              recipients:
-                - userId
+            - id: some-entry
+              type: push
               subject: hi
         """
         #expect(throws: NotificationParseError.unknownType(event: "SomeEvent", type: "push")) {
@@ -69,14 +66,12 @@ struct NotificationParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: mail
-              recipients:
-                - userId
+            - id: first-mail
+              type: mail
               subject: hi
               content: body
-            - type: mail
-              recipients:
-                - userId
+            - id: second-mail
+              type: mail
               subject: hi again
               content: body again
         """
@@ -90,9 +85,8 @@ struct NotificationParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: mail
-              recipients:
-                - userId
+            - id: some-mail
+              type: mail
               subject: hi
         """
         #expect(throws: NotificationParseError.missingField(event: "SomeEvent", type: "mail", field: "content")) {
@@ -105,9 +99,8 @@ struct NotificationParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: inApp
-              recipients:
-                - userId
+            - id: some-in-app
+              type: inApp
               content: hi
         """
         #expect(throws: NotificationParseError.missingField(event: "SomeEvent", type: "inApp", field: "title")) {
@@ -120,9 +113,8 @@ struct NotificationParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: mail
-              recipients:
-                - userId
+            - id: some-mail
+              type: mail
               subject: hi
               content: body
               cc: someone
@@ -137,9 +129,8 @@ struct NotificationParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: inApp
-              recipients:
-                - userId
+            - id: some-in-app
+              type: inApp
               title: hi
               content: body
               icon: bell
@@ -149,23 +140,25 @@ struct NotificationParsingTests {
         }
     }
 
-    @Test("empty recipients list on entry throws emptyRecipients")
-    func emptyRecipientsThrows() {
+    @Test("a recipients: key on an entry throws extraField — schema no longer supports it")
+    func recipientsKeyThrowsExtraField() {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: mail
-              recipients: []
+            - id: some-mail
+              type: mail
+              recipients:
+                - userId
               subject: hi
               content: body
         """
-        #expect(throws: NotificationParseError.emptyRecipients(event: "SomeEvent", type: "mail")) {
+        #expect(throws: NotificationParseError.extraField(event: "SomeEvent", type: "mail", field: "recipients")) {
             _ = try NotificationDefinitionParser.parse(yaml: yaml)
         }
     }
 
-    @Test("missing recipients key on entry throws emptyRecipients")
-    func missingRecipientsKeyThrows() {
+    @Test("missing id key on entry throws missingId")
+    func missingIdThrows() {
         let yaml = """
         SomeEvent:
           notifications:
@@ -173,9 +166,109 @@ struct NotificationParsingTests {
               subject: hi
               content: body
         """
-        #expect(throws: NotificationParseError.emptyRecipients(event: "SomeEvent", type: "mail")) {
+        #expect(throws: NotificationParseError.missingId(event: "SomeEvent", type: "mail")) {
             _ = try NotificationDefinitionParser.parse(yaml: yaml)
         }
+    }
+
+    @Test("empty id value on entry throws missingId")
+    func emptyIdThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: ""
+              type: mail
+              subject: hi
+              content: body
+        """
+        #expect(throws: NotificationParseError.missingId(event: "SomeEvent", type: "mail")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("id starting with an uppercase letter throws invalidId")
+    func idStartingUppercaseThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: Some-Mail
+              type: mail
+              subject: hi
+              content: body
+        """
+        #expect(throws: NotificationParseError.invalidId(event: "SomeEvent", id: "Some-Mail")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("id starting with a digit throws invalidId")
+    func idStartingDigitThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: "1st-mail"
+              type: mail
+              subject: hi
+              content: body
+        """
+        #expect(throws: NotificationParseError.invalidId(event: "SomeEvent", id: "1st-mail")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("id containing an illegal character throws invalidId")
+    func idContainingIllegalCharacterThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: "some mail"
+              type: mail
+              subject: hi
+              content: body
+        """
+        #expect(throws: NotificationParseError.invalidId(event: "SomeEvent", id: "some mail")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("duplicate id within the same event throws duplicateId")
+    func duplicateIdThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: same-id
+              type: mail
+              subject: hi
+              content: body
+            - id: same-id
+              type: inApp
+              title: hi
+              content: body
+        """
+        #expect(throws: NotificationParseError.duplicateId(event: "SomeEvent", id: "same-id")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("the same id may be reused across different events")
+    func sameIdAcrossDifferentEventsIsAllowed() throws {
+        let yaml = """
+        EventA:
+          notifications:
+            - id: shared-id
+              type: mail
+              subject: hi
+              content: body
+        EventB:
+          notifications:
+            - id: shared-id
+              type: mail
+              subject: hi
+              content: body
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        #expect(definitions.count == 2)
+        #expect(definitions.allSatisfy { $0.notifications[0].id == "shared-id" })
     }
 
     @Test("empty notifications list throws emptyNotifications")
@@ -208,9 +301,8 @@ struct NotificationRenderParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: mail
-              recipients:
-                - userId
+            - id: some-mail
+              type: mail
               subject: hi
               content: body
         """
@@ -223,9 +315,8 @@ struct NotificationRenderParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: inApp
-              recipients:
-                - userId
+            - id: some-in-app
+              type: inApp
               title: hi
               content: body
         """
@@ -238,9 +329,8 @@ struct NotificationRenderParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: mail
-              recipients:
-                - userId
+            - id: some-mail
+              type: mail
               render: plaintext
               subject: hi
               content: body
@@ -254,9 +344,8 @@ struct NotificationRenderParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: inApp
-              recipients:
-                - userId
+            - id: some-in-app
+              type: inApp
               render: markdown
               title: hi
               content: body
@@ -270,9 +359,8 @@ struct NotificationRenderParsingTests {
         let yaml = """
         SomeEvent:
           notifications:
-            - type: mail
-              recipients:
-                - userId
+            - id: some-mail
+              type: mail
               render: html
               subject: hi
               content: body
@@ -306,25 +394,5 @@ struct PlaceholderExtractorTests {
     @Test("non-token percent signs are ignored")
     func nonTokenPercentSignsIgnored() {
         #expect(PlaceholderExtractor.placeholders(in: "50%% off %A% 100% sure") == ["A"])
-    }
-}
-
-@Suite("NotificationDefinitionParser identifier validation")
-struct NotificationDefinitionParserIdentifierValidationTests {
-
-    @Test("a recipient field name that isn't a valid Swift identifier throws invalidIdentifier")
-    func invalidRecipientThrows() {
-        let yaml = """
-        SomeEvent:
-          notifications:
-            - type: mail
-              recipients:
-                - "%Foo%"
-              subject: hi
-              content: body
-        """
-        #expect(throws: IdentifierValidationError.invalidIdentifier(kind: .recipient, name: "%Foo%")) {
-            _ = try NotificationDefinitionParser.parse(yaml: yaml)
-        }
     }
 }
