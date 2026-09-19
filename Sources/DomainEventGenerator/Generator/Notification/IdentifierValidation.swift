@@ -67,6 +67,9 @@ package enum IdentifierValidation {
         "as", "Any", "catch", "false", "is", "nil", "self", "Self", "super", "throw", "throws", "true", "try",
         "_",
         "inputs", "values",
+        // Fixed member names every generated per-entry notification protocol declares
+        // (NotificationGenerator) — a variable input named one of these would collide.
+        "event", "recipients", "render",
     ]
 
     /// First character letter/underscore, remaining characters alphanumeric/underscore.

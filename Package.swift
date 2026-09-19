@@ -240,6 +240,7 @@ let package = Package(
         .target(
             name: "NotificationDefinition",
             dependencies: [
+                "DDDCore",
                 .product(name: "Markdown", package: "swift-markdown")
             ]),
         .testTarget(
@@ -251,6 +252,7 @@ let package = Package(
             name: "NotificationDefinitionDemo",
             dependencies: [
                 "NotificationDefinition",
+                "DDDCore",
             ],
             path: "Sources/NotificationDefinitionDemo",
             plugins: [
