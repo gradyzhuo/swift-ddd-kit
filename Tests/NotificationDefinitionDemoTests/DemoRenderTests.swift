@@ -27,6 +27,20 @@ struct DemoRenderTests {
             aggregateRootId: quotingCaseGroupingId)
     }
 
+    // Calling `.render(variables:)` directly on a value whose STATIC type is the concrete
+    // `CollaboratorAddedInAppNotification` struct would resolve to that struct's own method no
+    // matter whether `render` is a protocol requirement or only an extension default — Swift
+    // always prefers a concrete type's own member over an extension in that case. Routing the
+    // call through a generic parameter constrained to the protocol forces dispatch through the
+    // protocol's witness table instead, which is the only way to actually distinguish "requirement
+    // overridden by the conformer" from "unrelated same-signature method shadowing an
+    // extension-only default".
+    private func renderThroughProtocol<T: CollaboratorAddedNotificationCollaborator_Added_In_AppProtocol>(
+        _ notification: T, variables: DemoVariables
+    ) async throws -> RenderedNotification {
+        try await notification.render(variables: variables)
+    }
+
     @Test func mailUsesDefaultRenderAndSubstitutesFieldsExactly() async throws {
         let notification = CollaboratorAddedMailNotification(event: makeEvent())
         let rendered = try await notification.render(variables: DemoVariables())
@@ -44,9 +58,15 @@ struct DemoRenderTests {
 
     @Test func inAppOverriddenRenderIsSelectedOverDefault() async throws {
         // Proves render(variables:) being a protocol requirement (not only an extension method)
-        // means this conformer's own implementation is what actually runs.
+        // means this conformer's own implementation is what actually runs. The call is routed
+        // through `renderThroughProtocol` (generic over the protocol) rather than called directly
+        // on `notification` — a direct call on the concrete struct's static type would select its
+        // own `render` regardless of requirement-vs-extension-only, so it wouldn't discriminate
+        // the two cases. Going through the protocol abstraction does: if `render` were declared
+        // only in the protocol extension (not as a requirement), this call would resolve to the
+        // extension's default implementation instead, and the assertions below would fail.
         let notification = CollaboratorAddedInAppNotification(event: makeEvent())
-        let rendered = try await notification.render(variables: DemoVariables())
+        let rendered = try await renderThroughProtocol(notification, variables: DemoVariables())
 
         #expect(rendered.type == .inApp)
         #expect(rendered.fields["title"] == "OVERRIDDEN")

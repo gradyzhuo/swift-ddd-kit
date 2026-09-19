@@ -5,10 +5,12 @@
 //  Hand-written conformers to the GENERATED per-entry protocols (from notification.yaml's
 //  `collaborator-added-mail`/`collaborator-added-in-app` entries, produced by
 //  NotificationGeneratorPlugin). The mail conformer doesn't override `render()` (exercises the
-//  protocol extension's default implementation); the inApp conformer DOES override it, proving a
-//  conformer's own `render(variables:)` is correctly selected over the extension's default —
-//  which would NOT happen if `render` were declared only in the extension, not as a protocol
-//  requirement.
+//  protocol extension's default implementation); the inApp conformer DOES override it. Dispatch
+//  through the concrete struct's own static type would select this override regardless of whether
+//  `render` is a protocol requirement or only an extension method — proving the requirement
+//  actually matters (vs. this override merely shadowing a same-signature extension method) needs
+//  the call routed through the protocol abstraction; see
+//  `DemoRenderTests.inAppOverriddenRenderIsSelectedOverDefault`.
 //
 
 import NotificationDefinition
