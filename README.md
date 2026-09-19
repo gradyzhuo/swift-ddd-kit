@@ -725,36 +725,41 @@ public protocol OpportunityNotificationVariables: Sendable {
 
 ### `notification.yaml`
 
-Declares, per domain event type, what each channel says (`notifications`, a list of
-`{type, recipients, ...fields}` entries) and who gets notified for that entry (`recipients`, a
-list of event field names, declared per notification-type/channel entry — mail and inApp can
-notify different people for the same event). The type schema is closed: `mail` → `subject` +
-`content`, `inApp` → `title` + `content`. Every entry also takes an optional
-`render: markdown | plaintext` key, defaulting per channel type when omitted (`mail` → `markdown`,
-`inApp` → `plaintext`):
+Declares, per domain event type, what each channel says: `notifications`, a list of
+`{id, type, ...fields}` entries. Each entry gets its own generated protocol — the consumer
+implements it directly, providing the real domain event and the recipient logic (mail and inApp
+can notify completely different people for the same event, since each is its own protocol). The
+type schema is closed: `mail` → `subject` + `content`, `inApp` → `title` + `content`. Every entry
+also takes an optional `render: markdown | plaintext` key, defaulting per channel type when
+omitted (`mail` → `markdown`, `inApp` → `plaintext`):
 
 ```yaml
 CollaboratorAdded:
   notifications:
-    - type: mail
-      recipients:
-        - collaboratorId
+    - id: collaborator-added-mail
+      type: mail
       subject: 你已被加入案件「%QuotingCaseGroupName%」
       content: |
         你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」，%CollaboratorDescription%。
-    - type: inApp
-      recipients:
-        - collaboratorId
+    - id: collaborator-added-in-app
+      type: inApp
       title: 你已被加入案件「%QuotingCaseGroupName%」
       content: 你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」。
 ```
+
+`id` is required on every entry and must be unique among the entries of the same event (it may
+repeat across different events). It must match `^[a-z][a-z0-9_-]*$` — lowercase letters, digits,
+`-`, `_`, starting with a letter — and is transformed into the generated protocol's name by
+splitting on `-`/`_`, uppercasing each segment's first letter, and rejoining with `_`:
+`collaborator-added-mail` → `Collaborator_Added_Mail` → `CollaboratorAddedNotificationCollaborator_Added_MailProtocol`.
 
 Neither entry declares `render:` above, so each gets its channel type's default (`mail` →
 `markdown`, `inApp` → `plaintext`). Both directions are legal on both types — e.g. an inApp entry
 that wants a link can opt in with `render: markdown`:
 
 ```yaml
-    - type: inApp
+    - id: some-in-app-entry
+      type: inApp
       render: markdown        # override the inApp default
       title: ...
       content: 前往查看：[案件連結](https://mendesky.jwcpas.net/quoting-cases)
@@ -772,21 +777,40 @@ consumers need no `render` awareness for mail. Full rationale:
 
 `NotificationGeneratorPlugin` cross-validates every `%Placeholder%` token against `variables.yaml`
 (an undefined placeholder is a build error; a defined-but-unreferenced variable is a stderr
-warning) and generates, per event, a `Decodable` input struct plus a `render()` that resolves each
-distinct variable once and returns `[RenderedNotification]` in `notifications` order:
-
-Input binding (every variable input name and every `recipients` field name must be a property of
-the event) is a naming convention, not a build-time check against a co-located `event.yaml` — v1
-enforces it at runtime, via `Decodable` failure when an event's actual shape doesn't match.
+warning) and generates, per entry, a protocol you implement directly:
 
 ```swift
-public struct CollaboratorAddedNotificationInput: Decodable { /* union of inputs ∪ every entry's recipients */ }
+public protocol CollaboratorAddedNotificationCollaborator_Added_MailProtocol: Sendable {
+    associatedtype DomainEventType: DomainEvent
+    var event: DomainEventType { get }
 
-public enum CollaboratorAddedNotification {
-    public static func render(
-        input: CollaboratorAddedNotificationInput,
-        variables: some OpportunityNotificationVariables
-    ) async throws -> [RenderedNotification]
+    var collaboratorId: String { get }          // known fields: union of this entry's
+    var quotingCaseGroupingId: String { get }   // referenced variables' `inputs`
+
+    func recipients() async throws -> [String]                                                  // you implement this
+    func render(variables: some OpportunityNotificationVariables) async throws -> RenderedNotification  // has a default; override to customize
+}
+```
+
+`event`'s type is generic (`associatedtype DomainEventType: DomainEvent`) — your conforming type
+supplies the real domain event, giving `recipients()` (and an overridden `render()`) access to any
+of its fields, including `event.metadata`, not just the ones `notification.yaml`/`variables.yaml`
+happen to reference. `recipients()` has no default implementation — you must provide one. `render`
+IS declared as a protocol requirement (not only in an extension) specifically so a conformer's own
+`render(variables:)` is correctly selected over the default one via dynamic dispatch; the default
+implementation resolves this entry's own text-template placeholders the same way as before and
+calls your `recipients()` for the recipient list:
+
+```swift
+struct CollaboratorAddedMailNotification: CollaboratorAddedNotificationCollaborator_Added_MailProtocol {
+    let event: CollaboratorAddedEvent   // your real domain event type
+    var collaboratorId: String { event.collaboratorId }
+    var quotingCaseGroupingId: String { event.quotingCaseGroupingId }
+
+    func recipients() async throws -> [String] {
+        [event.collaboratorId]
+    }
+    // render() not overridden — uses the generated default.
 }
 ```
 
