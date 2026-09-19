@@ -27,27 +27,29 @@ extension NotificationRenderFormat {
 }
 
 /// One channel entry (`mail`/`inApp`) for a single event, with its fields in the type's
-/// canonical schema order (`mail`: subject, content; `inApp`: title, content).
+/// canonical schema order (`mail`: subject, content; `inApp`: title, content). `id` is this
+/// entry's own identifier, unique among the entries of the same event — used to derive the
+/// generated per-entry protocol's name (see `NotificationGenerator`).
 package struct NotificationEntry: Equatable {
+    package let id: String
     package let type: String
     package let render: NotificationRenderFormat
-    package let recipients: [String]
     package let fields: [(name: String, template: String)]
 
     package init(
-        type: String, render: NotificationRenderFormat, recipients: [String],
+        id: String, type: String, render: NotificationRenderFormat,
         fields: [(name: String, template: String)]
     ) {
+        self.id = id
         self.type = type
         self.render = render
-        self.recipients = recipients
         self.fields = fields
     }
 
     package static func == (lhs: NotificationEntry, rhs: NotificationEntry) -> Bool {
-        lhs.type == rhs.type
+        lhs.id == rhs.id
+            && lhs.type == rhs.type
             && lhs.render == rhs.render
-            && lhs.recipients == rhs.recipients
             && lhs.fields.count == rhs.fields.count
             && zip(lhs.fields, rhs.fields).allSatisfy { $0.name == $1.name && $0.template == $1.template }
     }
@@ -71,7 +73,9 @@ package enum NotificationParseError: Error, Equatable, Sendable {
     case missingField(event: String, type: String, field: String)
     case extraField(event: String, type: String, field: String)
     case invalidRenderFormat(event: String, type: String, value: String)
-    case emptyRecipients(event: String, type: String)
+    case missingId(event: String, type: String)
+    case invalidId(event: String, id: String)
+    case duplicateId(event: String, id: String)
     case emptyNotifications(event: String)
 }
 
@@ -91,8 +95,12 @@ extension NotificationParseError: CustomStringConvertible {
             return "event '\(event)': notification type '\(type)' has unexpected field '\(field)'"
         case .invalidRenderFormat(let event, let type, let value):
             return "event '\(event)': notification type '\(type)' has invalid `render` value '\(value)' (expected 'markdown' or 'plaintext')"
-        case .emptyRecipients(let event, let type):
-            return "event '\(event)': notification type '\(type)' has empty `recipients`"
+        case .missingId(let event, let type):
+            return "event '\(event)': notification type '\(type)' is missing required `id` key"
+        case .invalidId(let event, let id):
+            return "event '\(event)': id '\(id)' is not a valid id (expected lowercase letters/digits/'-'/'_' , starting with a lowercase letter)"
+        case .duplicateId(let event, let id):
+            return "event '\(event)': id '\(id)' is declared more than once"
         case .emptyNotifications(let event):
             return "event '\(event)': `notifications` must not be empty"
         }
@@ -109,6 +117,17 @@ package enum NotificationDefinitionParser {
         "mail": ["subject", "content"],
         "inApp": ["title", "content"],
     ]
+
+    /// `id:` grammar: a lowercase letter, then lowercase letters/digits/`-`/`_`.
+    private static let idRegex: NSRegularExpression = {
+        // Safe to force-unwrap: the pattern is a fixed, valid literal.
+        try! NSRegularExpression(pattern: "^[a-z][a-z0-9_-]*$")
+    }()
+
+    private static func isValidId(_ id: String) -> Bool {
+        let range = NSRange(id.startIndex..., in: id)
+        return idRegex.firstMatch(in: id, range: range) != nil
+    }
 
     package static func parse(yaml: String) throws -> [EventNotificationDefinition] {
         guard let root = try Yams.compose(yaml: yaml), let mapping = root.mapping else {
@@ -129,6 +148,7 @@ package enum NotificationDefinitionParser {
 
             var notifications: [NotificationEntry] = []
             var seenTypes: Set<String> = []
+            var seenIds: Set<String> = []
             for entryNode in notificationsSequence {
                 let entryMapping = entryNode.mapping
                 let type = entryMapping?["type"]?.string ?? ""
@@ -140,15 +160,18 @@ package enum NotificationDefinitionParser {
                     throw NotificationParseError.duplicateType(event: eventName, type: type)
                 }
 
-                let recipients: [String] = entryMapping?["recipients"]?.sequence?.compactMap { $0.string } ?? []
-                guard !recipients.isEmpty else {
-                    throw NotificationParseError.emptyRecipients(event: eventName, type: type)
+                let id = entryMapping?["id"]?.string ?? ""
+                guard !id.isEmpty else {
+                    throw NotificationParseError.missingId(event: eventName, type: type)
                 }
-                for recipient in recipients {
-                    try IdentifierValidation.validate(recipient, kind: .recipient)
+                guard Self.isValidId(id) else {
+                    throw NotificationParseError.invalidId(event: eventName, id: id)
+                }
+                guard seenIds.insert(id).inserted else {
+                    throw NotificationParseError.duplicateId(event: eventName, id: id)
                 }
 
-                let allowedKeys = Set(schemaFields).union(["type", "render", "recipients"])
+                let allowedKeys = Set(schemaFields).union(["type", "render", "id"])
                 if let entryMapping {
                     for (fieldKeyNode, _) in entryMapping {
                         guard let fieldKey = fieldKeyNode.string else { continue }
@@ -176,7 +199,7 @@ package enum NotificationDefinitionParser {
                     fields.append((name: fieldName, template: template))
                 }
 
-                notifications.append(NotificationEntry(type: type, render: render, recipients: recipients, fields: fields))
+                notifications.append(NotificationEntry(id: id, type: type, render: render, fields: fields))
             }
 
             definitions.append(EventNotificationDefinition(eventName: eventName, notifications: notifications))
