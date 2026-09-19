@@ -247,4 +247,142 @@ struct NotificationGeneratorTests {
         )
         #expect(generator.unreferencedVariables == ["NeverUsed"])
     }
+
+    @Test("unreferencedVariables is empty when every variable is referenced")
+    func unreferencedVariablesEmptyWhenAllUsed() {
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables",
+            events: [Self.collaboratorAddedEvent],
+            variables: Self.variables
+        )
+        #expect(generator.unreferencedVariables == [])
+    }
+
+    // MARK: - Findings from task-2 review (restoring coverage for generator behavior this task
+    // did not change, adapted to the new per-entry protocol output shape).
+
+    @Test("a placeholder whose only matching variable has empty inputs emits [:] for the inputs dict, not an invalid empty multi-line literal")
+    func emptyPropertiesWithPlaceholdersEmitsEmptyInputsDict() throws {
+        let event = EventNotificationDefinition(
+            eventName: "Foo",
+            notifications: [
+                NotificationEntry(id: "mail", type: "mail", render: .markdown, fields: [(name: "subject", template: "hi %ZeroParamText%"), (name: "content", template: "body")]),
+            ])
+        let variable = VariableDefinition(name: "ZeroParamText", placeholder: "ZeroParamText", inputs: [])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [variable])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains("let inputs: [String: String] = [:]"))
+        #expect(!output.contains("let inputs: [String: String] = [\n        ]"))
+    }
+
+    @Test("a placeholder that isn't a valid Swift identifier throws invalidIdentifier")
+    func invalidPlaceholderThrows() {
+        let event = EventNotificationDefinition(
+            eventName: "Foo",
+            notifications: [
+                NotificationEntry(id: "mail", type: "mail", render: .markdown, fields: [(name: "subject", template: "Hi %123%"), (name: "content", template: "body")]),
+            ])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [])
+        #expect(throws: IdentifierValidationError.invalidIdentifier(kind: .placeholder, name: "123")) {
+            _ = try generator.render(accessLevel: .internal)
+        }
+    }
+
+    @Test("a placeholder that lowerCamels to a fixed generated member name (\"Render\" -> \"render\") throws invalidIdentifier")
+    func placeholderCollidingWithFixedMemberNameThrows() {
+        let event = EventNotificationDefinition(
+            eventName: "Foo",
+            notifications: [
+                NotificationEntry(id: "mail", type: "mail", render: .markdown, fields: [(name: "subject", template: "Hi %Render%"), (name: "content", template: "body")]),
+            ])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [])
+        #expect(throws: IdentifierValidationError.invalidIdentifier(kind: .placeholder, name: "Render")) {
+            _ = try generator.render(accessLevel: .internal)
+        }
+    }
+
+    @Test("two placeholders that lowerCamel to the same local name throw identifierCollision")
+    func placeholderCollisionThrows() {
+        let event = EventNotificationDefinition(
+            eventName: "Foo",
+            notifications: [
+                NotificationEntry(id: "mail", type: "mail", render: .markdown, fields: [(name: "subject", template: "Hi %FooBar%"), (name: "content", template: "Bye %fooBar%")]),
+            ])
+        let variables: [VariableDefinition] = [
+            VariableDefinition(name: "FooBar", placeholder: "FooBar", inputs: []),
+            VariableDefinition(name: "fooBar", placeholder: "fooBar", inputs: []),
+        ]
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: variables)
+        #expect(throws: IdentifierValidationError.identifierCollision(a: "FooBar", b: "fooBar")) {
+            _ = try generator.render(accessLevel: .internal)
+        }
+    }
+
+    @Test("a template with quotes and backslashes emits a correctly escaped string literal")
+    func escapesQuotesAndBackslashes() throws {
+        let event = EventNotificationDefinition(
+            eventName: "Foo",
+            notifications: [
+                NotificationEntry(id: "mail", type: "mail", render: .markdown, fields: [
+                    (name: "subject", template: #"He said "hi" and used \ backslash."#),
+                    (name: "content", template: "body"),
+                ]),
+            ])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        let expectedLine = #""subject": try PlaceholderSubstitution.substitute("He said \"hi\" and used \\ backslash.", values: [:]),"#
+        #expect(output.contains(expectedLine))
+    }
+
+    @Test("public access level emits public protocol, extension, and render() signature")
+    func publicAccessLevel() throws {
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables",
+            events: [Self.collaboratorAddedEvent],
+            variables: Self.variables
+        )
+        let output = try generator.render(accessLevel: .public).joined(separator: "\n")
+
+        #expect(output.contains("public protocol CollaboratorAddedNotificationCollaborator_Added_MailProtocol: Sendable {"))
+        #expect(output.contains("extension CollaboratorAddedNotificationCollaborator_Added_MailProtocol {"))
+        #expect(output.contains("public func render(variables: some OpportunityNotificationVariables) async throws -> RenderedNotification {"))
+    }
+
+    @Test("events are rendered sorted by name")
+    func eventsSortedByName() throws {
+        let eventB = EventNotificationDefinition(
+            eventName: "BEvent",
+            notifications: [NotificationEntry(id: "mail", type: "mail", render: .markdown, fields: [(name: "subject", template: "s"), (name: "content", template: "c")])]
+        )
+        let eventA = EventNotificationDefinition(
+            eventName: "AEvent",
+            notifications: [NotificationEntry(id: "mail", type: "mail", render: .markdown, fields: [(name: "subject", template: "s"), (name: "content", template: "c")])]
+        )
+        let generator = NotificationGenerator(protocolName: "V", events: [eventB, eventA], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        let aIndex = try #require(output.range(of: "AEventNotificationMailProtocol"))
+        let bIndex = try #require(output.range(of: "BEventNotificationMailProtocol"))
+        #expect(aIndex.lowerBound < bIndex.lowerBound)
+    }
+
+    @Test("a placeholder appearing multiple times in an entry's templates is resolved exactly once")
+    func resolvesEachPlaceholderOnce() throws {
+        let event = EventNotificationDefinition(
+            eventName: "Foo",
+            notifications: [
+                NotificationEntry(id: "mail", type: "mail", render: .markdown, fields: [
+                    (name: "subject", template: "hi %QuotingCaseGroupName%"),
+                    (name: "content", template: "bye %QuotingCaseGroupName% again %QuotingCaseGroupName%"),
+                ]),
+            ])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [Self.variables[0]])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        let resolution = "let quotingCaseGroupName = try await variables.__value(of: \"QuotingCaseGroupName\", inputs: inputs)"
+        #expect(output.contains(resolution))
+        #expect(output.components(separatedBy: resolution).count - 1 == 1)
+    }
 }

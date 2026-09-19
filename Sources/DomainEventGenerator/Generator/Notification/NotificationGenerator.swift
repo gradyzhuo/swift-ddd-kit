@@ -199,11 +199,19 @@ package struct NotificationGenerator {
         lines.append("    \(access) func render(variables: some \(protocolName)) async throws -> RenderedNotification {")
 
         if !placeholders.isEmpty {
-            lines.append("        let inputs: [String: String] = [")
-            for property in properties {
-                lines.append("            \"\(property)\": \(property),")
+            if properties.isEmpty {
+                // A template can reference a variable declared with an empty `inputs:` list (e.g.
+                // a zero-parameter variable) — `properties` is then empty even though
+                // `placeholders` isn't. `[String: String] = [\n]` is invalid Swift; emit the
+                // empty-dictionary literal form instead.
+                lines.append("        let inputs: [String: String] = [:]")
+            } else {
+                lines.append("        let inputs: [String: String] = [")
+                for property in properties {
+                    lines.append("            \"\(property)\": \(property),")
+                }
+                lines.append("        ]")
             }
-            lines.append("        ]")
         }
 
         for placeholder in placeholders {
