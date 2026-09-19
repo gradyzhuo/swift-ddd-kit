@@ -842,8 +842,13 @@ variablesProtocolName: OpportunityNotificationVariables
 
 **Any target consuming generated notification code must depend on the `NotificationDefinition`
 product** — the generated `render()` imports it directly for `RenderedNotification`,
-`NotificationType`, and `PlaceholderSubstitution`. (`VariablesGeneratorPlugin`'s output has no such
-dependency — the variables protocol is deliberately runtime-independent.)
+`NotificationType`, and `PlaceholderSubstitution`. The generated notification protocols also emit
+`import DDDCore` and reference `DDDCore.DomainEvent` directly (each per-entry protocol declares
+`associatedtype DomainEventType: DomainEvent`); a consuming target obtains `DDDCore` either by also
+depending on `DDDKit` (which re-exports it via `@_exported import DDDCore`) or by depending on
+`DDDCore` directly if it is already a target-level dependency in the same package.
+(`VariablesGeneratorPlugin`'s output has no such dependency — the variables protocol is deliberately
+runtime-independent.)
 
 ## Cross-Context Events (Pulsar)
 
