@@ -15,6 +15,7 @@ import Foundation
 /// ``IdentifierValidationError`` messages readable.
 package enum IdentifierKind: String, Sendable, Equatable {
     case eventName = "event name"
+    case recipient = "recipient"
     case variableName = "variable"
     case inputName = "input"
     case placeholder = "placeholder"
@@ -40,7 +41,7 @@ extension IdentifierValidationError: CustomStringConvertible {
             case .variableName:
                 return "variable '\(name)' does not produce a valid Swift method name " +
                     "('\(IdentifierValidation.lowerCamel(name))') — rename it"
-            case .eventName, .inputName:
+            case .eventName, .recipient, .inputName:
                 return "\(kind.rawValue) '\(name)' is not a valid Swift identifier"
             }
         case .identifierCollision(let a, let b):
