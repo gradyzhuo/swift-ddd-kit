@@ -140,19 +140,50 @@ struct NotificationParsingTests {
         }
     }
 
-    @Test("a recipients: key on an entry throws extraField — schema no longer supports it")
-    func recipientsKeyThrowsExtraField() {
+    @Test("recipients: is optional and defaults to empty when absent")
+    func recipientsDefaultsToEmpty() throws {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: some-mail
+              type: mail
+              subject: hi
+              content: body
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        #expect(definitions[0].notifications[0].recipients == [])
+    }
+
+    @Test("recipients: parses a list of field names, in declared order")
+    func recipientsParsesFieldList() throws {
         let yaml = """
         SomeEvent:
           notifications:
             - id: some-mail
               type: mail
               recipients:
-                - userId
+                - fieldA
+                - fieldB
               subject: hi
               content: body
         """
-        #expect(throws: NotificationParseError.extraField(event: "SomeEvent", type: "mail", field: "recipients")) {
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        #expect(definitions[0].notifications[0].recipients == ["fieldA", "fieldB"])
+    }
+
+    @Test("a recipients: field name that isn't a valid Swift identifier throws invalidIdentifier")
+    func invalidRecipientFieldNameThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: some-mail
+              type: mail
+              recipients:
+                - "%Foo%"
+              subject: hi
+              content: body
+        """
+        #expect(throws: IdentifierValidationError.invalidIdentifier(kind: .recipient, name: "%Foo%")) {
             _ = try NotificationDefinitionParser.parse(yaml: yaml)
         }
     }

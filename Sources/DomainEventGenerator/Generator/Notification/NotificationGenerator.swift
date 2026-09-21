@@ -5,9 +5,10 @@
 //  For each (event, notification entry) pair declared in `notification.yaml`, generates a
 //  protocol the consumer implements — exposing the real `DomainEvent`, the entry's own known
 //  text-template fields, a `recipients()` requirement, and an overridable `render()` — plus an
-//  extension providing `render()`'s default implementation. Cross-validated against
-//  `variables.yaml`. Consumes the `__value(of:inputs:)` seam emitted by
-//  `VariablesProtocolGenerator` verbatim.
+//  extension providing `render()`'s default implementation. When the entry declares an optional
+//  `recipients:` field list, a default `recipients()` implementation is generated too (still
+//  overridable, same as `render()`). Cross-validated against `variables.yaml`. Consumes the
+//  `__value(of:inputs:)` seam emitted by `VariablesProtocolGenerator` verbatim.
 //  See spec: docs/superpowers/specs/2026-09-19-per-entry-notification-recipients-protocol-design.md
 //
 
@@ -144,6 +145,9 @@ package struct NotificationGenerator {
                 propertyNames.insert(input.name)
             }
         }
+        for recipient in entry.recipients {
+            propertyNames.insert(recipient)
+        }
         let sortedProperties = propertyNames.sorted()
 
         let idPascal = Self.idPascalCase(entry.id)
@@ -255,6 +259,19 @@ package struct NotificationGenerator {
         }
         lines.append("            ])")
         lines.append("    }")
+
+        // Optional default recipients() implementation — only when the entry declared
+        // `recipients:` in notification.yaml. `recipients()` is always a protocol requirement
+        // (see above) regardless of whether a default exists, so a consumer can always override
+        // this, the same way `render(variables:)` already works.
+        if !entry.recipients.isEmpty {
+            let recipientExpressions = entry.recipients.map { "self.\($0)" }.joined(separator: ", ")
+            lines.append("")
+            lines.append("    \(access) func recipients() async throws -> [String] {")
+            lines.append("        [\(recipientExpressions)]")
+            lines.append("    }")
+        }
+
         lines.append("}")
 
         return lines.joined(separator: "\n")

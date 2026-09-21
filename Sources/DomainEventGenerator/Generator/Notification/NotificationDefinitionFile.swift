@@ -29,20 +29,26 @@ extension NotificationRenderFormat {
 /// One channel entry (`mail`/`inApp`) for a single event, with its fields in the type's
 /// canonical schema order (`mail`: subject, content; `inApp`: title, content). `id` is this
 /// entry's own identifier, unique among the entries of the same event — used to derive the
-/// generated per-entry protocol's name (see `NotificationGenerator`).
+/// generated per-entry protocol's name (see `NotificationGenerator`). `recipients` is an
+/// optional list of field names — when present, the generator emits a default `recipients()`
+/// implementation (`[self.fieldA, self.fieldB, ...]`) in the protocol's extension; when absent
+/// (the default, `[]`), the consumer must implement `recipients()` themselves. Either way
+/// `recipients()` is a protocol requirement, so a consumer can always override the default.
 package struct NotificationEntry: Equatable {
     package let id: String
     package let type: String
     package let render: NotificationRenderFormat
+    package let recipients: [String]
     package let fields: [(name: String, template: String)]
 
     package init(
         id: String, type: String, render: NotificationRenderFormat,
-        fields: [(name: String, template: String)]
+        recipients: [String] = [], fields: [(name: String, template: String)]
     ) {
         self.id = id
         self.type = type
         self.render = render
+        self.recipients = recipients
         self.fields = fields
     }
 
@@ -50,6 +56,7 @@ package struct NotificationEntry: Equatable {
         lhs.id == rhs.id
             && lhs.type == rhs.type
             && lhs.render == rhs.render
+            && lhs.recipients == rhs.recipients
             && lhs.fields.count == rhs.fields.count
             && zip(lhs.fields, rhs.fields).allSatisfy { $0.name == $1.name && $0.template == $1.template }
     }
@@ -171,7 +178,7 @@ package enum NotificationDefinitionParser {
                     throw NotificationParseError.duplicateId(event: eventName, id: id)
                 }
 
-                let allowedKeys = Set(schemaFields).union(["type", "render", "id"])
+                let allowedKeys = Set(schemaFields).union(["type", "render", "id", "recipients"])
                 if let entryMapping {
                     for (fieldKeyNode, _) in entryMapping {
                         guard let fieldKey = fieldKeyNode.string else { continue }
@@ -199,7 +206,12 @@ package enum NotificationDefinitionParser {
                     fields.append((name: fieldName, template: template))
                 }
 
-                notifications.append(NotificationEntry(id: id, type: type, render: render, fields: fields))
+                let recipients: [String] = entryMapping?["recipients"]?.sequence?.compactMap { $0.string } ?? []
+                for recipient in recipients {
+                    try IdentifierValidation.validate(recipient, kind: .recipient)
+                }
+
+                notifications.append(NotificationEntry(id: id, type: type, render: render, recipients: recipients, fields: fields))
             }
 
             definitions.append(EventNotificationDefinition(eventName: eventName, notifications: notifications))

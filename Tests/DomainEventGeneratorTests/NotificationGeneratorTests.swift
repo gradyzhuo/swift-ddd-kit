@@ -385,4 +385,57 @@ struct NotificationGeneratorTests {
         #expect(output.contains(resolution))
         #expect(output.components(separatedBy: resolution).count - 1 == 1)
     }
+
+    @Test("an entry with recipients: emits a default recipients() implementation reading those fields")
+    func recipientsFieldEmitsDefaultImplementation() throws {
+        let event = EventNotificationDefinition(
+            eventName: "Foo",
+            notifications: [
+                NotificationEntry(
+                    id: "mail", type: "mail", render: .markdown, recipients: ["collaboratorId"],
+                    fields: [(name: "subject", template: "hi"), (name: "content", template: "hi")]),
+            ])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        // The recipients: field becomes a known-field property, same as a variable-derived one.
+        #expect(output.contains("var collaboratorId: String { get }"))
+        #expect(output.contains("func recipients() async throws -> [String]"))
+        #expect(output.contains(
+            "    internal func recipients() async throws -> [String] {\n        [self.collaboratorId]\n    }"))
+    }
+
+    @Test("recipients: with multiple fields emits them all in declared order")
+    func recipientsFieldWithMultipleFields() throws {
+        let event = EventNotificationDefinition(
+            eventName: "Foo",
+            notifications: [
+                NotificationEntry(
+                    id: "mail", type: "mail", render: .markdown, recipients: ["fieldA", "fieldB"],
+                    fields: [(name: "subject", template: "hi"), (name: "content", template: "hi")]),
+            ])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains(
+            "    internal func recipients() async throws -> [String] {\n        [self.fieldA, self.fieldB]\n    }"))
+    }
+
+    @Test("an entry without recipients: does not emit a default recipients() implementation")
+    func noRecipientsFieldEmitsNoDefaultImplementation() throws {
+        let event = EventNotificationDefinition(
+            eventName: "Foo",
+            notifications: [
+                NotificationEntry(
+                    id: "mail", type: "mail", render: .markdown,
+                    fields: [(name: "subject", template: "hi"), (name: "content", template: "hi")]),
+            ])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        // Requirement is still declared (unconditionally)...
+        #expect(output.contains("func recipients() async throws -> [String]"))
+        // ...but no implementation body is emitted anywhere in the extension.
+        #expect(!output.contains("func recipients() async throws -> [String] {"))
+    }
 }
