@@ -814,6 +814,26 @@ struct CollaboratorAddedMailNotification: CollaboratorAddedNotificationCollabora
 }
 ```
 
+For a case this simple — recipients are just one or more known `String` fields, no lookup or
+conditional logic needed — you don't have to write `recipients()` by hand at all. An entry can
+declare an optional `recipients:` key (a list of field names, same shape as this framework's
+original pre-per-entry-protocol design):
+
+```yaml
+    - id: collaborator-added-mail
+      type: mail
+      recipients:
+        - collaboratorId
+      subject: ...
+```
+
+This generates a default `recipients()` implementation (`[self.collaboratorId]`) in the protocol's
+extension, so `CollaboratorAddedMailNotification` above wouldn't need to implement `recipients()`
+at all. `recipients()` is still a protocol requirement regardless — a conformer can always override
+the default the same way it can override `render(variables:)`. `recipients:` only supports
+`String`-typed fields, each contributing one recipient; a field whose real value is a batch (e.g.
+an array of member ids) still needs a hand-written `recipients()`, same as before.
+
 ### Wiring both plugins into a target
 
 ```swift
