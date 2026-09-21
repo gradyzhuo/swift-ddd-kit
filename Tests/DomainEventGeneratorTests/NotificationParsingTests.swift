@@ -61,8 +61,8 @@ struct NotificationParsingTests {
         }
     }
 
-    @Test("duplicate notification type in the same event throws duplicateType")
-    func duplicateTypeThrows() {
+    @Test("multiple entries of the same type are allowed as long as their ids are distinct")
+    func multipleEntriesOfSameTypeAreAllowedWithDistinctIds() throws {
         let yaml = """
         SomeEvent:
           notifications:
@@ -75,9 +75,9 @@ struct NotificationParsingTests {
               subject: hi again
               content: body again
         """
-        #expect(throws: NotificationParseError.duplicateType(event: "SomeEvent", type: "mail")) {
-            _ = try NotificationDefinitionParser.parse(yaml: yaml)
-        }
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        #expect(definitions[0].notifications.map(\.id) == ["first-mail", "second-mail"])
+        #expect(definitions[0].notifications.allSatisfy { $0.type == "mail" })
     }
 
     @Test("mail entry missing content throws missingField")
