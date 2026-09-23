@@ -775,6 +775,42 @@ this field — its render choice is fully resolved into HTML before publishing, 
 consumers need no `render` awareness for mail. Full rationale:
 [`docs/superpowers/specs/2026-09-15-inapp-render-format-design.md`](docs/superpowers/specs/2026-09-15-inapp-render-format-design.md).
 
+A **mail** entry may also declare an optional `template:` key selecting which HTML layout the
+receiving NotificationContext wraps the content in, and filling that layout's *slots* — typically a
+call-to-action button's label and URL. Two spellings are accepted:
+
+```yaml
+    - id: assigned-member-added-mail
+      type: mail
+      template:
+        name: one-button                      # which NC layout
+        slots:                                # that layout's placeholders, plain text
+          action_label: 前往嘉威平台查看
+          action_url: https://mendesky.jwcpas.net/quoting-cases/case/%QuotingCaseGroupingId%/handover/view
+      subject: ...
+      content: ...
+    - id: some-other-mail
+      type: mail
+      template: plain-notice                  # scalar shorthand: a name, no slots
+      subject: ...
+      content: ...
+```
+
+Rules: `template:` is legal only on `type: mail` (an `inApp` entry with it is a build error).
+`name` follows the `id:` grammar (`^[a-z][a-z0-9_-]*$`) and is a static literal — `%Placeholder%`
+is not substituted in it. Slot names match `^[a-z][a-z0-9_]*$` and may not be `content`, `title`,
+`year` or `brand_url` (the layout's built-in tokens). Slot values are `%Placeholder%` plain-text
+templates substituted verbatim like `subject` — never Markdown, never HTML; the receiver escapes
+them at insertion. Omitting `template:` means the receiver's default layout, so no existing YAML
+needs to change.
+
+On the wire the selection rides `fields` as `template` and `template.<slot>`, flattening to
+`mail.template` / `mail.template.<slot>` (see `RenderedNotification.payloadEntries` below); nothing
+is emitted when `template:` is absent. Which layout names exist and which slots each one has is
+owned by the receiving NotificationContext deployment, not by this framework — this generator
+validates only the shape. Full design:
+[`NotificationContext/docs/superpowers/specs/2026-09-23-mail-template-field-design.md`](https://github.com/Mendesky/NotificationContext/blob/main/docs/superpowers/specs/2026-09-23-mail-template-field-design.md).
+
 `NotificationGeneratorPlugin` cross-validates every `%Placeholder%` token against `variables.yaml`
 (an undefined placeholder is a build error; a defined-but-unreferenced variable is a stderr
 warning) and generates, per entry, a protocol you implement directly:
