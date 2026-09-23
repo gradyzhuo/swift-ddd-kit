@@ -109,6 +109,10 @@ package enum NotificationParseError: Error, Equatable, Sendable {
     case templateNotSupported(event: String, id: String)
     case invalidTemplateName(event: String, id: String, value: String)
     case invalidTemplate(event: String, id: String)
+    case templateMissingName(event: String, id: String)
+    case templateExtraField(event: String, id: String, field: String)
+    case invalidSlotName(event: String, id: String, slot: String)
+    case invalidSlotValue(event: String, id: String, slot: String)
 }
 
 extension NotificationParseError: CustomStringConvertible {
@@ -139,6 +143,14 @@ extension NotificationParseError: CustomStringConvertible {
             return "event '\(event)': entry '\(id)' has invalid template name '\(value)' (expected lowercase letters/digits/'-'/'_', starting with a lowercase letter)"
         case .invalidTemplate(let event, let id):
             return "event '\(event)': entry '\(id)' has an invalid `template` value (expected a name string, or a mapping with `name` and optional `slots`)"
+        case .templateMissingName(let event, let id):
+            return "event '\(event)': entry '\(id)' has a `template` mapping without a `name` key"
+        case .templateExtraField(let event, let id, let field):
+            return "event '\(event)': entry '\(id)' has unexpected key '\(field)' under `template` (expected `name` and optional `slots`)"
+        case .invalidSlotName(let event, let id, let slot):
+            return "event '\(event)': entry '\(id)' has invalid slot name '\(slot)' (expected lowercase letters/digits/'_', starting with a lowercase letter, and not one of content/title/year/brand_url)"
+        case .invalidSlotValue(let event, let id, let slot):
+            return "event '\(event)': entry '\(id)' slot '\(slot)' must be a string"
         }
     }
 }
@@ -163,6 +175,21 @@ package enum NotificationDefinitionParser {
     private static func isValidId(_ id: String) -> Bool {
         let range = NSRange(id.startIndex..., in: id)
         return idRegex.firstMatch(in: id, range: range) != nil
+    }
+
+    /// Slot-name grammar: a lowercase letter, then lowercase letters/digits/`_` — the token
+    /// appears inside `{{…}}` in an HTML layout and as the tail of a `mail.template.<slot>` key.
+    private static let slotRegex: NSRegularExpression = {
+        try! NSRegularExpression(pattern: "^[a-z][a-z0-9_]*$")
+    }()
+
+    /// Placeholders every receiving context layout already fills; a slot may not shadow them.
+    package static let reservedSlotNames: Set<String> = ["content", "title", "year", "brand_url"]
+
+    package static func isValidSlotName(_ name: String) -> Bool {
+        guard !reservedSlotNames.contains(name) else { return false }
+        let range = NSRange(name.startIndex..., in: name)
+        return slotRegex.firstMatch(in: name, range: range) != nil
     }
 
     package static func parse(yaml: String) throws -> [EventNotificationDefinition] {
@@ -256,12 +283,47 @@ package enum NotificationDefinitionParser {
     /// Returns nil when the key is absent.
     private static func parseTemplate(_ node: Node?, event: String, id: String) throws -> NotificationTemplate? {
         guard let node else { return nil }
-        if let name = node.string, node.mapping == nil, node.sequence == nil {
+
+        if let mapping = node.mapping {
+            for (keyNode, _) in mapping {
+                guard let key = keyNode.string else { continue }
+                guard key == "name" || key == "slots" else {
+                    throw NotificationParseError.templateExtraField(event: event, id: id, field: key)
+                }
+            }
+            guard let name = mapping["name"]?.string, !name.isEmpty else {
+                throw NotificationParseError.templateMissingName(event: event, id: id)
+            }
+            guard Self.isValidId(name) else {
+                throw NotificationParseError.invalidTemplateName(event: event, id: id, value: name)
+            }
+            var slots: [(name: String, template: String)] = []
+            if let slotsNode = mapping["slots"] {
+                guard let slotsMapping = slotsNode.mapping else {
+                    throw NotificationParseError.invalidTemplate(event: event, id: id)
+                }
+                for (slotKeyNode, slotValueNode) in slotsMapping {
+                    let slotName = slotKeyNode.string ?? ""
+                    guard Self.isValidSlotName(slotName) else {
+                        throw NotificationParseError.invalidSlotName(event: event, id: id, slot: slotName)
+                    }
+                    guard slotValueNode.mapping == nil, slotValueNode.sequence == nil,
+                          let value = slotValueNode.string else {
+                        throw NotificationParseError.invalidSlotValue(event: event, id: id, slot: slotName)
+                    }
+                    slots.append((name: slotName, template: value))
+                }
+            }
+            return NotificationTemplate(name: name, slots: slots)
+        }
+
+        if let name = node.string, node.sequence == nil {
             guard Self.isValidId(name) else {
                 throw NotificationParseError.invalidTemplateName(event: event, id: id, value: name)
             }
             return NotificationTemplate(name: name)
         }
+
         throw NotificationParseError.invalidTemplate(event: event, id: id)
     }
 }
