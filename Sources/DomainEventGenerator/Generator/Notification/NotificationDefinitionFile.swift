@@ -280,9 +280,15 @@ package enum NotificationDefinitionParser {
     }
 
     /// Parses a mail entry's `template:` node — a scalar name, or a `{name, slots}` mapping.
-    /// Returns nil when the key is absent.
+    /// Returns nil when the key is absent. A null node (`~`, `null`, or no value) is a scalar
+    /// as far as `Node.string` is concerned, so it is rejected explicitly before the scalar
+    /// branch below would otherwise coerce it to the literal text `"~"` or `""`.
     private static func parseTemplate(_ node: Node?, event: String, id: String) throws -> NotificationTemplate? {
         guard let node else { return nil }
+
+        if node.mapping == nil, node.sequence == nil, node.tag.rawValue == Tag.Name.null.rawValue {
+            throw NotificationParseError.invalidTemplate(event: event, id: id)
+        }
 
         if let mapping = node.mapping {
             for (keyNode, _) in mapping {
@@ -307,7 +313,11 @@ package enum NotificationDefinitionParser {
                     guard Self.isValidSlotName(slotName) else {
                         throw NotificationParseError.invalidSlotName(event: event, id: id, slot: slotName)
                     }
+                    // A non-null scalar is coerced to its text, matching `subject`/`content`;
+                    // a null value (`~`, `null`, or no value) is rejected rather than silently
+                    // becoming the literal text `"~"` or `""`.
                     guard slotValueNode.mapping == nil, slotValueNode.sequence == nil,
+                          slotValueNode.tag.rawValue != Tag.Name.null.rawValue,
                           let value = slotValueNode.string else {
                         throw NotificationParseError.invalidSlotValue(event: event, id: id, slot: slotName)
                     }

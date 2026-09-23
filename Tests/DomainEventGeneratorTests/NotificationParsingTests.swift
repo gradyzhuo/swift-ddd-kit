@@ -544,6 +544,81 @@ struct NotificationParsingTests {
             _ = try NotificationDefinitionParser.parse(yaml: yaml)
         }
     }
+
+    @Test("a null slot value (~) throws invalidSlotValue")
+    func nullSlotValueThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: some-mail
+              type: mail
+              template:
+                name: one-button
+                slots:
+                  action_label: ~
+              subject: s
+              content: c
+        """
+        #expect(throws: NotificationParseError.invalidSlotValue(event: "SomeEvent", id: "some-mail", slot: "action_label")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("an empty slot value throws invalidSlotValue")
+    func emptySlotValueThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: some-mail
+              type: mail
+              template:
+                name: one-button
+                slots:
+                  action_url:
+              subject: s
+              content: c
+        """
+        #expect(throws: NotificationParseError.invalidSlotValue(event: "SomeEvent", id: "some-mail", slot: "action_url")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("a numeric or boolean slot value is accepted as its text, like subject")
+    func scalarSlotValuesAreCoercedToText() throws {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: some-mail
+              type: mail
+              template:
+                name: one-button
+                slots:
+                  count: 123
+                  flag: true
+              subject: s
+              content: c
+        """
+        let entry = try #require(try NotificationDefinitionParser.parse(yaml: yaml).first?.notifications.first)
+        #expect(entry.template?.slots.map(\.template) == ["123", "true"])
+    }
+
+    @Test("template: with a null value throws invalidTemplate")
+    func nullTemplateThrows() {
+        for value in ["~", ""] {
+            let yaml = """
+            SomeEvent:
+              notifications:
+                - id: some-mail
+                  type: mail
+                  template: \(value)
+                  subject: s
+                  content: c
+            """
+            #expect(throws: NotificationParseError.invalidTemplate(event: "SomeEvent", id: "some-mail")) {
+                _ = try NotificationDefinitionParser.parse(yaml: yaml)
+            }
+        }
+    }
 }
 
 @Suite("Notification YAML render: parsing")
