@@ -26,9 +26,9 @@ extension NotificationRenderFormat {
     }
 }
 
-/// A mail entry's optional layout selection (`template:`): the NC-side layout `name` and the
+/// A mail entry's optional layout selection (`template:`): the receiving context's layout `name` and the
 /// ordered `slots` whose values are `%Placeholder%` plain-text templates. See spec
-/// docs/superpowers/specs/2026-09-23-mail-template-field-design.md §2 (in NotificationContext).
+/// docs/superpowers/specs/2026-09-23-mail-template-field-design.md §2.
 package struct NotificationTemplate: Equatable {
     package let name: String
     package let slots: [(name: String, template: String)]
