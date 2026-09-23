@@ -26,6 +26,25 @@ extension NotificationRenderFormat {
     }
 }
 
+/// A mail entry's optional layout selection (`template:`): the NC-side layout `name` and the
+/// ordered `slots` whose values are `%Placeholder%` plain-text templates. See spec
+/// docs/superpowers/specs/2026-09-23-mail-template-field-design.md §2 (in NotificationContext).
+package struct NotificationTemplate: Equatable {
+    package let name: String
+    package let slots: [(name: String, template: String)]
+
+    package init(name: String, slots: [(name: String, template: String)] = []) {
+        self.name = name
+        self.slots = slots
+    }
+
+    package static func == (lhs: NotificationTemplate, rhs: NotificationTemplate) -> Bool {
+        lhs.name == rhs.name
+            && lhs.slots.count == rhs.slots.count
+            && zip(lhs.slots, rhs.slots).allSatisfy { $0.name == $1.name && $0.template == $1.template }
+    }
+}
+
 /// One channel entry (`mail`/`inApp`) for a single event, with its fields in the type's
 /// canonical schema order (`mail`: subject, content; `inApp`: title, content). `id` is this
 /// entry's own identifier, unique among the entries of the same event — used to derive the
@@ -40,16 +59,19 @@ package struct NotificationEntry: Equatable {
     package let render: NotificationRenderFormat
     package let recipients: [String]
     package let fields: [(name: String, template: String)]
+    package let template: NotificationTemplate?
 
     package init(
         id: String, type: String, render: NotificationRenderFormat,
-        recipients: [String] = [], fields: [(name: String, template: String)]
+        recipients: [String] = [], fields: [(name: String, template: String)],
+        template: NotificationTemplate? = nil
     ) {
         self.id = id
         self.type = type
         self.render = render
         self.recipients = recipients
         self.fields = fields
+        self.template = template
     }
 
     package static func == (lhs: NotificationEntry, rhs: NotificationEntry) -> Bool {
@@ -59,6 +81,7 @@ package struct NotificationEntry: Equatable {
             && lhs.recipients == rhs.recipients
             && lhs.fields.count == rhs.fields.count
             && zip(lhs.fields, rhs.fields).allSatisfy { $0.name == $1.name && $0.template == $1.template }
+            && lhs.template == rhs.template
     }
 }
 
@@ -83,6 +106,9 @@ package enum NotificationParseError: Error, Equatable, Sendable {
     case invalidId(event: String, id: String)
     case duplicateId(event: String, id: String)
     case emptyNotifications(event: String)
+    case templateNotSupported(event: String, id: String)
+    case invalidTemplateName(event: String, id: String, value: String)
+    case invalidTemplate(event: String, id: String)
 }
 
 extension NotificationParseError: CustomStringConvertible {
@@ -107,6 +133,12 @@ extension NotificationParseError: CustomStringConvertible {
             return "event '\(event)': id '\(id)' is declared more than once"
         case .emptyNotifications(let event):
             return "event '\(event)': `notifications` must not be empty"
+        case .templateNotSupported(let event, let id):
+            return "event '\(event)': entry '\(id)' declares `template`, which is only supported on type 'mail'"
+        case .invalidTemplateName(let event, let id, let value):
+            return "event '\(event)': entry '\(id)' has invalid template name '\(value)' (expected lowercase letters/digits/'-'/'_', starting with a lowercase letter)"
+        case .invalidTemplate(let event, let id):
+            return "event '\(event)': entry '\(id)' has an invalid `template` value (expected a name string, or a mapping with `name` and optional `slots`)"
         }
     }
 }
@@ -171,7 +203,11 @@ package enum NotificationDefinitionParser {
                     throw NotificationParseError.duplicateId(event: eventName, id: id)
                 }
 
-                let allowedKeys = Set(schemaFields).union(["type", "render", "id", "recipients"])
+                var allowedKeys = Set(schemaFields).union(["type", "render", "id", "recipients"])
+                if type == "mail" { allowedKeys.insert("template") }
+                if type != "mail", entryMapping?["template"] != nil {
+                    throw NotificationParseError.templateNotSupported(event: eventName, id: id)
+                }
                 if let entryMapping {
                     for (fieldKeyNode, _) in entryMapping {
                         guard let fieldKey = fieldKeyNode.string else { continue }
@@ -204,13 +240,29 @@ package enum NotificationDefinitionParser {
                     try IdentifierValidation.validate(recipient, kind: .recipient)
                 }
 
-                notifications.append(NotificationEntry(id: id, type: type, render: render, recipients: recipients, fields: fields))
+                let template = try Self.parseTemplate(entryMapping?["template"], event: eventName, id: id)
+
+                notifications.append(NotificationEntry(
+                    id: id, type: type, render: render, recipients: recipients, fields: fields, template: template))
             }
 
             definitions.append(EventNotificationDefinition(eventName: eventName, notifications: notifications))
         }
 
         return definitions
+    }
+
+    /// Parses a mail entry's `template:` node — a scalar name, or a `{name, slots}` mapping.
+    /// Returns nil when the key is absent.
+    private static func parseTemplate(_ node: Node?, event: String, id: String) throws -> NotificationTemplate? {
+        guard let node else { return nil }
+        if let name = node.string, node.mapping == nil, node.sequence == nil {
+            guard Self.isValidId(name) else {
+                throw NotificationParseError.invalidTemplateName(event: event, id: id, value: name)
+            }
+            return NotificationTemplate(name: name)
+        }
+        throw NotificationParseError.invalidTemplate(event: event, id: id)
     }
 }
 

@@ -322,6 +322,93 @@ struct NotificationParsingTests {
             _ = try NotificationDefinitionParser.parse(yaml: yaml)
         }
     }
+
+    @Test("mail entry accepts a scalar template: name with no slots")
+    func mailScalarTemplateParses() throws {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: some-mail
+              type: mail
+              template: plain-notice
+              subject: s
+              content: c
+        """
+        let definitions = try NotificationDefinitionParser.parse(yaml: yaml)
+        let entry = try #require(definitions.first?.notifications.first)
+        let template = try #require(entry.template)
+        #expect(template.name == "plain-notice")
+        #expect(template.slots.isEmpty)
+    }
+
+    @Test("template: default is legal and parses like any other name")
+    func mailTemplateDefaultParses() throws {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: some-mail
+              type: mail
+              template: default
+              subject: s
+              content: c
+        """
+        let entry = try #require(try NotificationDefinitionParser.parse(yaml: yaml).first?.notifications.first)
+        #expect(entry.template?.name == "default")
+    }
+
+    @Test("template: is nil when the key is absent")
+    func templateDefaultsToNil() throws {
+        let entry = try #require(try NotificationDefinitionParser.parse(yaml: Self.specSampleYAML).first?.notifications.first)
+        #expect(entry.template == nil)
+    }
+
+    @Test("inApp entry with template: throws templateNotSupported")
+    func inAppTemplateThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: some-in-app
+              type: inApp
+              template: plain-notice
+              title: t
+              content: c
+        """
+        #expect(throws: NotificationParseError.templateNotSupported(event: "SomeEvent", id: "some-in-app")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("template name failing the id grammar throws invalidTemplateName")
+    func invalidTemplateNameThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: some-mail
+              type: mail
+              template: ../Evil
+              subject: s
+              content: c
+        """
+        #expect(throws: NotificationParseError.invalidTemplateName(event: "SomeEvent", id: "some-mail", value: "../Evil")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
+
+    @Test("template: as a sequence throws invalidTemplate")
+    func templateSequenceThrows() {
+        let yaml = """
+        SomeEvent:
+          notifications:
+            - id: some-mail
+              type: mail
+              template: [a, b]
+              subject: s
+              content: c
+        """
+        #expect(throws: NotificationParseError.invalidTemplate(event: "SomeEvent", id: "some-mail")) {
+            _ = try NotificationDefinitionParser.parse(yaml: yaml)
+        }
+    }
 }
 
 @Suite("Notification YAML render: parsing")
