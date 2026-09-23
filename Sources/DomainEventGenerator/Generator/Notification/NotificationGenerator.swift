@@ -50,8 +50,8 @@ package struct NotificationGenerator {
         var referencedPlaceholders: Set<String> = []
         for event in events {
             for entry in event.notifications {
-                for field in entry.fields {
-                    referencedPlaceholders.formUnion(PlaceholderExtractor.placeholders(in: field.template))
+                for template in Self.placeholderTemplates(of: entry) {
+                    referencedPlaceholders.formUnion(PlaceholderExtractor.placeholders(in: template))
                 }
             }
         }
@@ -108,8 +108,8 @@ package struct NotificationGenerator {
         // generated code is alphabetical for determinism (see sortedPlaceholders below).
         var orderedPlaceholders: [String] = []
         var seenPlaceholders: Set<String> = []
-        for field in entry.fields {
-            for placeholder in PlaceholderExtractor.placeholders(in: field.template) {
+        for template in Self.placeholderTemplates(of: entry) {
+            for placeholder in PlaceholderExtractor.placeholders(in: template) {
                 if seenPlaceholders.insert(placeholder).inserted {
                     orderedPlaceholders.append(placeholder)
                 }
@@ -161,6 +161,11 @@ package struct NotificationGenerator {
             properties: sortedProperties,
             placeholders: sortedPlaceholders
         )
+    }
+
+    /// Every `%Placeholder%` template this entry owns: its schema fields plus its template slots.
+    private static func placeholderTemplates(of entry: NotificationEntry) -> [String] {
+        entry.fields.map(\.template) + (entry.template?.slots.map(\.template) ?? [])
     }
 
     /// `test-abc-mail` -> `Test_Abc_Mail`: split on `-`/`_`, uppercase each segment's first
@@ -235,9 +240,9 @@ package struct NotificationGenerator {
         lines.append("            type: NotificationType(rawValue: \"\(entry.type)\")!,")
         lines.append("            recipients: try await self.recipients(),")
         lines.append("            fields: [")
+        let valuesArgument = placeholders.isEmpty ? "[:]" : "values"
         for field in entry.fields {
             let escapedTemplate = Self.escapeSwiftStringLiteral(field.template)
-            let valuesArgument = placeholders.isEmpty ? "[:]" : "values"
             // `content` fields' handling depends on the entry's resolved `render` value — see
             // docs/superpowers/specs/2026-09-09-markdown-notification-content-design.md §3-4 and
             // docs/superpowers/specs/2026-09-15-inapp-render-format-design.md §3.
@@ -256,6 +261,19 @@ package struct NotificationGenerator {
             // (mail's render choice is fully resolved into HTML upstream, so mail never gets
             // this field).
             lines.append("                \"render\": \"\(entry.render.rawValue)\",")
+        }
+        if entry.type == "mail", let template = entry.template {
+            // Wire model: `mail.template` selects a layout by name (a baked literal, never
+            // substituted); `mail.template.<slot>` carries that layout's plain-text slot values,
+            // substituted verbatim — never Markdown-rendered, the receiving context escapes them
+            // at insertion.
+            lines.append("                \"template\": \"\(Self.escapeSwiftStringLiteral(template.name))\",")
+            for slot in template.slots {
+                let escapedSlot = Self.escapeSwiftStringLiteral(slot.template)
+                lines.append(
+                    "                \"template.\(slot.name)\": try PlaceholderSubstitution.substitute(\"\(escapedSlot)\", values: \(valuesArgument)),"
+                )
+            }
         }
         lines.append("            ])")
         lines.append("    }")

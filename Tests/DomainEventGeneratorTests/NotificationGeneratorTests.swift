@@ -438,4 +438,105 @@ struct NotificationGeneratorTests {
         // ...but no implementation body is emitted anywhere in the extension.
         #expect(!output.contains("func recipients() async throws -> [String] {"))
     }
+
+    static let caseIdVariable = VariableDefinition(
+        name: "CaseId", placeholder: "CaseId", inputs: [(name: "quotingCaseGroupingId", type: "String")])
+
+    static let templatedMailEvent = EventNotificationDefinition(
+        eventName: "Templated",
+        notifications: [
+            NotificationEntry(
+                id: "templated-mail", type: "mail", render: .markdown,
+                fields: [
+                    (name: "subject", template: "案件更新"),
+                    (name: "content", template: "內文"),
+                ],
+                template: NotificationTemplate(
+                    name: "one-button",
+                    slots: [
+                        (name: "action_label", template: "前往查看"),
+                        (name: "action_url", template: "https://example.test/cases/%CaseId%"),
+                    ])),
+        ])
+
+    @Test("a mail entry with template: emits the template name and one field per slot")
+    func templatedMailEmitsTemplateFields() throws {
+        let generator = NotificationGenerator(
+            protocolName: "P", events: [Self.templatedMailEvent], variables: [Self.caseIdVariable])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains("                \"template\": \"one-button\","))
+        #expect(output.contains("                \"template.action_label\": try PlaceholderSubstitution.substitute(\"前往查看\", values: values),"))
+        #expect(output.contains("                \"template.action_url\": try PlaceholderSubstitution.substitute(\"https://example.test/cases/%CaseId%\", values: values),"))
+        #expect(!output.contains("MarkdownRendering.html(from: try PlaceholderSubstitution.substitute(\"https://"))
+    }
+
+    @Test("a placeholder used only in a slot still gets its __value(of:) fetch and known-field property")
+    func slotOnlyPlaceholderIsResolved() throws {
+        let generator = NotificationGenerator(
+            protocolName: "P", events: [Self.templatedMailEvent], variables: [Self.caseIdVariable])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains("        let caseId = try await variables.__value(of: \"CaseId\", inputs: inputs)"))
+        #expect(output.contains("    var quotingCaseGroupingId: String { get }"))
+        #expect(output.contains("            \"CaseId\": caseId,"))
+    }
+
+    @Test("a variable referenced only by a slot is not reported as unreferenced")
+    func slotOnlyVariableIsReferenced() {
+        let generator = NotificationGenerator(
+            protocolName: "P", events: [Self.templatedMailEvent], variables: [Self.caseIdVariable])
+        #expect(generator.unreferencedVariables.isEmpty)
+    }
+
+    @Test("an undefined placeholder inside a slot throws undefinedPlaceholder")
+    func undefinedSlotPlaceholderThrows() {
+        let generator = NotificationGenerator(
+            protocolName: "P", events: [Self.templatedMailEvent], variables: [])
+        #expect(throws: NotificationGenerateError.undefinedPlaceholder(event: "Templated", placeholder: "CaseId")) {
+            _ = try generator.render(accessLevel: .internal)
+        }
+    }
+
+    @Test("a templated entry with no placeholders anywhere substitutes slots against [:]")
+    func templatedEntryWithoutPlaceholdersUsesEmptyValues() throws {
+        let event = EventNotificationDefinition(
+            eventName: "Static",
+            notifications: [
+                NotificationEntry(
+                    id: "static-mail", type: "mail", render: .plaintext,
+                    fields: [(name: "subject", template: "s"), (name: "content", template: "c")],
+                    template: NotificationTemplate(name: "plain-notice", slots: [(name: "note", template: "fixed")])),
+            ])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+        #expect(output.contains("                \"template.note\": try PlaceholderSubstitution.substitute(\"fixed\", values: [:]),"))
+        #expect(!output.contains("let values"))
+    }
+
+    @Test("a slot template with quotes and backslashes emits an escaped literal")
+    func slotTemplateIsEscaped() throws {
+        let event = EventNotificationDefinition(
+            eventName: "Esc",
+            notifications: [
+                NotificationEntry(
+                    id: "esc-mail", type: "mail", render: .plaintext,
+                    fields: [(name: "subject", template: "s"), (name: "content", template: "c")],
+                    template: NotificationTemplate(name: "plain-notice", slots: [(name: "note", template: "say \"hi\" \\ bye")])),
+            ])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+        #expect(output.contains("\"template.note\": try PlaceholderSubstitution.substitute(\"say \\\"hi\\\" \\\\ bye\", values: [:]),"))
+    }
+
+    @Test("a mail entry without template: emits no template fields")
+    func untemplatedMailEmitsNoTemplateFields() throws {
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables",
+            events: [Self.collaboratorAddedEvent],
+            variables: Self.variables)
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+        #expect(!output.contains("\"template\""))
+        #expect(!output.contains("\"template."))
+    }
 }
