@@ -397,3 +397,29 @@ Update hand-written rules accordingly:
 A rule that now produces one event per notification channel must give each a stable-across-retries,
 mutually-distinct `eventId` (e.g. `"\(record.eventId)#mail"`, `"\(record.eventId)#inApp"`) —
 downstream consumers dedup on `eventId`, and a retry re-publishes every event `translate` returns.
+
+## 2026-09 — notification.yaml mail template selection (`template:`)
+
+Purely additive — no existing `notification.yaml` needs editing. Mail entries may now declare an
+optional `template:` key (a layout name, or `{ name, slots }`) that the receiving
+NotificationContext uses to pick an HTML layout and fill its slots:
+
+```yaml
+CollaboratorAdded:
+  notifications:
+    - id: collaborator-added-mail
+      type: mail
+      template:
+        name: one-button
+        slots:
+          action_label: 前往查看
+          action_url: https://example.test/cases/%QuotingCaseGroupingId%
+      subject: ...
+      content: ...
+```
+
+Generated `render()` gains `"template"` and `"template.<slot>"` entries in `fields`
+(`mail.template`, `mail.template.<slot>` on the wire). `NotificationEntry.init` gains a defaulted
+trailing `template:` parameter; hand-built `NotificationEntry` fixtures keep compiling. New parse
+errors: `templateNotSupported` (on `inApp`), `invalidTemplateName`, `invalidTemplate`,
+`templateMissingName`, `templateExtraField`, `invalidSlotName`, `invalidSlotValue`.

@@ -2,6 +2,11 @@ CollaboratorAdded:
   notifications:
     - id: collaborator-added-mail
       type: mail
+      template:
+        name: one-button
+        slots:
+          action_label: 前往查看
+          action_url: https://example.test/cases/%QuotingCaseGroupName%
       subject: 你已被加入案件「%QuotingCaseGroupName%」
       content: |
         你以「%QuotingCaseGroupCollaboratorRole%」角色被加入案件「%QuotingCaseGroupName%」，%CollaboratorDescription%。

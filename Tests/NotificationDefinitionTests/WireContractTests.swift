@@ -24,6 +24,19 @@ struct RenderedNotificationPayloadEntriesTests {
             type: .inApp, recipients: [], fields: ["title": "Hi", "content": "Body", "render": "plaintext"])
         #expect(notification.payloadEntries["inApp.render"] == "plaintext")
     }
+
+    @Test("flattens a mail notification's template and slot fields to \"mail.template*\" keys")
+    func flattensMailTemplateFields() {
+        let notification = RenderedNotification(
+            type: .mail, recipients: [],
+            fields: [
+                "subject": "S", "content": "C",
+                "template": "one-button",
+                "template.action_url": "https://example.test/cases/42",
+            ])
+        #expect(notification.payloadEntries["mail.template"] == "one-button")
+        #expect(notification.payloadEntries["mail.template.action_url"] == "https://example.test/cases/42")
+    }
 }
 
 @Suite("RenderedNotification.recipients")
@@ -60,5 +73,12 @@ struct PayloadKeyParseTests {
     @Test("returns nil when the field half is empty")
     func returnsNilForEmptyField() {
         #expect(PayloadKey.parse("mail.") == nil)
+    }
+
+    @Test("splits on the first dot only, so a slot key keeps its dotted field name")
+    func parsesDottedSlotField() {
+        let parsed = PayloadKey.parse("mail.template.action_url")
+        #expect(parsed?.type == .mail)
+        #expect(parsed?.field == "template.action_url")
     }
 }
