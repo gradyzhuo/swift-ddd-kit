@@ -56,6 +56,16 @@ struct DemoRenderTests {
         #expect(rendered.fields["render"] == nil)
     }
 
+    @Test func mailTemplateFieldsAreRenderedAndExposedUnderTheirWireKeys() async throws {
+        let notification = CollaboratorAddedMailNotification(event: makeEvent())
+        let rendered = try await notification.render(variables: DemoVariables())
+
+        #expect(rendered.fields["template"] == "one-button")
+        #expect(rendered.fields["template.action_label"] == "前往查看")
+        #expect(rendered.fields["template.action_url"] == "https://example.test/cases/6666")
+        #expect(rendered.payloadEntries["mail.template.action_url"] == rendered.fields["template.action_url"])
+    }
+
     @Test func inAppOverriddenRenderIsSelectedOverDefault() async throws {
         // Proves render(variables:) being a protocol requirement (not only an extension method)
         // means this conformer's own implementation is what actually runs. The call is routed
