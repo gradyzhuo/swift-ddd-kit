@@ -82,3 +82,70 @@ struct PayloadKeyParseTests {
         #expect(parsed?.field == "template.action_url")
     }
 }
+
+@Suite("RenderedNotification entry id and variables")
+struct RenderedNotificationEntryAndVariablesTests {
+
+    @Test("entryId flattens to \"{type}.entry\" for mail and inApp")
+    func entryIdFlattens() {
+        let mail = RenderedNotification(
+            type: .mail, entryId: "assigned-member-added-mail-for-members", recipients: [],
+            fields: ["subject": "S", "content": "C"])
+        let inApp = RenderedNotification(
+            type: .inApp, entryId: "assigned-member-added-in-app-for-members", recipients: [],
+            fields: ["title": "T", "content": "C"])
+        #expect(mail.payloadEntries["mail.entry"] == "assigned-member-added-mail-for-members")
+        #expect(inApp.payloadEntries["inApp.entry"] == "assigned-member-added-in-app-for-members")
+    }
+
+    @Test("each variable flattens to \"{type}.var.{Placeholder}\"")
+    func variablesFlatten() {
+        let notification = RenderedNotification(
+            type: .mail, entryId: "e", recipients: [],
+            fields: ["subject": "S", "content": "C"],
+            variables: ["AssignedDepartment": "審計一組", "QuotingCaseGroupName": "6666"])
+        #expect(notification.payloadEntries == [
+            "mail.subject": "S",
+            "mail.content": "C",
+            "mail.entry": "e",
+            "mail.var.AssignedDepartment": "審計一組",
+            "mail.var.QuotingCaseGroupName": "6666",
+        ])
+    }
+
+    @Test("defaults keep the legacy payload exactly: no entry key, no var keys")
+    func defaultsKeepLegacyPayload() {
+        let notification = RenderedNotification(
+            type: .inApp, recipients: ["acct-1"], fields: ["title": "T", "content": "C", "render": "plaintext"])
+        #expect(notification.entryId == nil)
+        #expect(notification.variables == [:])
+        #expect(notification.payloadEntries == [
+            "inApp.title": "T", "inApp.content": "C", "inApp.render": "plaintext",
+        ])
+    }
+
+    @Test("a variable resolving to an empty string is still emitted")
+    func emptyVariableValueIsEmitted() {
+        let notification = RenderedNotification(
+            type: .mail, entryId: "e", recipients: [],
+            fields: ["subject": "S", "content": "C"], variables: ["CollaboratorDescription": ""])
+        #expect(notification.payloadEntries["mail.var.CollaboratorDescription"] == "")
+    }
+
+    @Test("a fields key colliding with a generated key wins, and nothing traps")
+    func fieldsWinOnKeyCollision() {
+        let notification = RenderedNotification(
+            type: .mail, entryId: "from-entry-id", recipients: [],
+            fields: ["subject": "S", "content": "C", "entry": "from-fields", "var.X": "from-fields"],
+            variables: ["X": "from-variables"])
+        #expect(notification.payloadEntries["mail.entry"] == "from-fields")
+        #expect(notification.payloadEntries["mail.var.X"] == "from-fields")
+    }
+
+    @Test("PayloadKey.parse keeps the var. prefix on the field half")
+    func parseKeepsVarPrefix() {
+        let parsed = PayloadKey.parse("mail.var.AssignedDepartment")
+        #expect(parsed?.type == .mail)
+        #expect(parsed?.field == "var.AssignedDepartment")
+    }
+}

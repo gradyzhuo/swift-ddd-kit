@@ -8,23 +8,54 @@ public enum NotificationType: String, Codable, Sendable, CaseIterable {
 
 /// One rendered notification for a single channel, ready to be flattened into
 /// the Published Language event's `payload` (see spec §6).
+///
+/// `entryId` is the `notification.yaml` entry's `id`, and `variables` the placeholder values the
+/// generated default `render()` resolved for that entry. Both exist so a receiving context can
+/// match rules against "which notification" and "with which values" without querying back
+/// upstream (NotificationContext mail Cc rules spec §3). A hand-written `render()` that omits
+/// them gets `nil` / `[:]`, and the payload carries no `.entry` / `.var.` keys.
 public struct RenderedNotification: Equatable, Sendable {
     public let type: NotificationType
+    public let entryId: String?
     public let recipients: [String]
     public let fields: [String: String]
+    public let variables: [String: String]
 
-    public init(type: NotificationType, recipients: [String], fields: [String: String]) {
+    public init(
+        type: NotificationType,
+        entryId: String? = nil,
+        recipients: [String],
+        fields: [String: String],
+        variables: [String: String] = [:]
+    ) {
         self.type = type
+        self.entryId = entryId
         self.recipients = recipients
         self.fields = fields
+        self.variables = variables
     }
 }
 
 extension RenderedNotification {
-    /// Flattens `fields` to the cross-context Published Language payload key convention:
-    /// `"{type}.{field}"` (e.g. `["mail.subject": ..., "mail.content": ...]`). See spec §6.
+    /// Flattens this notification to the cross-context Published Language payload key convention:
+    /// - every `fields` entry → `"{type}.{field}"` (e.g. `"mail.subject"`), see spec §6;
+    /// - `entryId`, when non-nil → `"{type}.entry"`;
+    /// - every `variables` entry → `"{type}.var.{Placeholder}"`.
+    ///
+    /// On a key collision the `fields`-derived value wins; this never traps.
     public var payloadEntries: [String: String] {
-        Dictionary(uniqueKeysWithValues: fields.map { field, value in ("\(type.rawValue).\(field)", value) })
+        let prefix = type.rawValue
+        var entries: [String: String] = [:]
+        for (name, value) in variables {
+            entries["\(prefix).var.\(name)"] = value
+        }
+        if let entryId {
+            entries["\(prefix).entry"] = entryId
+        }
+        for (field, value) in fields {
+            entries["\(prefix).\(field)"] = value
+        }
+        return entries
     }
 }
 
