@@ -59,8 +59,11 @@ extension RenderedNotification {
     }
 }
 
-/// Parses/builds the `"{type}.{field}"` Published Language payload key convention (see spec §6),
-/// the inverse of ``RenderedNotification/payloadEntries``.
+/// Parses/builds the `"{type}.{field}"` Published Language payload key convention (see spec §6).
+///
+/// The field half `entry` and every field half starting with `var.` are reserved: they carry
+/// ``RenderedNotification/entryId`` and ``RenderedNotification/variables``, not `fields` entries.
+/// A consumer rebuilding `fields` from parsed keys must skip them.
 public enum PayloadKey {
     /// Parses `"{type}.{field}"` back into its type and field.
     ///
