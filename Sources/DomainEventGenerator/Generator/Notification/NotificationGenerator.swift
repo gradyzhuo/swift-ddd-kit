@@ -238,6 +238,11 @@ package struct NotificationGenerator {
 
         lines.append("        return RenderedNotification(")
         lines.append("            type: NotificationType(rawValue: \"\(entry.type)\")!,")
+        // Wire model: the entry id and this entry's resolved placeholder values ride the payload
+        // as `{type}.entry` / `{type}.var.<Placeholder>` so a receiver can match rules against
+        // them (NotificationContext mail Cc rules spec §3). `entry.id` already passed the
+        // `^[a-z][a-z0-9_-]*$` grammar at parse time, so it is safe inside a string literal.
+        lines.append("            entryId: \"\(entry.id)\",")
         lines.append("            recipients: try await self.recipients(),")
         lines.append("            fields: [")
         let valuesArgument = placeholders.isEmpty ? "[:]" : "values"
@@ -275,7 +280,8 @@ package struct NotificationGenerator {
                 )
             }
         }
-        lines.append("            ])")
+        lines.append("            ],")
+        lines.append("            variables: \(valuesArgument))")
         lines.append("    }")
 
         // Optional default recipients() implementation — only when the entry declared
