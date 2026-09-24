@@ -539,4 +539,55 @@ struct NotificationGeneratorTests {
         #expect(!output.contains("\"template\""))
         #expect(!output.contains("\"template."))
     }
+
+    @Test("default render() passes the entry id literal as entryId")
+    func defaultRenderPassesEntryId() throws {
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables",
+            events: [Self.collaboratorAddedEvent],
+            variables: Self.variables)
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains(
+            "            type: NotificationType(rawValue: \"mail\")!,\n            entryId: \"collaborator-added-mail\",\n            recipients: try await self.recipients(),"))
+        #expect(output.contains(
+            "            type: NotificationType(rawValue: \"inApp\")!,\n            entryId: \"collaborator-added-in-app\",\n            recipients: try await self.recipients(),"))
+    }
+
+    @Test("default render() passes the resolved values dictionary as variables")
+    func defaultRenderPassesValuesAsVariables() throws {
+        let generator = NotificationGenerator(
+            protocolName: "OpportunityNotificationVariables",
+            events: [Self.collaboratorAddedEvent],
+            variables: Self.variables)
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains("            ],\n            variables: values)"))
+        #expect(!output.contains("            ])\n    }"))
+    }
+
+    @Test("an entry without placeholders passes variables: [:] and still passes entryId")
+    func entryWithoutPlaceholdersPassesEmptyVariables() throws {
+        let event = EventNotificationDefinition(
+            eventName: "Foo",
+            notifications: [
+                NotificationEntry(id: "static-mail", type: "mail", render: .plaintext, fields: [(name: "subject", template: "hi"), (name: "content", template: "static text")]),
+            ])
+        let generator = NotificationGenerator(protocolName: "P", events: [event], variables: [])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains("            entryId: \"static-mail\","))
+        #expect(output.contains("            ],\n            variables: [:])"))
+    }
+
+    @Test("a placeholder used only in a template slot is part of the values passed as variables")
+    func slotOnlyPlaceholderIsPassedAsVariable() throws {
+        let generator = NotificationGenerator(
+            protocolName: "P", events: [Self.templatedMailEvent], variables: [Self.caseIdVariable])
+        let output = try generator.render(accessLevel: .internal).joined(separator: "\n")
+
+        #expect(output.contains("        let values: [String: String] = [\n            \"CaseId\": caseId,\n        ]"))
+        #expect(output.contains("            entryId: \"templated-mail\","))
+        #expect(output.contains("            ],\n            variables: values)"))
+    }
 }

@@ -811,6 +811,27 @@ owned by the receiving NotificationContext deployment, not by this framework —
 validates only the shape. Full design:
 [`NotificationContext/docs/superpowers/specs/2026-09-23-mail-template-field-design.md`](https://github.com/Mendesky/NotificationContext/blob/main/docs/superpowers/specs/2026-09-23-mail-template-field-design.md).
 
+Every notification rendered by a generated default `render()` also carries two things a receiver
+can match rules against without querying back upstream: the entry's `id` and the placeholder
+values resolved for that entry. They ride `RenderedNotification.entryId` / `.variables` and flatten
+to `{type}.entry` and `{type}.var.<Placeholder>`:
+
+```text
+mail.entry                         = collaborator-added-mail
+mail.var.QuotingCaseGroupName      = 6666
+mail.var.CollaboratorDescription   = 歡迎加入團隊
+```
+
+Values are the raw resolved values (never Markdown-escaped or HTML-rendered), and only this
+entry's own placeholders (fields plus template slots) are included. A hand-written `render()` that
+builds `RenderedNotification(type:recipients:fields:)` without them emits neither key family — both
+initializer parameters default. If a `fields` key ever collides with one of these keys, the
+`fields` value wins. The `.entry` and `.var.*` keys are only coherent within one
+`RenderedNotification`: a producer that merges the payloads of two same-type entries into one
+event can end up with one entry's `entry` alongside the other entry's variables, so don't merge
+them. Full design:
+[`NotificationContext/docs/superpowers/specs/2026-09-23-mail-cc-rules-design.md`](https://github.com/Mendesky/NotificationContext/blob/main/docs/superpowers/specs/2026-09-23-mail-cc-rules-design.md) §3.
+
 `NotificationGeneratorPlugin` cross-validates every `%Placeholder%` token against `variables.yaml`
 (an undefined placeholder is a build error; a defined-but-unreferenced variable is a stderr
 warning) and generates, per entry, a protocol you implement directly:

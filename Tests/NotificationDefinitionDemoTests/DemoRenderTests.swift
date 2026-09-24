@@ -66,6 +66,35 @@ struct DemoRenderTests {
         #expect(rendered.payloadEntries["mail.template.action_url"] == rendered.fields["template.action_url"])
     }
 
+    @Test func generatedRenderCarriesEntryIdAndResolvedVariablesOntoThePayload() async throws {
+        let notification = CollaboratorAddedMailNotification(event: makeEvent())
+        let rendered = try await notification.render(variables: DemoVariables())
+
+        #expect(rendered.entryId == "collaborator-added-mail")
+        #expect(rendered.variables == [
+            "QuotingCaseGroupName": "6666",
+            "QuotingCaseGroupCollaboratorRole": "編輯者",
+            "CollaboratorDescription": "歡迎加入團隊",
+        ])
+        let payload = rendered.payloadEntries
+        #expect(payload["mail.entry"] == "collaborator-added-mail")
+        #expect(payload["mail.var.QuotingCaseGroupName"] == "6666")
+        #expect(payload["mail.var.QuotingCaseGroupCollaboratorRole"] == "編輯者")
+        #expect(payload["mail.var.CollaboratorDescription"] == "歡迎加入團隊")
+        // Pre-existing keys are untouched.
+        #expect(payload["mail.subject"] == "你已被加入案件「6666」")
+        #expect(payload["mail.template"] == "one-button")
+    }
+
+    @Test func overriddenRenderCarriesNoEntryOrVariables() async throws {
+        let notification = CollaboratorAddedInAppNotification(event: makeEvent())
+        let rendered = try await renderThroughProtocol(notification, variables: DemoVariables())
+
+        #expect(rendered.entryId == nil)
+        #expect(rendered.variables == [:])
+        #expect(rendered.payloadEntries.keys.sorted() == ["inApp.content", "inApp.render", "inApp.title"])
+    }
+
     @Test func inAppOverriddenRenderIsSelectedOverDefault() async throws {
         // Proves render(variables:) being a protocol requirement (not only an extension method)
         // means this conformer's own implementation is what actually runs. The call is routed
