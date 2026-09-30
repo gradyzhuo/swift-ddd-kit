@@ -1,168 +1,730 @@
 <!DOCTYPE html>
-<html lang="zh-Hant">
+<html lang="en" data-lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>swift-ddd-kit — DDD &amp; Event Sourcing for Swift 6</title>
-<meta name="description" content="swift-ddd-kit — a Domain-Driven Design + Event Sourcing framework for Swift 6, backed by KurrentDB.">
-<style>
-  :root{
-    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --ink:#e6e8ee; --muted:#9aa3b2;
-    --line:#2a2f3a; --accent:#5aa9ff; --accent2:#7c5cff;
-    --ok:#3fb950; --warn:#e3b341; --chip:#262b36;
-  }
-  *{box-sizing:border-box}
-  html,body{margin:0;padding:0}
-  body{background:var(--bg);color:var(--ink);
-    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
-    -webkit-font-smoothing:antialiased}
-  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
-  code{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
-    background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12.5px}
-  .wrap{max-width:1000px;margin:0 auto;padding:34px 22px 110px}
-
-  /* nav */
-  .sitenav{position:sticky;top:0;z-index:50;background:rgba(15,17,21,.92);
-    backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
-  .sn-inner{max-width:1000px;margin:0 auto;padding:10px 22px;display:flex;
-    align-items:center;gap:18px;flex-wrap:wrap}
-  .sn-brand{font:700 15px/1 "SF Mono",monospace;color:var(--ink)}
-  .sn-links{display:flex;gap:16px;flex-wrap:wrap;font-size:13.5px;margin-left:auto}
-  .sn-links a{color:var(--muted)}
-  .sn-links a:hover,.sn-links a.active{color:var(--accent);text-decoration:none}
-
-  h1{font-size:34px;margin:0 0 8px;letter-spacing:-.02em}
-  h2{font-size:21px;margin:46px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
-  h3{font-size:16px;margin:0 0 6px}
-  p{margin:10px 0}
-  .tagline{color:var(--muted);font-size:17px;margin:0 0 18px}
-  .badges{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
-  .badge{background:var(--chip);border:1px solid var(--line);border-radius:999px;
-    padding:3px 11px;font-size:12px;color:var(--muted)}
-  .badge.v{color:var(--ok);border-color:#1d5a2e}
-
-  .hero{background:linear-gradient(135deg,#171a21,#1b1830);
-    border:1px solid var(--line);border-radius:16px;padding:30px 28px;margin:20px 0 10px}
-  .hero p{font-size:15px;color:var(--muted);margin:14px 0 0;max-width:70ch}
-
-  .cta{display:flex;gap:12px;flex-wrap:wrap;margin:22px 0 6px}
-  .btn{display:inline-block;padding:10px 18px;border-radius:9px;font-weight:600;font-size:14px}
-  .btn.primary{background:var(--accent);color:#06121f}
-  .btn.primary:hover{background:#7bbcff;text-decoration:none}
-  .btn.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--ink)}
-  .btn.ghost:hover{border-color:var(--accent);text-decoration:none}
-
-  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;margin:14px 0}
-  .mod{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px 16px}
-  .mod .nm{font:600 13px/1 "SF Mono",monospace;color:var(--accent);margin-bottom:5px}
-  .mod p{margin:0;font-size:13px;color:var(--muted)}
-
-  .flow{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin:14px 0}
-  .step{background:var(--panel);border:1px solid var(--line);border-radius:11px;
-    padding:13px 15px 13px 46px;position:relative}
-  .step .n{position:absolute;left:12px;top:13px;width:24px;height:24px;border-radius:50%;
-    background:var(--accent2);color:#fff;font:700 12px/24px monospace;text-align:center}
-  .step b{font-size:13.5px} .step p{margin:3px 0 0;font-size:12.5px;color:var(--muted)}
-
-  .linkcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin:14px 0}
-  .lc{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:block}
-  .lc:hover{border-color:var(--accent);text-decoration:none}
-  .lc .ic{font-size:22px} .lc h3{margin:8px 0 4px;color:var(--ink)}
-  .lc p{margin:0;font-size:13px;color:var(--muted)}
-
-  footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--line);
-    color:var(--muted);font-size:12.5px}
-  .kicker{font:600 12px/1 "SF Mono",monospace;letter-spacing:.08em;
-    text-transform:uppercase;color:var(--accent2);margin:0 0 4px}
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>swift-ddd-kit — DDD, Event Sourcing and CQRS for Server-Side Swift</title>
+  <meta name="description" content="swift-ddd-kit brings Domain-Driven Design, Event Sourcing and CQRS to Server-Side Swift: aggregate roots, event-sourced repositories, projectors, YAML code generation and KurrentDB as the event store. Swift 6, Ubuntu and macOS 15+.">
+  <meta property="og:title" content="swift-ddd-kit">
+  <meta property="og:description" content="Domain-Driven Design, Event Sourcing and CQRS for Server-Side Swift, backed by KurrentDB.">
+  <meta property="og:url" content="https://gradyzhuo.github.io/swift-ddd-kit/">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<nav class="sitenav"><div class="sn-inner">
-  <a class="sn-brand" href="./index.html">swift-ddd-kit</a>
-  <div class="sn-links">
-    <a href="./index.html" class="active">Home</a>
-    <a href="./changelog.html">Changelog</a>
-    <a href="./migration/swift-ddd-kit-0.x-to-1.0.html">Migration 0.x→1.0</a>
-    <a href="https://github.com/gradyzhuo/swift-ddd-kit">GitHub ↗</a>
+<nav class="topbar" aria-label="Site">
+  <div class="container topbar-inner">
+    <a class="topbar-brand" href="#top">swift-ddd-kit</a>
+    <div class="lang-switch" role="group" aria-label="Language · 語言">
+      <button type="button" data-lang-switch="en" aria-pressed="true">EN</button>
+      <button type="button" data-lang-switch="zh" aria-pressed="false">中文</button>
+    </div>
   </div>
-</div></nav>
+</nav>
 
-<div class="wrap">
+<nav class="toc" aria-label="On this page · 本頁目錄">
+  <p class="toc-title"><span lang="en">On this page</span><span lang="zh-Hant">本頁目錄</span></p>
+  <ol>
+    <li><a href="#install"><span lang="en">Install</span><span lang="zh-Hant">安裝</span></a></li>
+    <li><a href="#whats-new"><span lang="en">What's new</span><span lang="zh-Hant">版本更新</span></a></li>
+    <li><a href="#why"><span lang="en">Why swift-ddd-kit</span><span lang="zh-Hant">為什麼選擇</span></a></li>
+    <li><a href="#flow"><span lang="en">How it works</span><span lang="zh-Hant">運作方式</span></a></li>
+    <li><a href="#quick-start"><span lang="en">Quick Start</span><span lang="zh-Hant">快速上手</span></a></li>
+    <li><a href="#modules"><span lang="en">Modules</span><span lang="zh-Hant">模組</span></a></li>
+    <li><a href="#codegen"><span lang="en">Code generation</span><span lang="zh-Hant">程式碼生成</span></a></li>
+    <li><a href="#docs"><span lang="en">Guides</span><span lang="zh-Hant">文件</span></a></li>
+  </ol>
+</nav>
 
-  <p class="kicker">Swift Package</p>
-  <h1>swift-ddd-kit</h1>
-  <p class="tagline">為 Server-Side Swift 打造的 Domain-Driven Design + Event Sourcing 框架。</p>
+<header class="hero" id="top">
+  <div class="container">
+    <div class="hero-mark" aria-hidden="true">ddd</div>
+    <h1>swift-ddd-kit</h1>
+    <p class="tagline" lang="en">Domain-Driven Design, Event Sourcing and CQRS for Server-Side Swift</p>
+    <p class="tagline" lang="zh-Hant">為 Server-Side Swift 打造的 Domain-Driven Design、Event Sourcing 與 CQRS 框架</p>
+    <p class="subtagline" lang="en">Swift 6 · KurrentDB as the event store · Ubuntu and macOS 15+</p>
+    <p class="subtagline" lang="zh-Hant">Swift 6 · 以 KurrentDB 作為事件儲存 · Ubuntu 與 macOS 15+</p>
 
-  <div class="badges">
-    <span class="badge v">latest: 1.0</span>
-    <span class="badge">Swift 6</span>
-    <span class="badge">Server-Side Swift</span>
-    <span class="badge">Ubuntu / macOS 15+</span>
-    <span class="badge">Event store: KurrentDB</span>
-  </div>
+    <div class="badges">
+      <a href="https://github.com/gradyzhuo/swift-ddd-kit/releases"><img src="https://img.shields.io/github/v/release/gradyzhuo/swift-ddd-kit?include_prereleases&label=release" alt="Latest release"></a>
+      <a href="https://swiftpackageindex.com/gradyzhuo/swift-ddd-kit"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fgradyzhuo%2Fswift-ddd-kit%2Fbadge%3Ftype%3Dswift-versions" alt="Swift versions"></a>
+      <a href="https://swiftpackageindex.com/gradyzhuo/swift-ddd-kit"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Fgradyzhuo%2Fswift-ddd-kit%2Fbadge%3Ftype%3Dplatforms" alt="Platforms"></a>
+      <a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+      <a href="https://github.com/gradyzhuo/swift-ddd-kit/actions/workflows/swift-build-testing.yml"><img src="https://github.com/gradyzhuo/swift-ddd-kit/actions/workflows/swift-build-testing.yml/badge.svg" alt="Build status"></a>
+    </div>
 
-  <div class="hero">
-    <h3 style="font-size:15px;color:var(--accent2);margin:0">What is it</h3>
-    <p>
-      swift-ddd-kit 把 Domain-Driven Design 的戰術模式（Aggregate、Domain Event、Repository、
-      Use Case）與 Event Sourcing 結合成一套<b>專為 Server-Side Swift 打造</b>的 Swift 6 框架，
-      並以 <b>KurrentDB</b> 作為事件儲存。Swift 後端生態日益成熟，但 production 等級 DDD 架構的
-      建構元件——aggregate root、event sourcing repository、CQRS projector、事件 migration——
-      一直缺席;swift-ddd-kit 補上這塊。它提供分層的 protocol 抽象、build-time 的程式碼生成
-      plugin，以及 CQRS 讀模型投影機制——讓你把注意力放在 domain 邏輯，而不是基礎設施。
-    </p>
     <div class="cta">
-      <a class="btn primary" href="./changelog.html">查看版本變更 →</a>
-      <a class="btn ghost" href="./migration/swift-ddd-kit-0.x-to-1.0.html">0.x → 1.0 Migration Guide</a>
-      <a class="btn ghost" href="https://github.com/gradyzhuo/swift-ddd-kit">GitHub Repository</a>
+      <a class="btn primary" href="#quick-start"><span lang="en">Get Started</span><span lang="zh-Hant">開始使用</span></a>
+      <a class="btn" href="#whats-new"><span lang="en">What's new</span><span lang="zh-Hant">版本更新</span></a>
+      <a class="btn" href="https://github.com/gradyzhuo/swift-ddd-kit" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<!-- ===================================================================== -->
+<section id="install" class="container">
+  <h2><span lang="en">Install</span><span lang="zh-Hant">安裝</span></h2>
+  <p lang="en">Add the package to your <code>Package.swift</code>. <code>DDDKit</code> is the umbrella product; it re-exports the core protocols, the event sourcing layer, the KurrentDB adapter, the in-memory event bus and read model persistence.</p>
+  <p lang="zh-Hant">在 <code>Package.swift</code> 加入套件。<code>DDDKit</code> 是 umbrella product，會一併重新導出核心協定、event sourcing 層、KurrentDB 轉接層、記憶體內 event bus 與 read model 持久化。</p>
+  <pre><code class="lang-swift">dependencies: [
+    .package(url: "https://github.com/gradyzhuo/swift-ddd-kit.git", from: "1.3.0")
+],
+targets: [
+    .target(
+        name: "MyContext",
+        dependencies: [
+            .product(name: "DDDKit", package: "swift-ddd-kit"),
+        ]
+    )
+]</code></pre>
+  <p class="note" lang="en">🧪 <strong>Trying 1.4?</strong> The Notification Definition framework ships as a pre-release. Pin <code>from: "1.4.0-beta.8"</code> to pick it up; the API may still move before 1.4.0 is final.</p>
+  <p class="note" lang="zh-Hant">🧪 <strong>想試 1.4？</strong> Notification Definition 框架目前以 pre-release 發佈。將版本設為 <code>from: "1.4.0-beta.8"</code> 即可取得；在 1.4.0 正式版之前 API 仍可能調整。</p>
+</section>
+
+<!-- ===================================================================== -->
+<section id="whats-new" class="container whats-new">
+  <div class="release-header">
+    <h2>
+      <span lang="en">What's new in</span><span lang="zh-Hant">版本更新</span>
+    </h2>
+    <div class="release-picker">
+      <label class="visually-hidden" for="release-select"><span lang="en">Choose a release</span><span lang="zh-Hant">選擇版本</span></label>
+      <select id="release-select">
+        <option value="v1.4" data-en="1.4 (pre-release)" data-zh="1.4（預覽版）">1.4 (pre-release)</option>
+        <option value="v1.3" data-en="1.3 (latest stable)" data-zh="1.3（最新穩定版）">1.3 (latest stable)</option>
+        <option value="v1.2" data-en="1.2" data-zh="1.2">1.2</option>
+        <option value="v1.1" data-en="1.1" data-zh="1.1">1.1</option>
+        <option value="v1.0" data-en="1.0" data-zh="1.0">1.0</option>
+      </select>
     </div>
   </div>
 
-  <h2>模組分層</h2>
-  <p>框架由數個 target 組成，<code>DDDKit</code> 是把它們重新導出的 umbrella module：</p>
-  <div class="grid">
-    <div class="mod"><div class="nm">DDDCore</div><p>核心 DDD 協定：Entity、DomainEvent、AggregateRoot、DomainEventBus、Usecase。</p></div>
-    <div class="mod"><div class="nm">EventSourcing</div><p>抽象的 event sourcing 模式：EventStore、EventSourcingRepository、EventSourcingProjector、ReadModel。</p></div>
-    <div class="mod"><div class="nm">KurrentSupport</div><p>KurrentDB 轉接層：KurrentStorageCoordinator、EventTypeMapper。</p></div>
-    <div class="mod"><div class="nm">EventBus</div><p>記憶體內的事件匯流排實作。</p></div>
-    <div class="mod"><div class="nm">MigrationUtility</div><p>事件結構演進 / schema migration 框架。</p></div>
-    <div class="mod"><div class="nm">DomainEventGenerator</div><p>YAML → Swift 的程式碼生成函式庫。</p></div>
-    <div class="mod"><div class="nm">TestUtility</div><p>對 KurrentDB 做整合測試的輔助工具。</p></div>
+  <!-- ------------------------------------------------------------------ 1.4 -->
+  <article class="release" id="v1.4">
+    <div class="whats-new-tag beta"><span lang="en">Pre-release · 1.4.0-beta.8</span><span lang="zh-Hant">預覽版 · 1.4.0-beta.8</span></div>
+    <h3 class="release-title"><span lang="en">Notification Definition — notifications generated from YAML</span><span lang="zh-Hant">Notification Definition —— 從 YAML 生成通知程式碼</span></h3>
+    <p class="lead" lang="en">
+      A bounded context that owns a domain event usually also owns the copy, the audience and the
+      channels of the notification it triggers. 1.4 turns two YAML files into a compiled, typed
+      notification pipeline: <code>variables.yaml</code> declares the values your read models can
+      supply, <code>notification.yaml</code> declares what each event should say on each channel.
+      The generated code renders <em>before</em> publishing, so downstream consumers receive
+      finished payloads instead of templates.
+    </p>
+    <p class="lead" lang="zh-Hant">
+      擁有某個 domain event 的 bounded context，通常也應該擁有該事件觸發的通知文案、對象與通道。
+      1.4 把兩個 YAML 檔轉成編譯期型別化的通知流程：<code>variables.yaml</code> 宣告 read model 能提供的變數，
+      <code>notification.yaml</code> 宣告每個事件在各通道要說什麼。生成的程式碼在<em>發佈前</em>就完成渲染，
+      下游收到的是成品 payload，而不是模板。
+    </p>
+
+    <div class="highlights">
+      <div class="highlight">
+        <h3><span lang="en">One protocol per entry</span><span lang="zh-Hant">每個 entry 一個 protocol</span><span class="since">beta.5</span></h3>
+        <p lang="en">Every <code>notification.yaml</code> entry has an <code>id</code> and yields <code>&lt;Event&gt;Notification&lt;Id&gt;Protocol</code>. You implement <code>recipients()</code> against the real domain event; <code>render(variables:)</code> comes with a default you can override.</p>
+        <p lang="zh-Hant">每個 <code>notification.yaml</code> entry 都有 <code>id</code>，並生成 <code>&lt;Event&gt;Notification&lt;Id&gt;Protocol</code>。你直接對真實的 domain event 實作 <code>recipients()</code>；<code>render(variables:)</code> 有預設實作，可覆寫。</p>
+      </div>
+      <div class="highlight">
+        <h3><span lang="en">Placeholders checked at build time</span><span lang="zh-Hant">Placeholder 在建置期就驗證</span><span class="since">beta.0</span></h3>
+        <p lang="en">Every <code>%Placeholder%</code> in your copy is cross-checked against <code>variables.yaml</code> when the code is generated. Unknown tokens fail the build; unreferenced variables warn.</p>
+        <p lang="zh-Hant">文案中每個 <code>%Placeholder%</code> 在生成程式碼時都會對照 <code>variables.yaml</code> 檢查。未知的 token 會讓建置失敗，沒被引用的變數則發出警告。</p>
+      </div>
+      <div class="highlight">
+        <h3><span lang="en">Markdown or plaintext per channel</span><span lang="zh-Hant">各通道可選 Markdown 或純文字</span><span class="since">beta.2</span></h3>
+        <p lang="en">Mail renders CommonMark + GFM to allow-listed HTML with substituted values escaped. In-app defaults to plaintext. Override either with <code>render: markdown | plaintext</code>.</p>
+        <p lang="zh-Hant">Mail 會把 CommonMark + GFM 渲染成白名單過濾的 HTML，替換值會做跳脫；in-app 預設為純文字。兩者都可用 <code>render: markdown | plaintext</code> 覆寫。</p>
+      </div>
+      <div class="highlight">
+        <h3><span lang="en">Mail layout templates with slots</span><span lang="zh-Hant">Mail 版型與 slot</span><span class="since">beta.7</span></h3>
+        <p lang="en">A mail entry may pick a layout with <code>template: { name, slots }</code>. It reaches the payload as <code>mail.template</code> and <code>mail.template.&lt;slot&gt;</code>; the receiving side owns which layouts exist.</p>
+        <p lang="zh-Hant">Mail entry 可用 <code>template: { name, slots }</code> 指定版型，會以 <code>mail.template</code> 與 <code>mail.template.&lt;slot&gt;</code> 進入 payload；有哪些版型由接收方決定。</p>
+      </div>
+      <div class="highlight">
+        <h3><span lang="en">Entry id and variables on the wire</span><span lang="zh-Hant">entry id 與變數值上線</span><span class="since">beta.8</span></h3>
+        <p lang="en">Each rendered notification now carries <code>&lt;type&gt;.entry</code> and <code>&lt;type&gt;.var.&lt;Placeholder&gt;</code>, so a downstream context can match rules on <em>which</em> notification fired and <em>with which values</em> without calling back upstream.</p>
+        <p lang="zh-Hant">每個渲染後的通知都帶著 <code>&lt;type&gt;.entry</code> 與 <code>&lt;type&gt;.var.&lt;Placeholder&gt;</code>，下游可以直接依「哪個通知、帶什麼值」比對規則，不必回頭查上游。</p>
+      </div>
+      <div class="highlight">
+        <h3><span lang="en">Plugins, CLI and a CI-enforced demo</span><span lang="zh-Hant">Plugin、CLI 與 CI 守護的示範</span><span class="since">beta.0</span></h3>
+        <p lang="en"><code>VariablesGeneratorPlugin</code> and <code>NotificationGeneratorPlugin</code> run at build time; <code>generate variables</code> / <code>generate notification</code> run by hand. A demo target compiles the generated code in CI, so a broken codegen chain fails the build.</p>
+        <p lang="zh-Hant"><code>VariablesGeneratorPlugin</code> 與 <code>NotificationGeneratorPlugin</code> 在建置時執行，也可手動跑 <code>generate variables</code> / <code>generate notification</code>。示範 target 在 CI 中編譯生成的程式碼，codegen 一壞建置就失敗。</p>
+      </div>
+    </div>
+
+    <h4 class="subsection-title"><span lang="en">A notification.yaml entry</span><span lang="zh-Hant">一個 notification.yaml entry</span></h4>
+    <pre><code class="lang-yaml">CollaboratorAdded:
+  notifications:
+    - id: collaborator-added-mail
+      type: mail
+      recipients: [collaboratorId]       # optional: generates a default recipients()
+      template:
+        name: one-button
+        slots:
+          action_label: Open the case
+          action_url: https://example.test/cases/%QuotingCaseGroupName%
+      subject: You were added to "%QuotingCaseGroupName%"
+      content: |
+        You joined "%QuotingCaseGroupName%" as **%QuotingCaseGroupCollaboratorRole%**.
+        %CollaboratorDescription%
+    - id: collaborator-added-in-app
+      type: inApp                        # render defaults to plaintext
+      title: You were added to "%QuotingCaseGroupName%"
+      content: You joined as %QuotingCaseGroupCollaboratorRole%.</code></pre>
+
+    <h4 class="subsection-title"><span lang="en">Pre-release timeline</span><span lang="zh-Hant">預覽版時間線</span></h4>
+    <div class="table-scroll">
+      <table class="compat">
+        <thead>
+          <tr>
+            <th><span lang="en">Tag</span><span lang="zh-Hant">Tag</span></th>
+            <th><span lang="en">Date</span><span lang="zh-Hant">日期</span></th>
+            <th><span lang="en">Change</span><span lang="zh-Hant">變更</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.8">1.4.0-beta.8</a></td><td>2026-09-24</td><td><span lang="en">Entry id and resolved variables flattened onto the payload.</span><span lang="zh-Hant">entry id 與解析後的變數值攤平到 payload。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.7">1.4.0-beta.7</a></td><td>2026-09-23</td><td><span lang="en">Mail-only <code>template:</code> with slots.</span><span lang="zh-Hant">Mail 專用的 <code>template:</code> 與 slot。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.6">1.4.0-beta.6</a></td><td>2026-09-21</td><td><span lang="en">Optional <code>recipients:</code> list generates a default <code>recipients()</code>.</span><span lang="zh-Hant">選填的 <code>recipients:</code> 清單會生成預設的 <code>recipients()</code>。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.5">1.4.0-beta.5</a></td><td>2026-09-20</td><td><span lang="en">Per-entry protocol replaces the shared input struct; <code>id:</code> becomes required. Several same-type entries per event allowed.</span><span lang="zh-Hant">每個 entry 一個 protocol，取代共用的 input struct；<code>id:</code> 成為必填。同一事件可有多個同型別 entry。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.4">1.4.0-beta.4</a></td><td>2026-09-18</td><td><span lang="en"><code>recipients</code> moves into each channel entry; <code>ForwardingRule.translate</code> returns an array.</span><span lang="zh-Hant"><code>recipients</code> 移入各通道 entry；<code>ForwardingRule.translate</code> 改回傳陣列。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.3">1.4.0-beta.3</a></td><td>2026-09-17</td><td><span lang="en">Fix: generated dispatch qualified with <code>self.</code> so a variable named like its input no longer fails to compile.</span><span lang="zh-Hant">修正：生成的 dispatch 加上 <code>self.</code>，變數名與輸入名相同時不再編譯失敗。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.2">1.4.0-beta.2</a></td><td>2026-09-15</td><td><span lang="en"><code>render: markdown | plaintext</code> per entry; in-app defaults to plaintext.</span><span lang="zh-Hant">每個 entry 可設 <code>render: markdown | plaintext</code>；in-app 預設純文字。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.1">1.4.0-beta.1</a></td><td>2026-09-09</td><td><span lang="en">Markdown content rendered to safe HTML; full CommonMark + GFM; substituted values escaped.</span><span lang="zh-Hant">Markdown 內容渲染為安全 HTML；完整 CommonMark + GFM；替換值做跳脫。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.0">1.4.0-beta.0</a></td><td>2026-09-08</td><td><span lang="en">Notification Definition runtime, both generators, CLI subcommands, plugins and the demo target.</span><span lang="zh-Hant">Notification Definition runtime、兩個 generator、CLI 子命令、plugin 與示範 target。</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.8" target="_blank" rel="noopener"><span lang="en">Full 1.4.0-beta.8 release notes →</span><span lang="zh-Hant">1.4.0-beta.8 完整 release notes →</span></a></p>
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/README.md#notification-definition" target="_blank" rel="noopener"><span lang="en">Notification Definition in the README →</span><span lang="zh-Hant">README 的 Notification Definition 章節 →</span></a></p>
+  </article>
+
+  <!-- ------------------------------------------------------------------ 1.3 -->
+  <article class="release" id="v1.3">
+    <div class="whats-new-tag"><span lang="en">Latest stable · 1.3.0</span><span lang="zh-Hant">最新穩定版 · 1.3.0</span></div>
+    <h3 class="release-title"><span lang="en">Cross-context events over Apache Pulsar</span><span lang="zh-Hant">跨 Bounded Context 的事件：Apache Pulsar</span></h3>
+    <p class="lead" lang="en">
+      Domain events stay inside their context. What crosses the boundary is a Published Language
+      event, and 1.3 adds both halves of that trip over Apache Pulsar, with neither side depending
+      on a Pulsar client library.
+    </p>
+    <p class="lead" lang="zh-Hant">
+      Domain event 留在自己的 context 裡；跨越邊界的是 Published Language 事件。1.3 補上這段旅程在 Apache Pulsar 上的兩端，
+      而且兩端都不依賴 Pulsar 的 client library。
+    </p>
+
+    <div class="highlights">
+      <div class="highlight">
+        <h3>PublishedLanguage</h3>
+        <p lang="en">The zero-dependency wire envelope, <code>PublishedLanguageEvent</code>, shared by producers and consumers.</p>
+        <p lang="zh-Hant">零依賴的 wire envelope <code>PublishedLanguageEvent</code>，由發送端與接收端共用。</p>
+      </div>
+      <div class="highlight">
+        <h3>ContextForwarder</h3>
+        <p lang="en">Produce side. Subscribes to the context's own KurrentDB, translates events through <code>ForwardingRule</code>s and posts them to Pulsar's REST produce endpoint. Bearer-token auth and a self-healing <code>ForwarderGroup</code>.</p>
+        <p lang="zh-Hant">發送端。訂閱自身 context 的 KurrentDB，透過 <code>ForwardingRule</code> 轉譯後 POST 到 Pulsar 的 REST produce 端點。支援 Bearer token 驗證與會自我修復的 <code>ForwarderGroup</code>。</p>
+      </div>
+      <div class="highlight">
+        <h3>ContextReceiver</h3>
+        <p lang="en">Consume side, portable. Drives a <code>PulsarMessageSource</code> into your handler with permit-based flow control, settlement rules and a <code>DeadLetterMonitor</code>. Fully testable offline.</p>
+        <p lang="zh-Hant">接收端，可攜。透過 permit 流量控制把 <code>PulsarMessageSource</code> 的訊息送進你的 handler，內含結算規則與 <code>DeadLetterMonitor</code>。可完全離線測試。</p>
+      </div>
+      <div class="highlight">
+        <h3>ContextReceiverWebSocket</h3>
+        <p lang="en">The concrete transport over Pulsar's WebSocket consumer protocol. Linux-only for now: the upstream WebSocket dependency does not build on the macOS 26 SDK.</p>
+        <p lang="zh-Hant">走 Pulsar WebSocket consumer 協定的實際 transport。目前僅支援 Linux：上游的 WebSocket 依賴在 macOS 26 SDK 上無法編譯。</p>
+      </div>
+    </div>
+
+    <p class="note warn" lang="en"><strong>Things only a live broker teaches.</strong> REST produce takes a raw JSON string while the WebSocket consumer returns it base64-encoded. Delivery is at-least-once, so derive downstream ids from the upstream <code>eventId</code> to stay idempotent. Set <code>maxRedeliverCount</code> and <code>deadLetterTopic</code>, or a message you gave up on will redeliver forever.</p>
+    <p class="note warn" lang="zh-Hant"><strong>只有真實 broker 才會教你的事。</strong> REST produce 收原始 JSON 字串，WebSocket consumer 卻回傳 base64 編碼。投遞是 at-least-once，請從上游 <code>eventId</code> 推導下游 id 以保持冪等。務必設定 <code>maxRedeliverCount</code> 與 <code>deadLetterTopic</code>，否則放棄的訊息會無限重送。</p>
+
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.3.0" target="_blank" rel="noopener"><span lang="en">Full 1.3.0 release notes →</span><span lang="zh-Hant">1.3.0 完整 release notes →</span></a></p>
+  </article>
+
+  <!-- ------------------------------------------------------------------ 1.2 -->
+  <article class="release" id="v1.2">
+    <div class="whats-new-tag"><span lang="en">1.2.0</span><span lang="zh-Hant">1.2.0</span></div>
+    <h3 class="release-title"><span lang="en">Test without a server: an in-memory KurrentDB double</span><span lang="zh-Hant">不用伺服器也能測：記憶體內的 KurrentDB 替身</span></h3>
+    <p class="lead" lang="en">
+      swift-kurrentdb's <code>RecordedEvent</code> and <code>Streams</code> cannot be constructed
+      from outside that package, so a fake could never conform to the client protocol. 1.2 adds a
+      narrow <code>EventStoreClient</code> seam covering exactly what the coordinator and the
+      projection runners call, and ships two conformances: the live one, and one that needs no
+      server at all.
+    </p>
+    <p class="lead" lang="zh-Hant">
+      swift-kurrentdb 的 <code>RecordedEvent</code> 與 <code>Streams</code> 無法在套件外建構，因此假物件永遠無法 conform 原本的 client 協定。
+      1.2 新增一個窄的 <code>EventStoreClient</code> seam，只涵蓋 coordinator 與 projection runner 實際呼叫的操作，並提供兩個實作：一個接真實伺服器，一個完全不需要伺服器。
+    </p>
+
+    <div class="highlights">
+      <div class="highlight">
+        <h3>InMemoryEventStoreClient</h3>
+        <p lang="en">In the new <code>KurrentSupportInMemory</code> product. Real optimistic-concurrency semantics, <code>$ce-</code> category routing, replay-on-subscribe for "seed then subscribe" tests, and an opt-in <code>deliveryDelay</code> to test eventual consistency on purpose.</p>
+        <p lang="zh-Hant">位於新的 <code>KurrentSupportInMemory</code> product。真實的 optimistic concurrency 語意、<code>$ce-</code> category 路由、訂閱時重播（方便「先塞資料再訂閱」的測試），以及可選的 <code>deliveryDelay</code> 用來刻意測試最終一致性。</p>
+      </div>
+      <div class="highlight">
+        <h3>LiveEventStoreClient</h3>
+        <p lang="en">The production conformance wrapping a real <code>KurrentDBClient</code>. The <code>client: KurrentDBClient</code> convenience initializers stay, so existing call sites do not change.</p>
+        <p lang="zh-Hant">包著真實 <code>KurrentDBClient</code> 的生產環境實作。<code>client: KurrentDBClient</code> 便利初始化器保留，既有呼叫端不需修改。</p>
+      </div>
+      <div class="highlight">
+        <h3>KurrentDBPool <span class="dim">(TestUtility)</span></h3>
+        <p lang="en"><code>KurrentDBClient.withPooledIntegrationTestClient</code> borrows a client from a pool when <code>KURRENTDB_POOL_URLS</code> is set and falls back to the fixed cluster otherwise. Opt-in only.</p>
+        <p lang="zh-Hant"><code>KurrentDBClient.withPooledIntegrationTestClient</code> 在設定 <code>KURRENTDB_POOL_URLS</code> 時從連線池借用 client，否則退回固定叢集。純選用。</p>
+      </div>
+    </div>
+
+    <h4 class="subsection-title"><span lang="en">Breaking: mappers receive <code>any RecordedEventLike</code></span><span lang="zh-Hant">破壞性變更：mapper 改收 <code>any RecordedEventLike</code></span></h4>
+    <div class="compare">
+      <div class="compare-col compare-old">
+        <h5><span lang="en">1.1</span><span lang="zh-Hant">1.1</span></h5>
+        <pre><code class="lang-swift">func mapping(eventData: RecordedEvent) throws
+    -> (any DomainEvent)? {
+    switch eventData.eventType { ... }
+}
+
+let stream = record.streamIdentifier.name</code></pre>
+      </div>
+      <div class="compare-col compare-new">
+        <h5><span lang="en">1.2</span><span lang="zh-Hant">1.2</span></h5>
+        <pre><code class="lang-swift">func mapping(eventData: any RecordedEventLike) throws
+    -> (any DomainEvent)? {
+    switch eventData.eventType { ... }   // unchanged body
+}
+
+let stream = record.streamName</code></pre>
+      </div>
+    </div>
+    <p lang="en">The same applies to <code>KurrentProjection</code>'s <code>register(extractInput:)</code> closures. Code that only switches on <code>eventType</code> and calls <code>decode(to:)</code> is source-compatible after updating the parameter type. The <code>dddkit</code> scaffolding CLI moved out to <a href="https://github.com/gradyzhuo/swift-pangu-cli">swift-pangu-cli</a> in this release.</p>
+    <p lang="zh-Hant"><code>KurrentProjection</code> 的 <code>register(extractInput:)</code> closure 也一樣。只 switch <code>eventType</code>、呼叫 <code>decode(to:)</code> 的程式碼，改參數型別後即可相容。此版也把 <code>dddkit</code> 腳手架 CLI 拆到 <a href="https://github.com/gradyzhuo/swift-pangu-cli">swift-pangu-cli</a>。</p>
+
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.2.0" target="_blank" rel="noopener"><span lang="en">Full 1.2.0 release notes →</span><span lang="zh-Hant">1.2.0 完整 release notes →</span></a></p>
+  </article>
+
+  <!-- ------------------------------------------------------------------ 1.1 -->
+  <article class="release" id="v1.1">
+    <div class="whats-new-tag"><span lang="en">1.1.0 · 1.1.1</span><span lang="zh-Hant">1.1.0 · 1.1.1</span></div>
+    <h3 class="release-title"><span lang="en">A scaffolding CLI, and a safer first save</span><span lang="zh-Hant">專案腳手架 CLI，與更安全的首次寫入</span></h3>
+    <p class="lead" lang="en">
+      1.1.0 added the <code>dddkit</code> command-line tool for scaffolding a runnable starter
+      project (aggregate, use cases, KurrentDB wiring) plus a release pipeline that publishes it
+      as a GitHub Release, a signed apt repository and a Homebrew tap. 1.1.1 fixed a correctness
+      hole in the write path.
+    </p>
+    <p class="lead" lang="zh-Hant">
+      1.1.0 新增 <code>dddkit</code> 命令列工具，可產生可直接執行的起始專案（aggregate、use case、KurrentDB 接線），
+      並附上把它發佈為 GitHub Release、簽章 apt repository 與 Homebrew tap 的 release pipeline。1.1.1 修補了寫入路徑上的一個正確性漏洞。
+    </p>
+
+    <div class="highlights">
+      <div class="highlight">
+        <h3><span lang="en">First save expects <code>.noStream</code></span><span lang="zh-Hant">首次寫入預期 <code>.noStream</code></span> <span class="since">1.1.1</span></h3>
+        <p lang="en">A never-persisted aggregate has no version. <code>KurrentStorageCoordinator.append</code> used to send <code>expectedRevision: .any</code> in that case, which skips the concurrency check entirely. It now sends <code>.noStream</code>, so a duplicate or concurrent create collides with the existing stream instead of silently succeeding.</p>
+        <p lang="zh-Hant">從未持久化的 aggregate 沒有版本號。過去 <code>KurrentStorageCoordinator.append</code> 在這種情況送出 <code>expectedRevision: .any</code>，等於完全跳過並行檢查。現在改送 <code>.noStream</code>，重複或並行的建立會撞到既有 stream，而不是靜默成功。</p>
+      </div>
+      <div class="highlight">
+        <h3><span lang="en">Where the CLI lives now</span><span lang="zh-Hant">CLI 現在的位置</span></h3>
+        <p lang="en">Since 1.2 the scaffolding tool is maintained separately as <a href="https://github.com/gradyzhuo/swift-pangu-cli">swift-pangu-cli</a> (<code>pangu project create</code>), with no dependency on this package's library targets.</p>
+        <p lang="zh-Hant">自 1.2 起，腳手架工具獨立維護為 <a href="https://github.com/gradyzhuo/swift-pangu-cli">swift-pangu-cli</a>（<code>pangu project create</code>），不再依賴本套件的 library target。</p>
+      </div>
+    </div>
+
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.1.1" target="_blank" rel="noopener"><span lang="en">Full 1.1.1 release notes →</span><span lang="zh-Hant">1.1.1 完整 release notes →</span></a></p>
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.1.0" target="_blank" rel="noopener"><span lang="en">Full 1.1.0 release notes →</span><span lang="zh-Hant">1.1.0 完整 release notes →</span></a></p>
+  </article>
+
+  <!-- ------------------------------------------------------------------ 1.0 -->
+  <article class="release" id="v1.0">
+    <div class="whats-new-tag breaking"><span lang="en">Breaking · 1.0.0 · 1.0.1</span><span lang="zh-Hant">破壞性變更 · 1.0.0 · 1.0.1</span></div>
+    <h3 class="release-title"><span lang="en">Ambient context and pluggable metadata</span><span lang="zh-Hant">Ambient context 與可替換的 metadata</span></h3>
+    <p class="lead" lang="en">
+      0.x carried audit metadata to the store as an <code>external: [String: String]?</code>
+      dictionary threaded through every <code>save</code>. 1.0 replaces that with a typed ambient
+      context: define your own <code>EventMetadata</code> schema, set it once at the use case entry,
+      and structured concurrency carries it to <code>EventStore.append</code>. Aggregates, events
+      and use cases never see it.
+    </p>
+    <p class="lead" lang="zh-Hant">
+      0.x 用 <code>external: [String: String]?</code> 字典把稽核 metadata 一路傳進每個 <code>save</code>。
+      1.0 改成型別化的 ambient context：自行定義 <code>EventMetadata</code> schema，在 use case 入口設定一次，
+      由 structured concurrency 帶到 <code>EventStore.append</code>。Aggregate、event 與 use case 完全不需要碰它。
+    </p>
+
+    <div class="compare">
+      <div class="compare-col compare-old">
+        <h5><span lang="en">0.x</span><span lang="zh-Hant">0.x</span></h5>
+        <pre><code class="lang-swift">try await repository.save(
+    aggregateRoot: order,
+    external: ["operatorId": input.operatorId]
+)</code></pre>
+      </div>
+      <div class="compare-col compare-new">
+        <h5><span lang="en">1.0</span><span lang="zh-Hant">1.0</span></h5>
+        <pre><code class="lang-swift">struct AuditMetadata: EventMetadata {
+    let operatorId: String
+    let tenantId: String
+}
+
+let meta = AuditMetadata(operatorId: ..., tenantId: ...)
+try await EventMetadataContext&lt;AuditMetadata&gt;.withValue(meta) {
+    try await repository.save(aggregateRoot: order)
+}</code></pre>
+      </div>
+    </div>
+
+    <h4 class="subsection-title"><span lang="en">Renames at a glance</span><span lang="zh-Hant">重新命名一覽</span></h4>
+    <div class="table-scroll">
+      <table class="compat rename">
+        <thead>
+          <tr>
+            <th><span lang="en">Concept</span><span lang="zh-Hant">項目</span></th>
+            <th>0.x</th>
+            <th>1.0</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><span lang="en">Storage protocol</span><span lang="zh-Hant">儲存抽象 protocol</span></td><td class="old"><code>EventStorageCoordinator</code></td><td class="new"><code>EventStore</code></td></tr>
+          <tr><td><span lang="en">Repository / Projector associated type</span><span lang="zh-Hant">Repository / Projector 關聯型別</span></td><td class="old"><code>StorageCoordinator</code></td><td class="new"><code>Store</code></td></tr>
+          <tr><td><span lang="en">Repository / Projector property</span><span lang="zh-Hant">Repository / Projector 屬性</span></td><td class="old"><code>coordinator</code></td><td class="new"><code>store</code></td></tr>
+          <tr><td><span lang="en">Metadata channel on append</span><span lang="zh-Hant">append 的 metadata 通道</span></td><td class="old"><code>external: [String:String]?</code></td><td class="new"><code>metadata: Metadata?</code></td></tr>
+          <tr><td><span lang="en">Kurrent store generics</span><span lang="zh-Hant">Kurrent 儲存實作泛型</span></td><td class="old"><code>KurrentStorageCoordinator&lt;S&gt;</code></td><td class="new"><code>KurrentStorageCoordinator&lt;S, Metadata&gt;</code></td></tr>
+          <tr><td><span lang="en">Event type discriminator</span><span lang="zh-Hant">事件型別判斷</span></td><td class="old"><code>RecordedEvent.mappingClassName</code></td><td class="new"><code>RecordedEvent.eventType</code></td></tr>
+          <tr><td><code>CustomMetadata</code></td><td class="old"><code>{ className, external }</code></td><td class="new"><code>{ operatorId }</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p lang="en">1.0.1 fixed a double-apply bug in <code>find(byId:hiddingDeleted: false)</code> when reconstructing a soft-deleted aggregate.</p>
+    <p lang="zh-Hant">1.0.1 修正 <code>find(byId:hiddingDeleted: false)</code> 重建已軟刪除 aggregate 時的重複 apply 錯誤。</p>
+
+    <div class="cta-row">
+      <a class="btn primary" href="./migration/swift-ddd-kit-0.x-to-1.0.html"><span lang="en">0.x → 1.0 Migration Guide</span><span lang="zh-Hant">0.x → 1.0 遷移指南</span></a>
+      <p class="cta-note" lang="en">Step-by-step changes, before/after data flow, and a machine-readable manifest for AI agents. Written in Traditional Chinese.</p>
+      <p class="cta-note" lang="zh-Hant">逐項變更、新舊資料流對照，以及給 AI agent 的機器可讀遷移清單。</p>
+    </div>
+
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.0.1" target="_blank" rel="noopener"><span lang="en">Full 1.0.1 release notes →</span><span lang="zh-Hant">1.0.1 完整 release notes →</span></a></p>
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.0.0" target="_blank" rel="noopener"><span lang="en">Full 1.0.0 release notes →</span><span lang="zh-Hant">1.0.0 完整 release notes →</span></a></p>
+  </article>
+</section>
+
+<!-- ===================================================================== -->
+<section id="why" class="container">
+  <h2><span lang="en">Why swift-ddd-kit</span><span lang="zh-Hant">為什麼選擇 swift-ddd-kit</span></h2>
+  <p lang="en">The Swift server ecosystem has matured, but the building blocks of a production DDD architecture, aggregate roots, event-sourced repositories, CQRS projectors and event migration, have been missing. swift-ddd-kit fills that gap.</p>
+  <p lang="zh-Hant">Swift 後端生態已經成熟，但 production 等級 DDD 架構的建構元件，aggregate root、event-sourced repository、CQRS projector、事件 migration，一直缺席。swift-ddd-kit 補上這一塊。</p>
+  <div class="features">
+    <div class="feature">
+      <h3><span lang="en">Events are the source of truth</span><span lang="zh-Hant">事件就是事實的來源</span></h3>
+      <p lang="en">State is never stored directly. Every change is an immutable <code>DomainEvent</code>, and state is rebuilt by replaying them through <code>when(happened:)</code>.</p>
+      <p lang="zh-Hant">狀態從不直接儲存。每次變更都是一個不可變的 <code>DomainEvent</code>，狀態透過 <code>when(happened:)</code> 重播事件重建。</p>
+    </div>
+    <div class="feature">
+      <h3><span lang="en">Aggregates guard invariants</span><span lang="zh-Hant">Aggregate 守住不變條件</span></h3>
+      <p lang="en">Business rules live in <code>AggregateRoot</code>. <code>apply(event:)</code> mutates state, runs <code>ensureInvariant()</code> and queues uncommitted events. No anemic models mutated from outside.</p>
+      <p lang="zh-Hant">商業規則放在 <code>AggregateRoot</code>。<code>apply(event:)</code> 變更狀態、執行 <code>ensureInvariant()</code> 並排入未提交事件。沒有從外部被改動的貧血模型。</p>
+    </div>
+    <div class="feature">
+      <h3><span lang="en">Write and read stay apart</span><span lang="zh-Hant">讀寫分離</span></h3>
+      <p lang="en">The write side appends events; <code>EventSourcingProjector</code> folds them into <code>ReadModel</code>s on the read side. A persistent-subscription runner keeps projections live.</p>
+      <p lang="zh-Hant">寫入端只附加事件；讀取端由 <code>EventSourcingProjector</code> 把事件折疊成 <code>ReadModel</code>。Persistent subscription runner 讓投影持續更新。</p>
+    </div>
+    <div class="feature">
+      <h3><span lang="en">Swift 6 strict concurrency</span><span lang="zh-Hant">Swift 6 strict concurrency</span></h3>
+      <p lang="en">Native <code>async/await</code> throughout. Ambient metadata rides on <code>TaskLocal</code>, so audit and tenant data never leak into domain types.</p>
+      <p lang="zh-Hant">全面使用原生 <code>async/await</code>。Ambient metadata 搭在 <code>TaskLocal</code> 上，稽核與租戶資料永遠不會滲入 domain 型別。</p>
+    </div>
+    <div class="feature">
+      <h3><span lang="en">Less boilerplate, checked at build time</span><span lang="zh-Hant">更少樣板，在建置期檢查</span></h3>
+      <p lang="en">SPM build-tool plugins turn <code>event.yaml</code>, <code>projection-model.yaml</code> and <code>notification.yaml</code> into Swift. Mistakes surface as build failures, not runtime surprises.</p>
+      <p lang="zh-Hant">SPM build-tool plugin 把 <code>event.yaml</code>、<code>projection-model.yaml</code> 與 <code>notification.yaml</code> 轉成 Swift。錯誤在建置時就浮現，而不是執行期才發現。</p>
+    </div>
+    <div class="feature">
+      <h3><span lang="en">Testable without infrastructure</span><span lang="zh-Hant">不需基礎設施也能測</span></h3>
+      <p lang="en"><code>InMemoryEventStoreClient</code> stands in for KurrentDB, <code>ContextReceiver</code> is fully offline-testable, and <code>TestUtility</code> covers the integration runs that do need a server.</p>
+      <p lang="zh-Hant"><code>InMemoryEventStoreClient</code> 代替 KurrentDB，<code>ContextReceiver</code> 可完全離線測試，<code>TestUtility</code> 則涵蓋真的需要伺服器的整合測試。</p>
+    </div>
   </div>
+</section>
 
-  <h2>Event Sourcing 流程</h2>
-  <div class="flow">
-    <div class="step"><span class="n">1</span><b>定義事件</b><p>讓事件 conform <code>DomainEvent</code>，或從 <code>event.yaml</code> 生成。</p></div>
-    <div class="step"><span class="n">2</span><b>實作 AggregateRoot</b><p>用 <code>when(happened:)</code> handler 從事件變更狀態。</p></div>
-    <div class="step"><span class="n">3</span><b>實作 EventTypeMapper</b><p>把 KurrentDB 的 <code>RecordedEvent</code> 反序列化回型別化的事件結構。</p></div>
-    <div class="step"><span class="n">4</span><b>實作 Repository</b><p><code>EventSourcingRepository</code> 由 <code>KurrentStorageCoordinator</code> 撐起。</p></div>
-    <div class="step"><span class="n">5</span><b>save</b><p><code>repository.save(aggregateRoot:)</code> 把未提交事件附加到 KurrentDB。</p></div>
-    <div class="step"><span class="n">6</span><b>find</b><p><code>repository.find(byId:)</code> 重播事件、重建 aggregate 狀態。</p></div>
+<!-- ===================================================================== -->
+<section id="flow" class="container">
+  <h2><span lang="en">How it works</span><span lang="zh-Hant">運作方式</span></h2>
+  <p lang="en">The write side and the read side share no code path. Both talk to KurrentDB on their own: commands append events, queries read those same events to build query-optimised models.</p>
+  <p lang="zh-Hant">寫入端與讀取端沒有共用的程式路徑，各自對 KurrentDB 存取：command 附加事件，query 讀取同一批事件建立查詢最佳化的模型。</p>
+  <ol class="steps">
+    <li>
+      <strong><span lang="en">Define events</span><span lang="zh-Hant">定義事件</span></strong>
+      <p lang="en">Conform to <code>DomainEvent</code>, or generate them from <code>event.yaml</code>.</p>
+      <p lang="zh-Hant">讓事件 conform <code>DomainEvent</code>，或從 <code>event.yaml</code> 生成。</p>
+    </li>
+    <li>
+      <strong><span lang="en">Model the aggregate</span><span lang="zh-Hant">建立 aggregate</span></strong>
+      <p lang="en">Implement <code>AggregateRoot</code>; <code>when(happened:)</code> turns each event into state.</p>
+      <p lang="zh-Hant">實作 <code>AggregateRoot</code>；<code>when(happened:)</code> 把每個事件轉成狀態。</p>
+    </li>
+    <li>
+      <strong><span lang="en">Map stored records back</span><span lang="zh-Hant">把儲存的記錄映射回來</span></strong>
+      <p lang="en">An <code>EventTypeMapper</code> decodes KurrentDB records into typed events.</p>
+      <p lang="zh-Hant"><code>EventTypeMapper</code> 把 KurrentDB 的記錄解碼回型別化的事件。</p>
+    </li>
+    <li>
+      <strong><span lang="en">Save</span><span lang="zh-Hant">儲存</span></strong>
+      <p lang="en"><code>repository.save(aggregateRoot:)</code> appends the uncommitted events with optimistic concurrency.</p>
+      <p lang="zh-Hant"><code>repository.save(aggregateRoot:)</code> 以 optimistic concurrency 附加未提交的事件。</p>
+    </li>
+    <li>
+      <strong><span lang="en">Find</span><span lang="zh-Hant">讀取</span></strong>
+      <p lang="en"><code>repository.find(byId:)</code> replays the stream and rebuilds the aggregate.</p>
+      <p lang="zh-Hant"><code>repository.find(byId:)</code> 重播 stream、重建 aggregate。</p>
+    </li>
+    <li>
+      <strong><span lang="en">Project</span><span lang="zh-Hant">投影</span></strong>
+      <p lang="en">An <code>EventSourcingProjector</code> folds events into a <code>ReadModel</code>, on demand or through a persistent subscription.</p>
+      <p lang="zh-Hant"><code>EventSourcingProjector</code> 把事件折疊成 <code>ReadModel</code>，可即時計算，也可透過 persistent subscription 持續更新。</p>
+    </li>
+  </ol>
+</section>
+
+<!-- ===================================================================== -->
+<section id="quick-start" class="container">
+  <h2><span lang="en">Quick Start</span><span lang="zh-Hant">快速上手</span></h2>
+
+  <h3><span lang="en">1. Events</span><span lang="zh-Hant">1. 事件</span></h3>
+  <pre><code class="lang-swift">import DDDKit
+
+struct OrderCreated: DomainEvent {
+    var id: UUID = .init()
+    var occurred: Date = .now
+    var aggregateRootId: String
+    let customerId: String
+}
+
+struct OrderCancelled: DeletedEvent {
+    var id: UUID = .init()
+    var occurred: Date = .now
+    let aggregateRootId: String
+}</code></pre>
+
+  <h3><span lang="en">2. Aggregate root</span><span lang="zh-Hant">2. Aggregate root</span></h3>
+  <pre><code class="lang-swift">final class Order: AggregateRoot {
+    typealias DeletedEventType = OrderCancelled
+
+    let id: String
+    private(set) var customerId: String = ""
+    var metadata: AggregateRootMetadata = .init()
+
+    init(id: String, customerId: String) throws {
+        self.id = id
+        try apply(event: OrderCreated(aggregateRootId: id, customerId: customerId))
+    }
+
+    required init?(events: [any DomainEvent]) throws {
+        guard let first = events.first as? OrderCreated else { return nil }
+        self.id = first.aggregateRootId
+        try apply(events: events)
+    }
+
+    func when(happened event: some DomainEvent) throws {
+        switch event {
+        case let e as OrderCreated: customerId = e.customerId
+        default: break
+        }
+    }
+}</code></pre>
+
+  <h3><span lang="en">3. Mapper and repository</span><span lang="zh-Hant">3. Mapper 與 repository</span></h3>
+  <pre><code class="lang-swift">struct OrderEventMapper: EventTypeMapper {
+    func mapping(eventData: any RecordedEventLike) throws -> (any DomainEvent)? {
+        switch eventData.eventType {
+        case "OrderCreated":   return try eventData.decode(to: OrderCreated.self)
+        case "OrderCancelled": return try eventData.decode(to: OrderCancelled.self)
+        default:               return nil
+        }
+    }
+}
+
+final class OrderRepository: EventSourcingRepository {
+    typealias AggregateRootType = Order
+    typealias Store = KurrentStorageCoordinator&lt;Order, CustomMetadata&gt;
+
+    let store: Store
+    init(client: KurrentDBClient) {
+        store = .init(client: client, eventMapper: OrderEventMapper())
+    }
+}</code></pre>
+
+  <h3><span lang="en">4. Save and find</span><span lang="zh-Hant">4. 儲存與讀取</span></h3>
+  <pre><code class="lang-swift">let client = KurrentDBClient(settings: .localhost())
+let repository = OrderRepository(client: client)
+
+let order = try Order(id: "order-001", customerId: "customer-42")
+try await repository.save(aggregateRoot: order)
+
+let found = try await repository.find(byId: "order-001")   // replayed from the stream
+
+try await repository.delete(byId: "order-001")   // soft delete: appends OrderCancelled
+try await repository.purge(byId: "order-001")    // hard delete: removes the stream</code></pre>
+
+  <h3><span lang="en">5. Metadata without touching the domain</span><span lang="zh-Hant">5. 不碰 domain 的 metadata</span></h3>
+  <pre><code class="lang-swift">struct AuditMetadata: EventMetadata {
+    let operatorId: String
+    let tenantId: String
+}
+
+// Bind the schema on the store …
+typealias Store = KurrentStorageCoordinator&lt;Order, AuditMetadata&gt;
+
+// … and set it once at the use case entry. save() picks it up automatically.
+try await EventMetadataContext&lt;AuditMetadata&gt;.withValue(meta) {
+    try await repository.save(aggregateRoot: order)
+}</code></pre>
+  <p lang="en">A ready-to-run starter project with all of this wired up is one command away with <a href="https://github.com/gradyzhuo/swift-pangu-cli">swift-pangu-cli</a>: <code>pangu project create</code>.</p>
+  <p lang="zh-Hant">想要一個已經接好線、可直接執行的起始專案，用 <a href="https://github.com/gradyzhuo/swift-pangu-cli">swift-pangu-cli</a> 一行搞定：<code>pangu project create</code>。</p>
+</section>
+
+<!-- ===================================================================== -->
+<section id="modules" class="container">
+  <h2><span lang="en">Modules</span><span lang="zh-Hant">模組</span></h2>
+  <p lang="en">Pick only what a context needs. <code>DDDKit</code> covers the write and read side against KurrentDB; everything else is an optional product.</p>
+  <p lang="zh-Hant">只挑 context 需要的部分。<code>DDDKit</code> 涵蓋對 KurrentDB 的寫入與讀取端；其餘都是選用的 product。</p>
+  <div class="table-scroll">
+    <table class="compat">
+      <thead>
+        <tr>
+          <th><span lang="en">Product</span><span lang="zh-Hant">Product</span></th>
+          <th><span lang="en">What it gives you</span><span lang="zh-Hant">提供什麼</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="group-row"><td colspan="2"><span lang="en">Core</span><span lang="zh-Hant">核心</span></td></tr>
+        <tr><td><code>DDDKit</code></td><td><span lang="en">Umbrella: <code>DDDCore</code> (Entity, AggregateRoot, DomainEvent, DomainEventBus), <code>EventSourcing</code> (EventStore, EventSourcingRepository, EventSourcingProjector, ReadModel), <code>KurrentSupport</code> (KurrentStorageCoordinator, EventTypeMapper, persistent-subscription runners), <code>EventBus</code> and <code>ReadModelPersistence</code>.</span><span lang="zh-Hant">Umbrella：<code>DDDCore</code>（Entity、AggregateRoot、DomainEvent、DomainEventBus）、<code>EventSourcing</code>（EventStore、EventSourcingRepository、EventSourcingProjector、ReadModel）、<code>KurrentSupport</code>（KurrentStorageCoordinator、EventTypeMapper、persistent subscription runner）、<code>EventBus</code> 與 <code>ReadModelPersistence</code>。</span></td></tr>
+        <tr><td><code>MigrationUtility</code></td><td><span lang="en">The <code>Migration</code> protocol and handlers for evolving event schemas.</span><span lang="zh-Hant"><code>Migration</code> 協定與 handler，用於演進事件 schema。</span></td></tr>
+        <tr class="group-row"><td colspan="2"><span lang="en">Read model persistence</span><span lang="zh-Hant">Read model 持久化</span></td></tr>
+        <tr><td><code>ReadModelPersistence</code></td><td><span lang="en"><code>ReadModelStore</code> protocol plus an in-memory store for read model snapshots.</span><span lang="zh-Hant"><code>ReadModelStore</code> 協定與記憶體內的 read model 快照儲存。</span></td></tr>
+        <tr><td><code>ReadModelPersistencePostgres</code> · <code>PostgresSupport</code></td><td><span lang="en">PostgreSQL + JSONB backed <code>ReadModelStore</code>, and the Postgres helpers it builds on.</span><span lang="zh-Hant">以 PostgreSQL + JSONB 實作的 <code>ReadModelStore</code>，以及它依賴的 Postgres 輔助工具。</span></td></tr>
+        <tr class="group-row"><td colspan="2"><span lang="en">Cross-context messaging</span><span lang="zh-Hant">跨 context 訊息</span></td></tr>
+        <tr><td><code>PublishedLanguage</code></td><td><span lang="en"><code>PublishedLanguageEvent</code>, the wire envelope shared by both sides.</span><span lang="zh-Hant">雙方共用的 wire envelope <code>PublishedLanguageEvent</code>。</span></td></tr>
+        <tr><td><code>ContextForwarder</code></td><td><span lang="en">Produce side over Pulsar's REST endpoint: <code>PulsarRESTPublisher</code>, <code>ForwarderGroup</code>.</span><span lang="zh-Hant">透過 Pulsar REST 端點的發送端：<code>PulsarRESTPublisher</code>、<code>ForwarderGroup</code>。</span></td></tr>
+        <tr><td><code>ContextReceiver</code> · <code>ContextReceiverWebSocket</code></td><td><span lang="en">Consume side: portable runner and dead-letter monitor, plus the Linux-only WebSocket transport.</span><span lang="zh-Hant">接收端：可攜的 runner 與 dead-letter monitor，加上僅限 Linux 的 WebSocket transport。</span></td></tr>
+        <tr class="group-row"><td colspan="2"><span lang="en">Notifications</span><span lang="zh-Hant">通知</span></td></tr>
+        <tr><td><code>NotificationDefinition</code></td><td><span lang="en">Runtime the generated notification code depends on: <code>RenderedNotification</code>, <code>NotificationType</code>, <code>PlaceholderSubstitution</code>. Pre-release in 1.4.</span><span lang="zh-Hant">生成的通知程式碼所依賴的 runtime：<code>RenderedNotification</code>、<code>NotificationType</code>、<code>PlaceholderSubstitution</code>。1.4 預覽版。</span></td></tr>
+        <tr class="group-row"><td colspan="2"><span lang="en">Testing</span><span lang="zh-Hant">測試</span></td></tr>
+        <tr><td><code>KurrentSupportInMemory</code></td><td><span lang="en"><code>InMemoryEventStoreClient</code>: a KurrentDB double that needs no server.</span><span lang="zh-Hant"><code>InMemoryEventStoreClient</code>：不需要伺服器的 KurrentDB 替身。</span></td></tr>
+        <tr><td><code>TestUtility</code></td><td><span lang="en">Integration-test helpers against a live KurrentDB: <code>TestBundle</code>, stream cleanup, the optional <code>KurrentDBPool</code> client.</span><span lang="zh-Hant">對真實 KurrentDB 做整合測試的輔助：<code>TestBundle</code>、stream 清理、選用的 <code>KurrentDBPool</code> client。</span></td></tr>
+        <tr class="group-row"><td colspan="2"><span lang="en">Code generation</span><span lang="zh-Hant">程式碼生成</span></td></tr>
+        <tr><td><code>DomainEventGenerator</code></td><td><span lang="en">The YAML parsing and Swift emission library behind the plugins and the <code>generate</code> CLI.</span><span lang="zh-Hant">plugin 與 <code>generate</code> CLI 背後的 YAML 解析與 Swift 輸出函式庫。</span></td></tr>
+      </tbody>
+    </table>
   </div>
+</section>
 
-  <h2>文件導覽</h2>
-  <div class="linkcards">
-    <a class="lc" href="./changelog.html">
-      <div class="ic">📋</div><h3>版本變更說明</h3>
-      <p>每個版本的新功能、破壞性變更、修正項目。</p>
+<!-- ===================================================================== -->
+<section id="codegen" class="container">
+  <h2><span lang="en">Code generation</span><span lang="zh-Hant">程式碼生成</span></h2>
+  <p lang="en">Four SPM build-tool plugins read YAML next to your sources and emit Swift at build time; one command plugin emits KurrentDB projection definitions on demand. The same logic is reachable by hand through <code>swift run generate</code>.</p>
+  <p lang="zh-Hant">四個 SPM build-tool plugin 讀取原始碼旁的 YAML，在建置時輸出 Swift；另有一個 command plugin 可隨時輸出 KurrentDB projection 定義。同樣的邏輯也可以透過 <code>swift run generate</code> 手動執行。</p>
+
+  <div class="api-grid">
+    <div class="api-card">
+      <h3>DomainEventGeneratorPlugin</h3>
+      <p lang="en"><code>event.yaml</code> → created / domain / deleted event structs and an <code>EventTypeMapper</code> for the aggregate.</p>
+      <p lang="zh-Hant"><code>event.yaml</code> → created / domain / deleted 事件 struct，以及該 aggregate 的 <code>EventTypeMapper</code>。</p>
+      <pre><code class="lang-yaml">OrderCreated:
+  kind: createdEvent
+  aggregateRootId:
+    alias: orderId
+  properties:
+    customerId: String
+    totalAmount: Double
+
+OrderCancelled:
+  kind: deletedEvent</code></pre>
+    </div>
+    <div class="api-card">
+      <h3>ModelGeneratorPlugin</h3>
+      <p lang="en"><code>projection-model.yaml</code> → <code>ReadModel</code> types and the projector scaffolding for the query side.</p>
+      <p lang="zh-Hant"><code>projection-model.yaml</code> → 查詢端的 <code>ReadModel</code> 型別與 projector 骨架。</p>
+      <pre><code class="lang-yaml">OrderSummary:
+  model: readModel
+  events:
+    - OrderCreated
+    - OrderAmountUpdated</code></pre>
+    </div>
+    <div class="api-card">
+      <h3>GenerateKurrentDBProjectionsPlugin</h3>
+      <p lang="en">A command plugin: <code>swift package generate-kurrentdb-projections</code> emits the KurrentDB projection definitions your read side subscribes to, from the same <code>projection-model.yaml</code>.</p>
+      <p lang="zh-Hant">Command plugin：<code>swift package generate-kurrentdb-projections</code> 從同一份 <code>projection-model.yaml</code> 輸出讀取端要訂閱的 KurrentDB projection 定義。</p>
+    </div>
+    <div class="api-card">
+      <h3>VariablesGeneratorPlugin · NotificationGeneratorPlugin</h3>
+      <p lang="en"><code>variables.yaml</code> → a variables protocol; <code>notification.yaml</code> → one protocol per notification entry with a default <code>render()</code>. Pre-release in 1.4.</p>
+      <p lang="zh-Hant"><code>variables.yaml</code> → 變數 protocol；<code>notification.yaml</code> → 每個通知 entry 一個 protocol，附預設 <code>render()</code>。1.4 預覽版。</p>
+      <pre><code class="lang-yaml">QuotingCaseGroupName:
+  placeholder: QuotingCaseGroupName
+  inputs:
+    - quotingCaseGroupingId: String</code></pre>
+    </div>
+  </div>
+  <pre><code class="lang-bash">swift run generate event        Sources/MyContext/event.yaml \
+    --configuration Sources/MyContext/event-generator-config.yaml -o Generated/Events.swift
+swift run generate projector    Sources/MyContext/projection-model.yaml \
+    --events Sources/MyContext/event.yaml -o Generated/Projectors.swift
+swift run generate variables    Sources/MyContext/variables.yaml    -o Generated/Variables.swift
+swift run generate notification Sources/MyContext/notification.yaml \
+    --variables Sources/MyContext/variables.yaml -o Generated/Notifications.swift</code></pre>
+</section>
+
+<!-- ===================================================================== -->
+<section id="docs" class="container">
+  <h2><span lang="en">Guides</span><span lang="zh-Hant">文件</span></h2>
+  <div class="doc-cards">
+    <a class="doc-card" href="https://github.com/gradyzhuo/swift-ddd-kit#readme" target="_blank" rel="noopener">
+      <h3>README</h3>
+      <p lang="en">The full walkthrough: core concepts, CQRS projectors and runners, metadata, code generation, notifications and Pulsar.</p>
+      <p lang="zh-Hant">完整導覽：核心概念、CQRS projector 與 runner、metadata、程式碼生成、通知與 Pulsar。</p>
     </a>
-    <a class="lc" href="./migration/swift-ddd-kit-0.x-to-1.0.html">
-      <div class="ic">🧭</div><h3>0.x → 1.0 Migration Guide</h3>
-      <p>給依賴本套件的下游專案——多圖表 + 給 AI agent 的機器可讀遷移清單。</p>
+    <a class="doc-card" href="./migration/swift-ddd-kit-0.x-to-1.0.html">
+      <h3><span lang="en">Migration Guide 0.x → 1.0</span><span lang="zh-Hant">遷移指南 0.x → 1.0</span></h3>
+      <p lang="en">For downstream projects: diagrams, a change catalogue and a machine-readable manifest for AI agents. Traditional Chinese.</p>
+      <p lang="zh-Hant">給下游專案：圖表、變更總表，以及給 AI agent 的機器可讀遷移清單。</p>
     </a>
-    <a class="lc" href="https://github.com/gradyzhuo/swift-ddd-kit">
-      <div class="ic">⌥</div><h3>原始碼 &amp; Issues</h3>
-      <p>GitHub repository，含完整 README 與 API 文件。</p>
+    <a class="doc-card" href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/MIGRATION.md" target="_blank" rel="noopener">
+      <h3>MIGRATION.md</h3>
+      <p lang="en">Running log of every schema and API change that needs action downstream, including the 1.4 notification.yaml moves.</p>
+      <p lang="zh-Hant">所有需要下游處理的 schema 與 API 變更紀錄，包含 1.4 的 notification.yaml 調整。</p>
+    </a>
+    <a class="doc-card" href="https://github.com/gradyzhuo/swift-ddd-kit/tree/main/docs/superpowers/specs" target="_blank" rel="noopener">
+      <h3><span lang="en">Design specs</span><span lang="zh-Hant">設計文件</span></h3>
+      <p lang="en">The design documents behind each feature, from the ambient-context redesign to the notification framework.</p>
+      <p lang="zh-Hant">每個功能背後的設計文件，從 ambient context 重構到通知框架。</p>
+    </a>
+    <a class="doc-card" href="https://github.com/gradyzhuo/swift-ddd-kit/releases" target="_blank" rel="noopener">
+      <h3><span lang="en">All releases</span><span lang="zh-Hant">所有版本</span></h3>
+      <p lang="en">Every tag from 0.1.0 onward with generated notes, including the 1.4 pre-releases.</p>
+      <p lang="zh-Hant">從 0.1.0 起每個 tag 的 release notes，包含 1.4 的預覽版。</p>
+    </a>
+    <a class="doc-card" href="https://gradyzhuo.github.io/swift-kurrentdb/" target="_blank" rel="noopener">
+      <h3>swift-kurrentdb</h3>
+      <p lang="en">The KurrentDB client this framework is built on.</p>
+      <p lang="zh-Hant">本框架所依賴的 KurrentDB client。</p>
     </a>
   </div>
+</section>
 
-  <footer>
-    <p>swift-ddd-kit · DDD + Event Sourcing for Swift 6 ·
-       由 <a href="https://github.com/gradyzhuo/swift-ddd-kit">gradyzhuo/swift-ddd-kit</a> 維護。</p>
-    <p>本站由 GitHub Pages 自動部署（來源：<code>docs/</code>）。</p>
-  </footer>
+<footer class="container">
+  <div class="footer-links">
+    <a href="https://github.com/gradyzhuo/swift-ddd-kit" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/gradyzhuo/swift-ddd-kit/releases" target="_blank" rel="noopener"><span lang="en">Releases</span><span lang="zh-Hant">版本</span></a>
+    <a href="https://github.com/gradyzhuo/swift-ddd-kit/issues" target="_blank" rel="noopener">Issues</a>
+    <a href="./migration/swift-ddd-kit-0.x-to-1.0.html"><span lang="en">Migration Guide (0.x → 1.0)</span><span lang="zh-Hant">遷移指南（0.x → 1.0）</span></a>
+    <a href="https://gradyzhuo.github.io/swift-kurrentdb/" target="_blank" rel="noopener">swift-kurrentdb</a>
+  </div>
+  <p class="footer-meta"><span lang="en">MIT License · Made by</span><span lang="zh-Hant">MIT 授權 · 作者</span> <a href="https://github.com/gradyzhuo" target="_blank" rel="noopener">Grady Zhuo</a></p>
+</footer>
 
-</div>
+<script src="site.js"></script>
 </body>
 </html>
