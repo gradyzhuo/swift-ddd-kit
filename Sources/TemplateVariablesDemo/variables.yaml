@@ -1,0 +1,10 @@
+CustomerName:
+  placeholder: CustomerName
+  inputs:
+    - customerId: String
+
+InvoiceTotal:
+  placeholder: InvoiceTotal
+  inputs:
+    - customerId: String
+    - invoiceId: String

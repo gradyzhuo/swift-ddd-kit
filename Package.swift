@@ -52,6 +52,9 @@ let package = Package(
         .library(
             name: "DomainEventGenerator",
             targets: ["DomainEventGenerator"]),
+       .plugin(name: "VariablesGeneratorPlugin", targets: [
+           "VariablesGeneratorPlugin"
+       ]),
        .plugin(name: "DomainEventGeneratorPlugin", targets: [
            "DomainEventGeneratorPlugin"
        ]),
@@ -331,8 +334,22 @@ let package = Package(
         .executableTarget(name: "generate",
                           dependencies: [
                             "DomainEventGenerator",
+                            "TemplateVariablesDefinition",
                             .product(name: "ArgumentParser", package: "swift-argument-parser")
                           ]),
+        .target(
+            name: "TemplateVariablesDemo",
+            dependencies: ["TemplateVariables"],
+            plugins: ["VariablesGeneratorPlugin"]),
+        .testTarget(
+            name: "TemplateVariablesDemoTests",
+            dependencies: ["TemplateVariablesDemo", "TemplateVariables"]),
+        .plugin(
+          name: "VariablesGeneratorPlugin",
+          capability: .buildTool(),
+          dependencies: [
+            "generate"
+          ]),
         .plugin(
           name: "DomainEventGeneratorPlugin",
           capability: .buildTool(),
