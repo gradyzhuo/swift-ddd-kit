@@ -47,6 +47,9 @@ let package = Package(
             name: "TemplateVariables",
             targets: ["TemplateVariables"]),
         .library(
+            name: "TemplateVariablesDefinition",
+            targets: ["TemplateVariablesDefinition"]),
+        .library(
             name: "DomainEventGenerator",
             targets: ["DomainEventGenerator"]),
        .plugin(name: "DomainEventGeneratorPlugin", targets: [
@@ -89,6 +92,14 @@ let package = Package(
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
+        .target(
+            name: "TemplateVariablesDefinition",
+            dependencies: [
+                .product(name: "Yams", package: "yams"),
+            ]),
+        .testTarget(
+            name: "TemplateVariablesDefinitionTests",
+            dependencies: ["TemplateVariablesDefinition"]),
         .target(
             name: "TemplateVariables"),
         .testTarget(
