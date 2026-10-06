@@ -46,6 +46,28 @@ public struct ForwardedRecord: Sendable {
         }
     }
 
+    /// Decodes `metadata` with a schema the rule chooses — the read-side twin of
+    /// the writing context's `EventMetadata` struct. The kit never names that
+    /// schema; the constraint is plain `Decodable` so this target stays free of
+    /// an `EventSourcing` dependency.
+    ///
+    /// - `metadata == nil` → `nil`. Absent metadata is a normal state (events
+    ///   written before a context started attaching it), never an error.
+    /// - Bytes present but not decodable as `M` (not JSON, or a field `M`
+    ///   requires is missing) → `ForwardingError.permanent`, same reasoning as
+    ///   `decodeBody`: redelivery will not change the bytes, so retrying only
+    ///   burns budget while parking makes the record visible. A rule that wants
+    ///   leniency declares optional fields on its own `M`; the kit does not guess.
+    public func decodeMetadata<M: Decodable>(_ type: M.Type) throws -> M? {
+        guard let metadata else { return nil }
+        do {
+            return try JSONDecoder().decode(type, from: metadata)
+        } catch {
+            throw ForwardingError.permanent(
+                reason: "decoding metadata as \(M.self) from \(eventType) (\(eventId)) failed: \(error)")
+        }
+    }
+
     /// Reads the event's own `occurred` timestamp — every DDDKit-generated
     /// `DomainEvent` carries one, encoded with a plain `JSONEncoder`
     /// (`.deferredToDate`), which is why this uses a matching plain decoder.
