@@ -30,4 +30,32 @@ struct ForwardedRecordTests {
 
         #expect(throws: ForwardingError.self) { _ = try record.decodeOccurred() }
     }
+
+    // MARK: - metadata field
+
+    @Test("existing 4-argument init leaves metadata nil")
+    func legacyInitHasNilMetadata() {
+        let record = ForwardedRecord(
+            eventType: "X", streamName: "s", eventId: "e", data: Data())
+        #expect(record.metadata == nil)
+    }
+
+    @Test("init stores the metadata bytes it is given")
+    func initStoresMetadata() {
+        let bytes = #"{"operatorId":"u-1"}"#.data(using: .utf8)!
+        let record = ForwardedRecord(
+            eventType: "X", streamName: "s", eventId: "e", data: Data(), metadata: bytes)
+        #expect(record.metadata == bytes)
+    }
+
+    @Test("normalizedMetadata turns KurrentDB's empty Data into nil")
+    func emptyBytesNormaliseToNil() {
+        #expect(ForwardedRecord.normalizedMetadata(Data()) == nil)
+    }
+
+    @Test("normalizedMetadata passes non-empty bytes through untouched")
+    func nonEmptyBytesPassThrough() {
+        let bytes = #"{"operatorId":"u-1"}"#.data(using: .utf8)!
+        #expect(ForwardedRecord.normalizedMetadata(bytes) == bytes)
+    }
 }

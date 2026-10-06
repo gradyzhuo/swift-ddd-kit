@@ -12,12 +12,27 @@ public struct ForwardedRecord: Sendable {
     public let streamName: String
     public let eventId: String
     public let data: Data
+    /// KurrentDB `customMetadata` as raw bytes — whatever the writing context's
+    /// `EventMetadata` struct JSON-encoded to (see
+    /// `docs/superpowers/specs/2026-05-15-ambient-context-and-pluggable-metadata-design.md`).
+    /// `nil` when the write carried no metadata; swift-kurrentdb hands that back
+    /// as an empty `Data`, which `init(from:)` normalises so "absent" has exactly
+    /// one spelling. Raw rather than typed on purpose: this record is
+    /// kit-agnostic and each rule picks its own schema via `decodeMetadata(_:)`.
+    public let metadata: Data?
 
-    public init(eventType: String, streamName: String, eventId: String, data: Data) {
+    public init(
+        eventType: String,
+        streamName: String,
+        eventId: String,
+        data: Data,
+        metadata: Data? = nil
+    ) {
         self.eventType = eventType
         self.streamName = streamName
         self.eventId = eventId
         self.data = data
+        self.metadata = metadata
     }
 
     /// Decodes the payload. A decode failure is `ForwardingError.permanent`:
@@ -44,5 +59,13 @@ public struct ForwardedRecord: Sendable {
             throw ForwardingError.permanent(
                 reason: "\(eventType) (\(eventId)) carries no decodable `occurred`: \(error)")
         }
+    }
+
+    /// `RecordedEvent.customMetadata` is a non-optional `Data` that is empty
+    /// when nothing was written. Collapse that to `nil` so callers never have
+    /// to ask "nil or empty?". Kept `static` and side-effect free so it is
+    /// testable without constructing a `ReadEvent`.
+    static func normalizedMetadata(_ bytes: Data) -> Data? {
+        bytes.isEmpty ? nil : bytes
     }
 }
