@@ -800,7 +800,7 @@ Pulsar redelivers on ack timeout or nack, so a `PublishedLanguageHandler` may se
 
 ### Reading custom metadata in a rule
 
-`ForwardedRecord.metadata` carries the KurrentDB `customMetadata` bytes the writing context attached (the JSON encoding of its `EventMetadata` struct — see the pluggable-metadata design). The kit does not know that schema; a rule decodes it with its own type:
+`ForwardedRecord.metadata` carries the KurrentDB `customMetadata` bytes the writing context attached (the JSON encoding of its `EventMetadata` struct — see [the pluggable-metadata design](docs/superpowers/specs/2026-05-15-ambient-context-and-pluggable-metadata-design.md)). The kit does not know that schema; a rule decodes it with its own type:
 
 ```swift
 struct Operator: Decodable { let operatorId: String }
@@ -812,7 +812,7 @@ ForwardingRule(eventTypes: ["CollaboratorAdded"]) { record in
 }
 ```
 
-Semantics mirror `decodeBody`: absent metadata is `nil`, never an error (events written before a context started attaching metadata stay forwardable); bytes that are present but do not decode as the requested type are `ForwardingError.permanent` and park the record, because redelivery cannot repair them. A rule that wants leniency declares optional fields on its own type.
+Semantics mirror `decodeBody`: absent metadata is `nil`, never an error (events written before a context started attaching metadata stay forwardable); bytes that are present but do not decode as the requested type are `ForwardingError.permanent` and park the record, because redelivery cannot repair them. A rule that wants leniency declares optional fields on its own type. This is deliberately stricter than aggregate loading: the generated `EventMapper` decodes metadata with `try?` and leaves `event.metadata` nil on failure, whereas the forwarder parks the record. The practical consequence is that a new rule declaring a required field which older events encoded under a different shape will park every such event on replay, so declare the field optional on the rule's type when old events may lack it.
 
 ### Dead letter mapping
 
