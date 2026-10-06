@@ -798,6 +798,22 @@ Pulsar's REST produce endpoint accepts a **raw JSON string** as the message payl
 
 Pulsar redelivers on ack timeout or nack, so a `PublishedLanguageHandler` may see the same `eventId` more than once (`ReceivedRecord.isRedelivery` / `redeliveryCount` surface this for logging). The framework does not deduplicate on the consumer's behalf — hosts are expected to derive deterministic downstream aggregate/entity ids from the upstream `eventId` so that reapplying the same event is naturally idempotent, rather than tracking a separate dedup table.
 
+### Reading custom metadata in a rule
+
+`ForwardedRecord.metadata` carries the KurrentDB `customMetadata` bytes the writing context attached (the JSON encoding of its `EventMetadata` struct — see the pluggable-metadata design). The kit does not know that schema; a rule decodes it with its own type:
+
+```swift
+struct Operator: Decodable { let operatorId: String }
+
+ForwardingRule(eventTypes: ["CollaboratorAdded"]) { record in
+    let body = try record.decodeBody(CollaboratorAdded.self)
+    let actor = try record.decodeMetadata(Operator.self)   // nil when the write carried no metadata
+    …
+}
+```
+
+Semantics mirror `decodeBody`: absent metadata is `nil`, never an error (events written before a context started attaching metadata stay forwardable); bytes that are present but do not decode as the requested type are `ForwardingError.permanent` and park the record, because redelivery cannot repair them. A rule that wants leniency declares optional fields on its own type.
+
 ### Dead letter mapping
 
 Pulsar's WebSocket API has no "send to DLQ now" command. `ContextReceiver` maps a permanent failure (an undecodable payload, or a handler classifying its own error as non-retryable) to `ReceiveDisposition.dropToDeadLetter`, which the transport implements as a negative-acknowledge. The message only actually parks in the dead letter topic once `maxRedeliverCount` is exhausted — both `maxRedeliverCount` and `deadLetterTopic` must be set on `ConsumerEndpoint.Settings`, or a message the host has explicitly given up on will redeliver forever instead of parking. `DeadLetterMonitor` polls the DLQ's backlog via the admin API so a growing park pile can page someone.

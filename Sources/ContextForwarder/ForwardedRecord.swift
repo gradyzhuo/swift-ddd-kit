@@ -1,7 +1,13 @@
 import Foundation
 
 /// Kit-agnostic view of one recorded domain event — what a translate closure
-/// sees. `data` is the raw JSON payload as stored in KurrentDB.
+/// sees. `data` is the raw JSON payload as stored in KurrentDB; `metadata` is
+/// the raw `customMetadata` the writing context attached (nil when none).
+///
+/// Both are bytes, not types, on purpose: this module never learns a context's
+/// event or metadata schema. A rule decodes with `decodeBody(_:)` /
+/// `decodeMetadata(_:)` using its own types, so two rules on one forwarder may
+/// read the same metadata with different shapes.
 ///
 /// Deliberately carries NO timestamp: swift-kurrentdb's `RecordedEvent` has no
 /// server-side created-date, so any time this type could offer would be
