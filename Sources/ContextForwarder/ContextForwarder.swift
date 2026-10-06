@@ -259,6 +259,9 @@ extension ForwardedRecord {
             eventType: record.eventType,
             streamName: record.streamIdentifier.name,
             eventId: record.id.uuidString,
-            data: record.data)
+            data: record.data,
+            // `customMetadata` is a non-optional Data that is empty when the
+            // writer attached nothing; normalise so rules see nil, not Data().
+            metadata: Self.normalizedMetadata(record.customMetadata))
     }
 }
