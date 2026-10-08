@@ -84,4 +84,69 @@ struct ForwarderLoopTests {
         _ = try? await client.persistentSubscriptions(stream: "$ce-\(category)", group: group).delete()
         _ = try? await client.streams(specified: streamName).delete { $0.expectedRevision = .any }
     }
+
+    @Test("recreates a group deleted while running, then forwards new events")
+    func recreatesMissingGroup() async throws {
+        let kurrentURL = try #require(IntegrationEnvironment.kurrentURL)
+        let settings: ClientSettings = try kurrentURL.parse()
+        let client = KurrentDBClient(settings: settings)
+
+        let suffix = UUID().uuidString.prefix(8).lowercased()
+        let category = "FwdGone\(suffix)"
+        let streamName = "\(category)-case1"
+        let group = "forwarder-missing-group-test-\(suffix)"
+
+        let recorder = RecordingPublisher()
+        let forwarder = ContextForwarder(
+            client: client,
+            publisher: recorder,
+            stream: "$ce-\(category)",
+            groupName: group
+        ).register(ForwardingRule(eventTypes: ["CollaboratorAdded"]) { record in
+            let decoded = try record.decodeBody(TestBody.self)
+            return [PublishedLanguageEvent(
+                eventId: record.eventId,
+                eventType: "OpportunityCollaboratorAdded.v1",
+                occurredAt: try record.decodeOccurred(),
+                recipientIds: [decoded.collaboratorId],
+                payload: ["role": decoded.role])]
+        })
+
+        // The host created the group at startup; then it vanished (KurrentDB recreated
+        // under the running host). Deleting it before run() reproduces that state.
+        try await forwarder.ensureSubscription()
+        try await client.persistentSubscriptions(stream: "$ce-\(category)", group: group).delete()
+
+        let runner = Task {
+            try await ForwarderGroup(forwarders: [forwarder], restartDelay: .milliseconds(200)).run()
+        }
+        defer { runner.cancel() }
+
+        // Wait for the group to come back before seeding: it is recreated at .end.
+        var recreated = false
+        for _ in 0..<50 {
+            if (try? await client.persistentSubscriptions(stream: "$ce-\(category)", group: group).getInfo()) != nil {
+                recreated = true
+                break
+            }
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        #expect(recreated)
+
+        try await client.streams(specified: streamName).append(events: [
+            EventData(eventType: "CollaboratorAdded", model: TestBody(collaboratorId: "acc-2", role: "viewer", occurred: Date()))
+        ])
+
+        var events: [PublishedLanguageEvent] = []
+        for _ in 0..<75 {
+            events = await recorder.published
+            if !events.isEmpty { break }
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        #expect(events.map(\.recipientIds) == [["acc-2"]])
+
+        runner.cancel()
+        _ = try? await client.persistentSubscriptions(stream: "$ce-\(category)", group: group).delete()
+        _ = try? await client.streams(specified: streamName).delete { $0.expectedRevision = .any }
+    }
 }

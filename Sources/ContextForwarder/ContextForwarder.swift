@@ -165,7 +165,38 @@ public struct ContextForwarder: Sendable {
     /// acked. A retry re-publishes events that already succeeded on this
     /// delivery — consumers dedup on `eventId`, which absorbs it. Records
     /// matching no rule are acked immediately (skip).
+    ///
+    /// **A missing group is recreated, not just retried.** `ensureSubscription()`
+    /// normally runs once at host startup, so if the group disappears while the
+    /// host is up — KurrentDB recreated or upgraded under it, or someone deleted
+    /// the group — every restart from `ForwarderGroup` would hit the same
+    /// "subscription group does not exist" forever and forward nothing (OC's
+    /// forwarder on 55, 2026-10-08). On that error the group is recreated with
+    /// the same settings, then the error is rethrown so `ForwarderGroup`'s
+    /// backoff restarts consumption against the new group. The new group starts
+    /// at `subscriptionSettings.startFrom` (default `.end`): events written
+    /// while the group was missing are NOT replayed.
     private func consume() async throws {
+        do {
+            try await consumeSubscription()
+        } catch let error as KurrentError where Self.isMissingGroup(error) {
+            logger.warning("\(stream)/\(groupName): subscription group is missing — recreating it (startFrom: \(subscriptionSettings.startFrom)); events written while it was missing are not replayed")
+            try await ensureSubscription()
+            throw error
+        }
+    }
+
+    /// KurrentDB answers a subscribe to a group that does not exist with
+    /// NotFound ("Subscription group … does not exist"), which swift-kurrentdb
+    /// maps to `.resourceNotFound`. Nothing else in the consume path reads a
+    /// resource that can be missing: a persistent subscription to an empty or
+    /// absent source stream is valid and simply waits.
+    static func isMissingGroup(_ error: KurrentError) -> Bool {
+        if case .resourceNotFound = error { return true }
+        return false
+    }
+
+    private func consumeSubscription() async throws {
         let subscription = try await client.persistentSubscriptions(stream: stream, group: groupName).subscribe()
         for try await result in subscription.events {
             if Task.isCancelled { return }
