@@ -27,6 +27,15 @@ swift run generate projection --input Sources/MyTarget/projection-model.yaml
 
 `DDDCoreTests` and `KurrentSupportIntegrationTests` require a local KurrentDB instance (connects to `localhost`). `EventSourcingTests` uses an in-memory `InMemoryStorageCoordinator` and can run without KurrentDB. `KurrentSupportInMemoryTests` exercises `KurrentStorageCoordinator`/`KurrentProjection.PersistentSubscriptionRunner` end to end against `InMemoryEventStoreClient` (`KurrentSupportInMemory` target) — no KurrentDB needed either.
 
+## Documentation Site
+
+`.github/workflows/documentation.yml` builds DocC for every module and deploys it with the `docs/` landing page to GitHub Pages (source: GitHub Actions); it replaces the old `pages.yml`.
+- No swift-docc-plugin: `scripts/emit-symbol-graphs.sh` compiles symbol graphs for every `Sources/*` module (minus an exclusion list of executables/demos/the re-export umbrella `DDDKit` — a new non-library target must be added there or the build fails), and `scripts/build-docs-site.py` converts each module, combines a version's modules with `docc merge`, and assembles the site
+- Versioned: the latest patch of every minor from 1.0 (`scripts/doc-versions.py`; pre-releases skipped) at `/<major.minor>/`, main at `/main/`, the latest release also at the root; `docs/doc-versions.js` draws the version menu
+- A module gets a richer landing page by adding a `Sources/<Module>/<Module>.docc` catalog — the workflow picks it up automatically
+- `DOC_DEPENDENCY_PINS` in the workflow pins upstream releases that break the build (the package has no `Package.resolved`, so old releases resolve to new dependencies too); release symbol graphs are cached per commit + pins
+- Runs on pushes to main and on `*.*.*` tags (the `github-pages` environment must allow both)
+
 ## Architecture Overview
 
 DDDKit is a Domain-Driven Design + Event Sourcing framework for Server-Side Swift (Swift 6), targeting Ubuntu (Linux) and macOS 15+. It uses KurrentDB as the event store.
