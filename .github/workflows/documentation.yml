@@ -38,10 +38,8 @@ env:
   # Dependencies pinned after resolving, as "package@version" separated by spaces, for an
   # upstream release that breaks the build. The package has no Package.resolved, so every
   # version — old releases included — resolves to the newest dependencies on each build.
-  #
-  # swift-distributed-tracing 1.6.0 makes `ServiceContext` ambiguous in async-http-client
-  # (1.30–1.36.2), which ContextForwarder and ContextReceiver depend on.
-  DOC_DEPENDENCY_PINS: "swift-distributed-tracing@1.5.0"
+  # Empty while nothing needs pinning, e.g. "swift-distributed-tracing@1.5.0".
+  DOC_DEPENDENCY_PINS: ""
 
 jobs:
   versions:
