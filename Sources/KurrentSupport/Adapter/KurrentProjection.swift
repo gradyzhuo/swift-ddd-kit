@@ -508,19 +508,15 @@ public enum KurrentProjection {
         }
 
 
-        /// Dispatch a single recorded event to all registered projectors within
-        /// the supplied transaction. Throws if any projector throws — TaskGroup
-        /// cancels remaining children, the throw bubbles to `withTransaction`
-        /// which rolls back.
+        /// Dispatch a single recorded event to every registered projector, one after
+        /// another in registration order, within the supplied transaction. Sequential
+        /// on purpose: all projectors share the transaction's single connection.
+        /// The first throw stops the rest and bubbles to `withTransaction`, which
+        /// rolls back.
         internal func dispatch(record: any RecordedEventLike, transaction tx: Provider.Transaction) async throws {
             let snapshot = _registrations.withLock { $0 }
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                for registration in snapshot {
-                    group.addTask {
-                        try await registration.dispatch(record, tx)
-                    }
-                }
-                try await group.waitForAll()
+            for registration in snapshot {
+                try await registration.dispatch(record, tx)
             }
         }
 
