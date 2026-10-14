@@ -45,6 +45,25 @@ public protocol PersistentSubscriptionSession: Sendable {
     func nack(_ deliveries: [SubscriptionDelivery], action: KurrentProjection.NackAction, reason: String) async throws
 }
 
+/// Settings used when a persistent subscription group is created. They apply only at
+/// creation — an existing group keeps its server-side settings and checkpoint.
+public struct PersistentSubscriptionSettings: Sendable, Equatable {
+    public enum StartPosition: Sendable, Equatable { case start, end }
+
+    /// Where a newly created group starts. `.start` (default) is what a read model
+    /// needs: a fresh or recreated group rebuilds every snapshot; already-applied
+    /// events are no-ops thanks to the stored revision cursor.
+    public var startFrom: StartPosition
+    /// Required for `$ce-<Category>`/`$et-<Type>` system streams so delivered events
+    /// carry the original stream name. Default `true`.
+    public var resolveLink: Bool
+
+    public init(startFrom: StartPosition = .start, resolveLink: Bool = true) {
+        self.startFrom = startFrom
+        self.resolveLink = resolveLink
+    }
+}
+
 /// Seam over the KurrentDB operations `KurrentStorageCoordinator`/`KurrentProjection`
 /// actually call. `LiveEventStoreClient` wraps a real `KurrentDBClient`;
 /// `InMemoryEventStoreClient` (KurrentSupportInMemory) needs no server at all.
@@ -63,7 +82,13 @@ public protocol EventStoreClient: Sendable {
     func append(events: [EventData], toStream name: String, category: String, expectedRevision: StreamRevision) async throws -> UInt64?
     func readStream(name: String, from revision: RevisionCursor, resolveLinks: Bool) async throws -> [any RecordedEventLike]
     func deleteStream(name: String, expectedRevision: StreamRevision) async throws
+    /// Throws `EventStoreClientError.subscriptionGroupNotFound` — at subscribe time or from `events` — when the group does not exist (or is deleted while subscribed).
     func subscribePersistent(stream: String, group: String) async throws -> any PersistentSubscriptionSession
+    /// Creates the persistent subscription group. An already-existing group is
+    /// tolerated and left unchanged.
+    func ensurePersistentSubscription(stream: String, group: String, settings: PersistentSubscriptionSettings) async throws
+    /// Deletes the persistent subscription group. A missing group is tolerated.
+    func deletePersistentSubscription(stream: String, group: String) async throws
 }
 
 /// Errors raised by an `EventStoreClient` conformance, independent of any
@@ -85,6 +110,10 @@ public enum EventStoreClientError: Error, Sendable, Equatable {
     /// time instead of leaving a persistent-subscription runner running forever with no
     /// deliveries.
     case unroutableCategory(stream: String)
+    /// The persistent subscription group does not exist — never created, or deleted
+    /// (e.g. the KurrentDB instance was recreated). Raised by `subscribePersistent`
+    /// or from a session's `events` when the group disappears mid-subscription.
+    case subscriptionGroupNotFound(stream: String, group: String)
 }
 
 /// Shared by both `EventStoreClient` conformances so `$ce-<category>` handling stays

@@ -73,8 +73,49 @@ public struct LiveEventStoreClient: EventStoreClient {
             // the runner subscribed forever with no deliveries.
             throw EventStoreClientError.unroutableCategory(stream: stream)
         }
-        let subscription = try await client.persistentSubscriptions(stream: stream, group: group).subscribe()
-        return LiveSubscriptionSession(subscription: subscription)
+        do {
+            let subscription = try await client.persistentSubscriptions(stream: stream, group: group).subscribe()
+            return LiveSubscriptionSession(subscription: subscription, stream: stream, group: group)
+        } catch {
+            throw Self.mapMissingGroup(error, stream: stream, group: group)
+        }
+    }
+
+    public func ensurePersistentSubscription(
+        stream: String, group: String, settings: PersistentSubscriptionSettings
+    ) async throws {
+        do {
+            try await client.persistentSubscriptions(stream: stream, group: group).create {
+                $0.settings.resolveLink = settings.resolveLink
+                switch settings.startFrom {
+                case .start: $0.revision = .start
+                case .end: $0.revision = .end
+                }
+            }
+        } catch {
+            // Only already-exists is the steady state (a group created by a prior
+            // process start or by the application itself); everything else —
+            // connection, auth — must reach the caller.
+            guard case .resourceAlreadyExists = error else { throw error }
+        }
+    }
+
+    public func deletePersistentSubscription(stream: String, group: String) async throws {
+        do {
+            try await client.persistentSubscriptions(stream: stream, group: group).delete()
+        } catch {
+            guard case .resourceNotFound = error else { throw error }
+        }
+    }
+
+    /// KurrentDB answers a subscribe to a group that does not exist with NotFound
+    /// ("Subscription group … does not exist"), which swift-kurrentdb maps to
+    /// `.resourceNotFound` — same detection as `ContextForwarder.isMissingGroup`.
+    static func mapMissingGroup(_ error: any Error, stream: String, group: String) -> any Error {
+        if let kurrent = error as? KurrentError, case .resourceNotFound = kurrent {
+            return EventStoreClientError.subscriptionGroupNotFound(stream: stream, group: group)
+        }
+        return error
     }
 }
 
@@ -89,12 +130,12 @@ final class LiveSubscriptionSession: PersistentSubscriptionSession, Sendable {
     private let pendingReadEvents: Mutex<[UUID: ReadEvent]>
     let events: AsyncThrowingStream<SubscriptionDelivery, Error>
 
-    init(subscription: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Subscription<PersistentSubscription.EventResult>) {
+    init(subscription: PersistentSubscriptions<SpecifiedPersistentSubscriptionTarget>.Subscription<PersistentSubscription.EventResult>, stream: String, group: String) {
         self.subscription = subscription
         self.pendingReadEvents = Mutex<[UUID: ReadEvent]>([:])
 
-        let (stream, continuation) = AsyncThrowingStream<SubscriptionDelivery, Error>.makeStream()
-        events = stream
+        let (eventStream, continuation) = AsyncThrowingStream<SubscriptionDelivery, Error>.makeStream()
+        events = eventStream
 
         let bridgeTask = Task {
             do {
@@ -106,7 +147,7 @@ final class LiveSubscriptionSession: PersistentSubscriptionSession, Sendable {
                 }
                 continuation.finish()
             } catch {
-                continuation.finish(throwing: error)
+                continuation.finish(throwing: LiveEventStoreClient.mapMissingGroup(error, stream: stream, group: group))
             }
         }
         // The real subscription is only observed by this producer task — if the
