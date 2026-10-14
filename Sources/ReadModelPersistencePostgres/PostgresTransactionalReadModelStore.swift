@@ -2,7 +2,7 @@
 //  PostgresTransactionalReadModelStore.swift
 //  ReadModelPersistencePostgres
 //
-//  TransactionalReadModelStore impl for `read_model_snapshots`.
+//  TransactionalReadModelStore impl for a Postgres snapshot table.
 //  Stateless; the connection arrives via the `Transaction` parameter.
 //
 //  See spec: docs/superpowers/specs/2026-04-29-transactional-subscription-runner-design.md
@@ -15,24 +15,35 @@ import DDDCore
 import EventSourcing
 import ReadModelPersistence
 
-/// `TransactionalReadModelStore` impl for the shared `read_model_snapshots` table.
+/// `TransactionalReadModelStore` impl for a Postgres snapshot table (see ``SnapshotWriteMode`` for which one).
 ///
 /// Stateless — there's nothing to construct beyond the type. The connection
 /// is supplied per-call via the `Transaction` parameter (`PostgresConnection`),
 /// which arrives from `PostgresTransactionProvider.withTransaction`.
 ///
 /// Schema/encoding mirrors `PostgresJSONReadModelStore` (one row per
-/// (id, type) keyed by `String(describing: Model.self)`; data as JSONB;
+/// (id, type) keyed by `Model.readModelTypeName`; data as JSONB;
 /// revision as `Int64` via `bitPattern`).
 public struct PostgresTransactionalReadModelStore<Model: ReadModel & Codable & Sendable>: TransactionalReadModelStore
 where Model.ID == String {
 
     public typealias Transaction = PostgresConnection
 
-    public init() {}
+    private let tableName: String
+    private let writeMode: SnapshotWriteMode
+    private let logger = Logger(label: "PostgresTransactionalReadModelStore")
+
+    /// - Parameters:
+    ///   - tableName: Base table name; the physical table depends on `writeMode`
+    ///     (see ``SnapshotWriteMode``).
+    ///   - writeMode: Defaults to `.monotonic`.
+    public init(tableName: String = "read_model_snapshots", writeMode: SnapshotWriteMode = .monotonic) {
+        self.tableName = SnapshotTable.resolve(baseName: tableName, mode: writeMode)
+        self.writeMode = writeMode
+    }
 
     public func save(readModel: Model, revision: UInt64, in transaction: PostgresConnection) async throws {
-        let typeName = String(describing: Model.self)
+        let typeName = Model.readModelTypeName
         let data = try JSONEncoder().encode(readModel)
         guard let json = String(data: data, encoding: .utf8) else {
             throw ReadModelStoreError.saveFailed(
@@ -46,28 +57,31 @@ where Model.ID == String {
         let revBits = Int64(bitPattern: revision)
 
         do {
-            _ = try await transaction.query("""
-                INSERT INTO read_model_snapshots (id, type, data, revision, updated_at)
-                VALUES (\(readModel.id), \(typeName), \(json)::jsonb, \(revBits), now())
-                ON CONFLICT (id, type) DO UPDATE SET
-                    data = EXCLUDED.data,
-                    revision = EXCLUDED.revision,
-                    updated_at = EXCLUDED.updated_at
-                """,
-                logger: Logger(label: "PostgresTransactionalReadModelStore"))
+            let rows = try await transaction.query(
+                SnapshotUpsert.query(
+                    table: tableName, id: readModel.id, typeName: typeName,
+                    json: json, revision: revBits, mode: writeMode
+                ),
+                logger: logger
+            )
+            if writeMode == .monotonic, try await rows.collect().isEmpty {
+                logger.debug("skipped stale snapshot write", metadata: [
+                    "id": "\(readModel.id)", "type": "\(typeName)", "revision": "\(revision)",
+                ])
+            }
         } catch {
             throw ReadModelStoreError.saveFailed(id: readModel.id, cause: error)
         }
     }
 
     public func fetch(byId id: String, in transaction: PostgresConnection) async throws -> StoredReadModel<Model>? {
-        let typeName = String(describing: Model.self)
+        let typeName = Model.readModelTypeName
         do {
             let rows = try await transaction.query("""
-                SELECT data, revision FROM read_model_snapshots
+                SELECT data, revision FROM \(unescaped: tableName)
                 WHERE id = \(id) AND type = \(typeName)
                 """,
-                logger: Logger(label: "PostgresTransactionalReadModelStore"))
+                logger: logger)
 
             for try await (data, revBits) in rows.decode((String, Int64).self) {
                 let model = try JSONDecoder().decode(Model.self, from: Data(data.utf8))
