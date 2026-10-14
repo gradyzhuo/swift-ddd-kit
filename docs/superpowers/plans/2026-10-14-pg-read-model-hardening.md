@@ -46,10 +46,12 @@ docker run -d --rm --name ddd-kit-hardening-pg -p 5433:5432 \
 
 # KurrentDB on 2115, insecure, advertising the mapped port (otherwise gossip
 # hands the client :2113 and tests would write into the dev DB)
-docker run -d --rm --name ddd-kit-hardening-kdb -p 2115:2115 \
+docker run -d --name ddd-kit-hardening-kdb -p 2115:2115 \
   -e KURRENTDB_INSECURE=true \
-  -e KURRENTDB_HTTP_PORT=2115 \
+  -e KURRENTDB_NODE_PORT=2115 \
   -e KURRENTDB_ADVERTISE_NODE_PORT_TO_CLIENT_AS=2115 \
+  -e KURRENTDB_CLUSTER_SIZE=1 \
+  -e KURRENTDB_ENABLE_ATOM_PUB_OVER_HTTP=true \
   -e KURRENTDB_RUN_PROJECTIONS=All \
   -e KURRENTDB_START_STANDARD_PROJECTIONS=true \
   docker.kurrent.io/kurrent-latest/kurrentdb:latest
@@ -58,7 +60,7 @@ export PG_HOST=localhost PG_PORT=5433 PG_USER=postgres PG_PASSWORD=postgres PG_D
 export KURRENTDB_POOL_URLS='["esdb://admin:changeit@localhost:2115?tls=false"]'
 ```
 
-Verify isolation before the first integration run: `curl -s localhost:2115/gossip | grep -o '"httpEndPointPort":[0-9]*'` must print `2115`. Integration tests in this plan obtain their client **only** through `KurrentDBClient.withPooledIntegrationTestClient` (TestUtility), which uses `KURRENTDB_POOL_URLS` when set.
+Verify isolation before the first integration run: `curl -s localhost:2115/gossip` must list the member with `"httpEndPointPort": 2115`. Integration tests in this plan obtain their client **only** through `KurrentDBClient.withPooledIntegrationTestClient` (TestUtility), which uses `KURRENTDB_POOL_URLS` when set.
 
 Teardown at the end: `docker rm -f ddd-kit-hardening-pg ddd-kit-hardening-kdb`.
 
