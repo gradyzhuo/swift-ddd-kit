@@ -22,8 +22,8 @@ debug level (`skipped stale snapshot write`) and does not throw, so a redelivere
 
 ### When to choose overwrite
 
-When a stream's revision can legitimately go backwards — a stream hard-deleted and recreated under
-the same id starts again at revision 0, and `.monotonic` would skip every write for it.
+`.overwrite` is the pre-existing last-write-wins behaviour. It is appropriate for a single consumer
+with in-order delivery, or for keeping an existing `read_model_snapshots` table as it is.
 
 ### Separate tables
 

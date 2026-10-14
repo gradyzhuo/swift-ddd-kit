@@ -82,7 +82,7 @@ DDDKit (umbrella re-export)
 
 **`ReadModel`** (EventSourcing) — `Codable` type with an `id` for read-optimized projections.
 
-**`SnapshotWriteMode`** (ReadModelPersistencePostgres) — `.monotonic` (default; only a strictly newer revision replaces a row, older/equal writes are skipped with a debug log, table `<base>_monotonic`) or `.overwrite` (last write wins, table `<base>`; for streams whose revision can restart at 0). Pass the same `tableName`/`writeMode` to `PostgresReadModelMigration`, the stores and `PostgresReadModelSnapshots`.
+**`SnapshotWriteMode`** (ReadModelPersistencePostgres) — `.monotonic` (default; only a strictly newer revision replaces a row, older/equal writes are skipped with a debug log, table `<base>_monotonic`) or `.overwrite` (last write wins, table `<base>`; pre-existing behaviour; for a single consumer with in-order delivery or an existing `read_model_snapshots` table). Pass the same `tableName`/`writeMode` to `PostgresReadModelMigration`, the stores and `PostgresReadModelSnapshots`.
 
 **`ReadModelSnapshotPurging`** (ReadModelPersistence) — Backend capability to drop all snapshots of given `readModelTypeName`s; implemented by `PostgresReadModelSnapshots` and `InMemoryReadModelStore`.
 

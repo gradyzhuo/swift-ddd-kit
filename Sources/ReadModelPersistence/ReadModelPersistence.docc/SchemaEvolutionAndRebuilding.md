@@ -36,6 +36,16 @@ silently orphaned after any of these:
 
 Every step is idempotent; re-run after a partial failure.
 
+`rebuild` purges one snapshot backend. Read models stored in different tables or write modes need
+one `rebuild` call per purger (or a purger that fans out to all of them).
+
+## Automatic group recreation is not a rebuild
+
+The runner's default `.ensure` setup recreates a missing subscription group, which assumes the event
+data survived. If KurrentDB was recreated empty (or the event history was otherwise reset), the
+stored revisions are ahead of the new streams, so run `KurrentProjection.rebuild` instead of
+relying on auto-recreation.
+
 ## Why purging alone is not enough
 
 The subscription group's checkpoint is already past the existing events. After a purge alone,

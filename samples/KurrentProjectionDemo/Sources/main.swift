@@ -148,19 +148,7 @@ let stream = "$ce-Order"
 
 print("=== KurrentProjection Demo ===\n")
 
-// 1. Create persistent subscription with resolveLink (idempotent — re-create errors are tolerated).
-//    `resolveLink = true` is required so the runner's `extractInput` closure receives
-//    the original aggregate stream name (e.g. "Order-abc") rather than the link
-//    event living in "$ce-Order".
-do {
-    try await kdbClient.persistentSubscriptions(stream: stream, group: groupName).create { options in
-        options.settings.resolveLink = true
-    }
-    print("✓ Persistent subscription created: \(stream) / \(groupName)")
-} catch {
-    // Subscription likely already exists from a previous run — fine for a demo.
-    print("ℹ Subscription create skipped (probably already exists): \(error)")
-}
+// 1. The runner creates the persistent subscription group (resolveLink on) if it is missing.
 
 // 2. Build the runner with THREE registered projectors fanning out from the same
 //    subscription. OrderRegistry uses an `eventFilter` so the runner skips

@@ -5,7 +5,7 @@
 /// `KurrentProjection.rebuild` drives that flow through this protocol, which keeps it
 /// independent of where snapshots live (Postgres, memory, or a future stream-backed store).
 public protocol ReadModelSnapshotPurging: Sendable {
-    /// Deletes every snapshot whose read model type name (``ReadModel/readModelTypeName``)
+    /// Deletes every snapshot whose read model type name (`ReadModel.readModelTypeName`)
     /// is in `typeNames`. Idempotent: purging types with no snapshots succeeds.
     func purgeSnapshots(ofTypes typeNames: [String]) async throws
 }

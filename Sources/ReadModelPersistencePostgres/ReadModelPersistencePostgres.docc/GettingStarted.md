@@ -70,8 +70,15 @@ let runner = KurrentProjection.TransactionalSubscriptionRunner(
 
 The runner creates the `order-summary` group if it is missing (from the start of the stream,
 with `resolveLink` on) and recreates it if it disappears, then throws so your supervisor
-restarts it. Run it under Swift Service Lifecycle's `ServiceGroup`, which restarts on failure.
+restarts it. Nothing restarts it for you: `ServiceGroup` (Swift Service Lifecycle) does not
+restart a failed service. Wrap `run()` in a restart loop with backoff (as `ContextForwarder`'s
+`ForwarderGroup.runWithRestart` does), or let the process exit and have your process supervisor
+restart it.
 Pass `subscriptionSetup: .manual` to manage the group yourself.
+
+Automatic recreation assumes the event data survived. If KurrentDB was recreated empty (or the
+event history was otherwise reset), the stored snapshot revisions are ahead of the new streams;
+run `KurrentProjection.rebuild` instead of relying on auto-recreation.
 
 ## 5. Query
 

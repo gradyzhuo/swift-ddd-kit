@@ -15,6 +15,7 @@ public struct PostgresJSONReadModelStore<Model: ReadModel & Sendable>: ReadModel
     private let logger = Logger(label: "PostgresJSONReadModelStore")
 
     /// - Parameters:
+    ///   - client: The Postgres client the store reads and writes through.
     ///   - tableName: Base table name; the physical table depends on `writeMode`
     ///     (see ``SnapshotWriteMode``). Create it with
     ///     `PostgresReadModelMigration.createTable(on:tableName:writeMode:)`.

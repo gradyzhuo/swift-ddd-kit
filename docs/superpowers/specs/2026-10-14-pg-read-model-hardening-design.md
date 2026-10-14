@@ -110,8 +110,10 @@ WHERE <table>.revision < EXCLUDED.revision
   （以 affected row count == 0 判斷）。
 - 選條件式 upsert 而非 `SELECT ... FOR UPDATE`：`PostgresJSONReadModelStore` 不在交易內，`FOR UPDATE`
   無效；第一次建立時資料列不存在，鎖不到。
-- `overwrite` 維持現行 SQL。其正當用途：同 id 的 stream 被 hard delete 後重建，revision 從 0 重來，
-  monotonic 會拒絕所有寫入，只有 overwrite 能正確寫入（或改走重建流程）。
+- `overwrite` 維持現行 SQL（既有的 last-write-wins 行為）。適用於單一 consumer 且依序投遞，或需沿用既有
+  `read_model_snapshots` 表。（KurrentDB 的 hard delete 會留下 tombstone、stream 無法重建；soft delete 後再寫入
+  revision 仍持續累加，因此「revision 從 0 重來」不會發生；且 runner 以 `stored.revision` 增量折疊，
+  overwrite 也無法解決 revision 重置。）
 
 ### 1.4 穩定的 type 名稱（4b）
 

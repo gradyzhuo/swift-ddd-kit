@@ -396,7 +396,7 @@ let runner = KurrentProjection.PersistentSubscriptionRunner(
     CustomerProjectorInput(customerId: parseId(from: record))
 }
 
-try await runner.run()  // ServiceGroup-friendly; cancellation returns normally.
+try await runner.run()  // cancellation returns normally; on a thrown error, call run() again (restart loop with backoff) — ServiceGroup does not restart failed services.
 ```
 
 - Configurable retry via `RetryPolicy` (default: `MaxRetriesPolicy(max: 5)`).

@@ -50,7 +50,9 @@ import ReadModelPersistence
 /// - `run()` blocks until the parent `Task` is cancelled (returns normally) or the
 ///   subscription connection drops (throws).
 /// - The runner does not auto-reconnect — the caller is responsible for re-running it
-///   on failure (typically via Swift Service Lifecycle's `ServiceGroup`).
+///   on failure. `ServiceGroup` (Swift Service Lifecycle) does not restart failed
+///   services, so wrap `run()` in a restart loop with backoff or let the process exit and
+///   have the process supervisor restart it.
 ///
 /// ## System projection streams
 ///
@@ -102,9 +104,15 @@ public enum KurrentProjection {
         /// Create the group before subscribing if it doesn't exist, and recreate it
         /// when it disappears (KurrentDB recreated, group deleted). On disappearance
         /// `run()` recreates the group and then throws
-        /// `EventStoreClientError.subscriptionGroupNotFound` so the caller's restart
-        /// (ServiceGroup, etc.) resubscribes. With `startFrom: .start` the recreated
-        /// group replays everything; the revision cursor makes that a no-op.
+        /// `EventStoreClientError.subscriptionGroupNotFound`; the caller must call `run()`
+        /// again (restart loop with backoff, or let the process exit and be restarted by its
+        /// supervisor) to resubscribe. With `startFrom: .start` the recreated group replays
+        /// everything; the revision cursor makes that a no-op.
+        ///
+        /// This assumes the event data survived. If KurrentDB was recreated empty (or the
+        /// event history was otherwise reset), stored revisions are ahead of the new
+        /// streams and the replay would be skipped — run `KurrentProjection.rebuild`
+        /// instead of relying on auto-recreation.
         case ensure(PersistentSubscriptionSettings)
         /// The caller creates and maintains the group (behavior before 1.4.0-beta.12).
         case manual
@@ -130,7 +138,11 @@ public enum KurrentProjection {
         } catch let error as EventStoreClientError {
             guard case .subscriptionGroupNotFound = error else { throw error }
             logger.warning("\(stream)/\(group): subscription group is missing — recreating it (startFrom: \(settings.startFrom))")
-            try await client.ensurePersistentSubscription(stream: stream, group: group, settings: settings)
+            do {
+                try await client.ensurePersistentSubscription(stream: stream, group: group, settings: settings)
+            } catch let ensureError {
+                logger.error("\(stream)/\(group): recreating the subscription group failed: \(ensureError)")
+            }
             throw error
         }
     }
@@ -283,8 +295,8 @@ public enum KurrentProjection {
         /// registered projectors in parallel. Acks on success.
         ///
         /// Returns when the parent `Task` is cancelled. Throws on subscription
-        /// connection failure (no auto-reconnect — caller must restart via
-        /// ServiceGroup or similar).
+        /// connection failure (no auto-reconnect — the caller must call `run()` again,
+        /// e.g. in a restart loop with backoff).
         ///
         /// With the default `.ensure` setup the group is created first and recreated if it
         /// goes missing — see ``KurrentProjection/SubscriptionSetup``.
@@ -506,7 +518,6 @@ public enum KurrentProjection {
                 return
             }
         }
-
 
         /// Dispatch a single recorded event to every registered projector, one after
         /// another in registration order, within the supplied transaction. Sequential

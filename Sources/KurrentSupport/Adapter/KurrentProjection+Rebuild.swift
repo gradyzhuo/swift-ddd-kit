@@ -19,6 +19,9 @@ extension KurrentProjection {
     ///
     /// Every step is idempotent — re-run after a partial failure. Read models sharing
     /// the group but not listed are replayed too; their stored revisions make that a no-op.
+    ///
+    /// `snapshots` is a single backend: read models stored in different tables or write
+    /// modes need one `rebuild` call per purger (or a purger that fans out).
     public static func rebuild(
         readModels: [any ReadModel.Type],
         snapshots: any ReadModelSnapshotPurging,
