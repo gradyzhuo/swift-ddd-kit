@@ -11,6 +11,7 @@ struct SnapshotWriteModeTests {
         #expect(SnapshotTable.resolve(baseName: "read_model_snapshots", mode: .monotonic) == "read_model_snapshots_monotonic")
     }
 
+    #if compiler(>=6.2) // `#expect(processExitsWith:)` requires Swift 6.2+
     @Test("A base name that only exceeds 63 bytes once suffixed is rejected")
     func suffixedLengthRejected() async {
         await #expect(processExitsWith: .failure) {
@@ -19,6 +20,7 @@ struct SnapshotWriteModeTests {
             _ = SnapshotTable.resolve(baseName: base, mode: .monotonic)
         }
     }
+    #endif
 
     @Test("createTable builds the table for the chosen mode")
     func createTablePerMode() async throws {
