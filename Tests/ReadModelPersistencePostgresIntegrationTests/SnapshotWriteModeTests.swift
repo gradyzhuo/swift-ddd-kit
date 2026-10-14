@@ -28,6 +28,16 @@ struct SnapshotWriteModeTests {
             _ = SnapshotTable.resolve(baseName: "READ_MODEL_SNAPSHOTS_MONOTONIC", mode: .overwrite)
         }
     }
+
+    @Test("A trailing newline is rejected (it would be whitespace once spliced into SQL)")
+    func trailingNewlineRejected() async {
+        await #expect(processExitsWith: .failure) {
+            _ = SnapshotTable.resolve(baseName: "read_model_snapshots_monotonic\n", mode: .overwrite)
+        }
+        await #expect(processExitsWith: .failure) {
+            _ = SnapshotTable.resolve(baseName: "read_model_snapshots\r\n", mode: .overwrite)
+        }
+    }
     #endif
 
     @Test("createTable builds the table for the chosen mode")

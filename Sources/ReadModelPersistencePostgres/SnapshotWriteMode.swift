@@ -33,7 +33,9 @@ enum SnapshotTable {
             )
         }
         precondition(
-            name.range(of: #"^[a-zA-Z_][a-zA-Z0-9_$]*$"#, options: .regularExpression) != nil,
+            // `\A`/`\z`, not `^`/`$`: ICU's `$` also matches before a trailing newline, and the
+            // name is spliced into SQL unquoted, where that newline is just whitespace.
+            name.range(of: #"\A[a-zA-Z_][a-zA-Z0-9_$]*\z"#, options: .regularExpression) != nil,
             "Snapshot table name '\(name)' must be a valid SQL identifier (letters, digits, underscores, dollar signs; must start with a letter or underscore)"
         )
         precondition(
