@@ -500,6 +500,40 @@ See the runnable example: `samples/KurrentTransactionalProjectionDemo/`. It
 includes a `SIMULATE_FAILURE=once` env knob that injects a one-shot projector
 failure to demonstrate observable rollback (no partial state).
 
+## Postgres read models
+
+`ReadModelPersistencePostgres` stores read model snapshots as JSONB in a Postgres table, written by a
+KurrentDB persistent subscription runner. Snapshots default to a monotonic write mode (a stale or
+out-of-order write never rolls a snapshot back), the runner creates and recreates its subscription
+group itself, and `KurrentProjection.rebuild` replays history after any schema change. Query the table
+with your own SQL.
+
+```swift
+try await PostgresReadModelMigration.createTable(on: pgClient)
+// creates read_model_snapshots_monotonic (the default .monotonic write mode)
+```
+
+```swift
+let runner = KurrentProjection.TransactionalSubscriptionRunner(
+    client: kurrentClient,
+    pgClient: pgClient,
+    stream: "$ce-Order",
+    groupName: "order-summary"
+)
+.register(
+    projector: OrderSummaryProjector(store: coordinator),
+    storeFactory: { _ in PostgresTransactionalReadModelStore<OrderSummary>() },
+    extractInput: { record in
+        record.streamName.hasPrefix("Order-")
+            ? OrderSummaryInput(id: String(record.streamName.dropFirst("Order-".count))) : nil
+    }
+)
+```
+
+- [Getting Started: Postgres read models](https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/readmodelpersistencepostgres/gettingstarted)
+- [Snapshot write modes](https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/readmodelpersistencepostgres/snapshotwritemodes)
+- [Schema evolution and rebuilding](https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/readmodelpersistence/schemaevolutionandrebuilding)
+
 ## Event Migration
 
 When event schemas evolve, `MigrationUtility` handles replaying old events through migration handlers without losing history.
