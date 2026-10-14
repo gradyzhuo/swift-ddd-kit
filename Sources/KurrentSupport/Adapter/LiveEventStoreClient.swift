@@ -111,6 +111,10 @@ public struct LiveEventStoreClient: EventStoreClient {
     /// KurrentDB answers a subscribe to a group that does not exist with NotFound
     /// ("Subscription group … does not exist"), which swift-kurrentdb maps to
     /// `.resourceNotFound` — same detection as `ContextForwarder.isMissingGroup`.
+    ///
+    /// Observed live (KurrentDB, integration tests): both a subscribe to a never-created
+    /// group and deleting the group while a session is active surface `.resourceNotFound`
+    /// from the session's `events`, so both map to `subscriptionGroupNotFound`.
     static func mapMissingGroup(_ error: any Error, stream: String, group: String) -> any Error {
         if let kurrent = error as? KurrentError, case .resourceNotFound = kurrent {
             return EventStoreClientError.subscriptionGroupNotFound(stream: stream, group: group)
