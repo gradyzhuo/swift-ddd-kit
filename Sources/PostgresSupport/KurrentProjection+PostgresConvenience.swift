@@ -29,6 +29,7 @@ extension KurrentProjection.TransactionalSubscriptionRunner where Provider == Po
         stream: String,
         groupName: String,
         retryPolicy: any KurrentProjection.RetryPolicy = KurrentProjection.MaxRetriesPolicy(max: 5),
+        subscriptionSetup: KurrentProjection.SubscriptionSetup = .ensure(.init()),
         logger: Logger = Logger(label: "KurrentProjection.TransactionalSubscriptionRunner")
     ) {
         self.init(
@@ -37,6 +38,7 @@ extension KurrentProjection.TransactionalSubscriptionRunner where Provider == Po
             stream: stream,
             groupName: groupName,
             retryPolicy: retryPolicy,
+            subscriptionSetup: subscriptionSetup,
             logger: logger
         )
     }
@@ -49,6 +51,7 @@ extension KurrentProjection.TransactionalSubscriptionRunner where Provider == Po
         stream: String,
         groupName: String,
         retryPolicy: any KurrentProjection.RetryPolicy = KurrentProjection.MaxRetriesPolicy(max: 5),
+        subscriptionSetup: KurrentProjection.SubscriptionSetup = .ensure(.init()),
         logger: Logger = Logger(label: "KurrentProjection.TransactionalSubscriptionRunner")
     ) {
         self.init(
@@ -57,6 +60,7 @@ extension KurrentProjection.TransactionalSubscriptionRunner where Provider == Po
             stream: stream,
             groupName: groupName,
             retryPolicy: retryPolicy,
+            subscriptionSetup: subscriptionSetup,
             logger: logger
         )
     }
