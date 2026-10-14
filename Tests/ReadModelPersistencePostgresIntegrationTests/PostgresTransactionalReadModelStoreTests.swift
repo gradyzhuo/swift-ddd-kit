@@ -92,6 +92,9 @@ struct PostgresTransactionalReadModelStoreTests {
             try await provider.withTransaction { conn in
                 try await store.save(readModel: DemoModel(id: id, value: "rev5"), revision: 5, in: conn)
             }
+            try await provider.withTransaction { conn in
+                try await store.save(readModel: DemoModel(id: id, value: "rev6-again"), revision: 6, in: conn)
+            }
             let stored: StoredReadModel<DemoModel>? = try await provider.withTransaction { conn in
                 try await store.fetch(byId: id, in: conn)
             }
