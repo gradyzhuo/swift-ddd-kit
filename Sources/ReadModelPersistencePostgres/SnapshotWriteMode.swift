@@ -26,7 +26,9 @@ enum SnapshotTable {
         }
         if mode == .overwrite {
             precondition(
-                !baseName.hasSuffix("_monotonic"),
+                // Tables are referenced unquoted, so Postgres folds the name to lowercase:
+                // compare the way Postgres will see it.
+                !baseName.lowercased().hasSuffix("_monotonic"),
                 "Base table name '\(baseName)' must not end in '_monotonic': an overwrite table would alias the monotonic table of base '\(baseName.dropLast("_monotonic".count))'"
             )
         }

@@ -20,6 +20,14 @@ struct SnapshotWriteModeTests {
             _ = SnapshotTable.resolve(baseName: base, mode: .monotonic)
         }
     }
+
+    @Test("An overwrite base that folds to a monotonic table name is rejected, whatever its case")
+    func overwriteAliasingMonotonicRejectedCaseInsensitively() async {
+        await #expect(processExitsWith: .failure) {
+            // Postgres folds unquoted identifiers to lowercase, so this is read_model_snapshots_monotonic.
+            _ = SnapshotTable.resolve(baseName: "READ_MODEL_SNAPSHOTS_MONOTONIC", mode: .overwrite)
+        }
+    }
     #endif
 
     @Test("createTable builds the table for the chosen mode")
