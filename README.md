@@ -2,6 +2,8 @@
 
 **swift-ddd-kit** is a Swift framework that brings Domain-Driven Design, Event Sourcing, and CQRS to Server-Side Swift. While the Swift backend ecosystem has grown significantly, the building blocks for production-grade DDD architecture — aggregate roots, event sourcing repositories, CQRS projectors, and event migration — have remained largely absent. swift-ddd-kit fills that gap.
 
+📖 **API reference:** [gradyzhuo.github.io/swift-ddd-kit/documentation](https://gradyzhuo.github.io/swift-ddd-kit/documentation/) — DocC for every module of the latest release, with a version menu for older minors and `main`.
+
 ## Overview
 
 This framework focuses on:

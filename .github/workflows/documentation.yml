@@ -1,0 +1,161 @@
+# Builds the DocC documentation of every module for every published version and deploys it to
+# GitHub Pages together with the landing page in docs/:
+#
+#   https://gradyzhuo.github.io/swift-ddd-kit/                                  ← docs/index.html
+#   https://gradyzhuo.github.io/swift-ddd-kit/documentation/                    ← latest release
+#   https://gradyzhuo.github.io/swift-ddd-kit/documentation/<module>/
+#   https://gradyzhuo.github.io/swift-ddd-kit/<major.minor>/documentation/<module>/
+#   https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/<module>/
+#
+# The published releases are the latest patch of every minor (scripts/doc-versions.py), and
+# docs/doc-versions.js adds a version menu to every page. GitHub Pages must use "GitHub
+# Actions" as its source, and the github-pages environment must allow `*.*.*` tags so that
+# a release deploys as soon as it is tagged.
+#
+# The DocC is built without swift-docc-plugin, so the package gains no dependency: the
+# compiler emits the symbol graphs (scripts/emit-symbol-graphs.sh), the toolchain's own
+# `docc` converts each module and `docc merge` combines the modules of a version into one
+# archive with an overview page (scripts/build-docs-site.py).
+#
+# Compiling the symbol graphs takes minutes, converting them takes seconds. Each release's
+# symbol graphs are therefore kept in the Actions cache (keyed by commit, toolchain and
+# dependency pins) and only main is compiled on every run; an evicted entry is simply rebuilt.
+#
+# Pull requests only build the site; pushes to main, release tags and manual runs deploy it.
+name: Documentation
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "*.*.*" ]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: the deploy job asks for the Pages permissions it needs.
+permissions:
+  contents: read
+
+env:
+  # Dependencies pinned after resolving, as "package@version" separated by spaces, for an
+  # upstream release that breaks the build. The package has no Package.resolved, so every
+  # version — old releases included — resolves to the newest dependencies on each build.
+  # Empty while nothing needs pinning, e.g. "swift-distributed-tracing@1.5.0".
+  DOC_DEPENDENCY_PINS: ""
+
+jobs:
+  versions:
+    name: List versions
+    runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.list.outputs.releases }}
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: list
+        env:
+          # A tag's run documents the main branch as "main", not the tagged commit.
+          MAIN_REF: ${{ github.ref_type == 'tag' && 'main' || github.sha }}
+        run: |
+          releases=$(scripts/doc-versions.py)
+          echo "$releases" | jq .
+          echo "releases=$releases" >> "$GITHUB_OUTPUT"
+          echo "matrix=$(echo "$releases" | jq -c --arg ref "$MAIN_REF" '. + [{label: "main", ref: $ref, commit: ""}]')" >> "$GITHUB_OUTPUT"
+
+  symbol-graph:
+    name: Symbol graphs (${{ matrix.label }})
+    needs: versions
+    runs-on: ubuntu-latest
+    container: swift:6.2-noble
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.versions.outputs.matrix) }}
+    steps:
+      # The scripts come from this run's commit, the sources from the documented version.
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          path: src
+
+      - id: cache
+        if: matrix.label != 'main'
+        uses: actions/cache@v4
+        with:
+          path: symbol-graphs
+          # Keep the toolchain in the key in sync with `container:`, so a new toolchain rebuilds every release.
+          key: docc-symbol-graphs-swift-6.2-noble-${{ matrix.commit }}-${{ hashFiles('scripts/emit-symbol-graphs.sh') }}-${{ env.DOC_DEPENDENCY_PINS }}
+
+      - name: Emit the symbol graphs
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: scripts/emit-symbol-graphs.sh src symbol-graphs
+
+      - name: Collect the symbol graphs and the catalogs
+        run: |
+          mkdir -p doc-input/catalogs
+          cp -R symbol-graphs doc-input/symbol-graphs
+          for module in doc-input/symbol-graphs/*/; do
+            module=$(basename "$module")
+            catalog=$(find "src/Sources/$module" -maxdepth 1 -name '*.docc' -type d | head -n 1)
+            if [ -n "$catalog" ]; then cp -R "$catalog" "doc-input/catalogs/$module.docc"; fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: doc-input-${{ matrix.label }}
+          path: doc-input
+          retention-days: 1
+
+  site:
+    name: Build site
+    needs: [versions, symbol-graph]
+    runs-on: ubuntu-latest
+    container: swift:6.2-noble
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: doc-input-*
+          path: doc-input
+
+      - name: Assemble the site
+        env:
+          RELEASES: ${{ needs.versions.outputs.releases }}
+        run: |
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends python3 > /dev/null
+          # Each artifact downloads into doc-input/doc-input-<label>; the script expects doc-input/<label>.
+          for artifact in doc-input/doc-input-*; do
+            mv "$artifact" "doc-input/${artifact#doc-input/doc-input-}"
+          done
+          python3 scripts/build-docs-site.py --inputs doc-input --releases "$RELEASES" --output _site
+          test -f _site/documentation/index.html
+          test -f _site/main/documentation/dddcore/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    needs: site
+    runs-on: ubuntu-latest
+    # Deployments from main and from tags take turns; a newer one replaces a queued one.
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}documentation/
+    steps:
+      - uses: actions/configure-pages@v5
+      - id: deployment
+        uses: actions/deploy-pages@v4
