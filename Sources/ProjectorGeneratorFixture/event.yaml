@@ -1,0 +1,19 @@
+OrderCreated:
+  kind: createdEvent
+  aggregateRootId:
+    alias: orderId
+  properties:
+    customerId: String
+    totalAmount: Double
+
+OrderNoteAdded:
+  aggregateRootId:
+    alias: orderId
+  properties:
+    note: String
+
+OrderAmountUpdated:
+  aggregateRootId:
+    alias: orderId
+  properties:
+    newAmount: Double
