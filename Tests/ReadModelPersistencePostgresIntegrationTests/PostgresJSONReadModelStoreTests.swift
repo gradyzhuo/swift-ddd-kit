@@ -158,7 +158,7 @@ struct PostgresJSONReadModelStoreTests {
             "SELECT type FROM read_model_snapshots_test_monotonic WHERE id = \(id)"
         )
         var types: [String] = []
-        for try await (type,) in rows.decode((String,).self) { types.append(type) }
+        for try await type in rows.decode(String.self) { types.append(type) }
         #expect(types == ["Stable.Name"])
         try await store.delete(byId: id)
     }

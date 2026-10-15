@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.1
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -81,13 +81,11 @@ let package = Package(
         // This is why the WebSocket transport is its own target — every other target
         // and all unit tests stay buildable on macOS.
         //
-        // Capped below 1.6.0 ON PURPOSE: 1.6.x declares swift-tools-version 6.1, and
-        // SwiftPM checks that at resolution time on every platform — so depending on it
-        // would raise this package's own floor from Swift 6.0 to 6.1 and break the
-        // Swift 6.0 job in .github/workflows. 1.5.0 is the newest tag still on
-        // tools-version 6.0. The only API we lose is the `writeTextMessage` convenience,
-        // and `write(.text(_:))` exists in both, so the call sites are version-agnostic.
-        // Raising this cap is a support-policy decision, not a routine bump.
+        // Capped below 1.6.0: 1.6.x declares swift-tools-version 6.1, which used to be
+        // above this package's floor. The floor is now Swift 6.1, so the cap is no longer
+        // required; lifting it is a separate dependency bump. The only API the cap costs is
+        // the `writeTextMessage` convenience, and `write(.text(_:))` exists in both, so the
+        // call sites are version-agnostic.
         .package(url: "https://github.com/hummingbird-project/swift-websocket.git", "1.5.0"..<"1.6.0"),
         // HTTPFields carries the Authorization header into WebSocketClientConfiguration.
         .package(url: "https://github.com/apple/swift-http-types.git", from: "1.0.0"),
