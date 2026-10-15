@@ -193,24 +193,15 @@ print("simulateFailure: \(simulateFailure)\n")
 try await withThrowingTaskGroup(of: Void.self) { group in
     group.addTask { await pgClient.run() }
 
-    // 1. Ensure the read_model_snapshots table exists (idempotent).
+    // 1. Ensure the read_model_snapshots_monotonic table exists (idempotent).
     try await PostgresReadModelMigration.createTable(on: pgClient)
-    print("✓ Postgres table ready (read_model_snapshots)")
+    print("✓ Postgres table ready (read_model_snapshots_monotonic)")
 
     // Clean any leftover snapshots from previous runs so the demo is repeatable.
     let cleanupStoreSummary = PostgresJSONReadModelStore<OrderSummary>(client: pgClient)
     let cleanupStoreRegistry = PostgresJSONReadModelStore<OrderRegistry>(client: pgClient)
 
-    // 2. Create persistent subscription with resolveLink (idempotent).
-    do {
-        try await kdbClient.persistentSubscriptions(stream: stream, group: groupName).create { options in
-            options.settings.resolveLink = true
-        }
-        print("✓ Persistent subscription created: \(stream) / \(groupName)")
-    } catch {
-        // Subscription likely already exists from a previous run — fine for a demo.
-        print("ℹ Subscription create skipped (probably already exists)")
-    }
+    // The runner creates the persistent subscription group itself (SubscriptionSetup.ensure, the default).
 
     // 3. Build projectors. The shared `mapper` covers both projectors' events.
     let mapper = OrderSummaryEventMapper()

@@ -73,7 +73,7 @@ extension \(protocolName) {
             
             lines.append("""
             default:
-                return
+                continue
             }
         }
     }

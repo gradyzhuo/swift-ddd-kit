@@ -50,12 +50,16 @@ import ReadModelPersistence
 /// - `run()` blocks until the parent `Task` is cancelled (returns normally) or the
 ///   subscription connection drops (throws).
 /// - The runner does not auto-reconnect — the caller is responsible for re-running it
-///   on failure (typically via Swift Service Lifecycle's `ServiceGroup`).
+///   on failure. `ServiceGroup` (Swift Service Lifecycle) does not restart failed
+///   services, so wrap `run()` in a restart loop with backoff or let the process exit and
+///   have the process supervisor restart it.
 ///
 /// ## System projection streams
 ///
-/// When subscribing to a system projection stream like `$ce-<Category>` or `$et-<Type>`,
-/// you must create the persistent subscription with `resolveLink = true`. Otherwise the
+/// With the default `.ensure` setup the runner creates the group with `resolveLink = true`,
+/// so this section only applies to `.manual`. When subscribing to a system projection
+/// stream like `$ce-<Category>` or `$et-<Type>`, you must create the persistent
+/// subscription with `resolveLink = true`. Otherwise the
 /// event delivered to your `extractInput` closure will reference the system
 /// stream itself (e.g., `$ce-Order`) rather than the original aggregate stream
 /// (e.g., `Order-<id>`). This is a KurrentDB requirement, not enforced by the runner.
@@ -95,6 +99,54 @@ public enum KurrentProjection {
         }
     }
 
+    /// How a runner treats its persistent subscription group.
+    public enum SubscriptionSetup: Sendable {
+        /// Create the group before subscribing if it doesn't exist, and recreate it
+        /// when it disappears (KurrentDB recreated, group deleted). On disappearance
+        /// `run()` recreates the group and then throws
+        /// `EventStoreClientError.subscriptionGroupNotFound`; the caller must call `run()`
+        /// again (restart loop with backoff, or let the process exit and be restarted by its
+        /// supervisor) to resubscribe. With `startFrom: .start` the recreated group replays
+        /// everything; the revision cursor makes that a no-op.
+        ///
+        /// This assumes the event data survived. If KurrentDB was recreated empty (or the
+        /// event history was otherwise reset), stored revisions are ahead of the new
+        /// streams and the replay would be skipped — run `KurrentProjection.rebuild`
+        /// instead of relying on auto-recreation.
+        case ensure(PersistentSubscriptionSettings)
+        /// The caller creates and maintains the group (behavior before 1.4.0-beta.12).
+        case manual
+    }
+
+    /// Shared by both runners: ensure the group, run `consume`, and recreate the group
+    /// if it went missing.
+    static func withSubscriptionGroup(
+        client: any EventStoreClient,
+        stream: String,
+        group: String,
+        setup: SubscriptionSetup,
+        logger: Logger,
+        consume: () async throws -> Void
+    ) async throws {
+        guard case let .ensure(settings) = setup else {
+            try await consume()
+            return
+        }
+        try await client.ensurePersistentSubscription(stream: stream, group: group, settings: settings)
+        do {
+            try await consume()
+        } catch let error as EventStoreClientError {
+            guard case .subscriptionGroupNotFound = error else { throw error }
+            logger.warning("\(stream)/\(group): subscription group is missing — recreating it (startFrom: \(settings.startFrom))")
+            do {
+                try await client.ensurePersistentSubscription(stream: stream, group: group, settings: settings)
+            } catch let ensureError {
+                logger.error("\(stream)/\(group): recreating the subscription group failed: \(ensureError)")
+            }
+            throw error
+        }
+    }
+
     public protocol RetryPolicy: Sendable {
         func decide(error: any Error, retryCount: Int) -> NackAction
     }
@@ -117,6 +169,7 @@ public enum KurrentProjection {
         private let stream: String
         private let groupName: String
         private let retryPolicy: any RetryPolicy
+        private let subscriptionSetup: SubscriptionSetup
         private let logger: Logger
 
         // Registrations are appended via `register` (chainable, sync) and read by `run()`.
@@ -128,12 +181,14 @@ public enum KurrentProjection {
             stream: String,
             groupName: String,
             retryPolicy: any RetryPolicy = MaxRetriesPolicy(max: 5),
+            subscriptionSetup: SubscriptionSetup = .ensure(.init()),
             logger: Logger = Logger(label: "KurrentProjection.PersistentSubscriptionRunner")
         ) {
             self.client = client
             self.stream = stream
             self.groupName = groupName
             self.retryPolicy = retryPolicy
+            self.subscriptionSetup = subscriptionSetup
             self.logger = logger
         }
 
@@ -144,6 +199,7 @@ public enum KurrentProjection {
             stream: String,
             groupName: String,
             retryPolicy: any RetryPolicy = MaxRetriesPolicy(max: 5),
+            subscriptionSetup: SubscriptionSetup = .ensure(.init()),
             logger: Logger = Logger(label: "KurrentProjection.PersistentSubscriptionRunner")
         ) {
             self.init(
@@ -151,6 +207,7 @@ public enum KurrentProjection {
                 stream: stream,
                 groupName: groupName,
                 retryPolicy: retryPolicy,
+                subscriptionSetup: subscriptionSetup,
                 logger: logger
             )
         }
@@ -238,23 +295,29 @@ public enum KurrentProjection {
         /// registered projectors in parallel. Acks on success.
         ///
         /// Returns when the parent `Task` is cancelled. Throws on subscription
-        /// connection failure (no auto-reconnect — caller must restart via
-        /// ServiceGroup or similar).
+        /// connection failure (no auto-reconnect — the caller must call `run()` again,
+        /// e.g. in a restart loop with backoff).
+        ///
+        /// With the default `.ensure` setup the group is created first and recreated if it
+        /// goes missing — see ``KurrentProjection/SubscriptionSetup``.
         ///
         /// Cancellation is observed between events, not mid-dispatch — once an event
         /// enters `dispatch(record:)` it runs to completion (or until the registered
         /// closures themselves observe `Task.isCancelled`).
         public func run() async throws {
-            let subscription = try await client.subscribePersistent(stream: stream, group: groupName)
-
-            for try await delivery in subscription.events {
-                if Task.isCancelled { return }
-
-                do {
-                    try await dispatch(record: delivery.event)
-                    try await subscription.ack([delivery])
-                } catch {
-                    try await handleFailure(error: error, delivery: delivery, subscription: subscription)
+            try await KurrentProjection.withSubscriptionGroup(
+                client: client, stream: stream, group: groupName,
+                setup: subscriptionSetup, logger: logger
+            ) {
+                let subscription = try await client.subscribePersistent(stream: stream, group: groupName)
+                for try await delivery in subscription.events {
+                    if Task.isCancelled { return }
+                    do {
+                        try await dispatch(record: delivery.event)
+                        try await subscription.ack([delivery])
+                    } catch {
+                        try await handleFailure(error: error, delivery: delivery, subscription: subscription)
+                    }
                 }
             }
         }
@@ -316,6 +379,7 @@ public enum KurrentProjection {
         private let stream: String
         private let groupName: String
         private let retryPolicy: any RetryPolicy
+        private let subscriptionSetup: SubscriptionSetup
         private let logger: Logger
 
         // Registrations: closure captures projector + storeFactory + extractInput;
@@ -328,6 +392,7 @@ public enum KurrentProjection {
             stream: String,
             groupName: String,
             retryPolicy: any RetryPolicy = MaxRetriesPolicy(max: 5),
+            subscriptionSetup: SubscriptionSetup = .ensure(.init()),
             logger: Logger = Logger(label: "KurrentProjection.TransactionalSubscriptionRunner")
         ) {
             self.client = client
@@ -335,6 +400,7 @@ public enum KurrentProjection {
             self.stream = stream
             self.groupName = groupName
             self.retryPolicy = retryPolicy
+            self.subscriptionSetup = subscriptionSetup
             self.logger = logger
         }
 
@@ -346,6 +412,7 @@ public enum KurrentProjection {
             stream: String,
             groupName: String,
             retryPolicy: any RetryPolicy = MaxRetriesPolicy(max: 5),
+            subscriptionSetup: SubscriptionSetup = .ensure(.init()),
             logger: Logger = Logger(label: "KurrentProjection.TransactionalSubscriptionRunner")
         ) {
             self.init(
@@ -354,6 +421,7 @@ public enum KurrentProjection {
                 stream: stream,
                 groupName: groupName,
                 retryPolicy: retryPolicy,
+                subscriptionSetup: subscriptionSetup,
                 logger: logger
             )
         }
@@ -428,19 +496,22 @@ public enum KurrentProjection {
         ///
         /// Cancellation is observed between events, not mid-dispatch.
         public func run() async throws {
-            let subscription = try await client.subscribePersistent(stream: stream, group: groupName)
-
             do {
-                for try await delivery in subscription.events {
-                    if Task.isCancelled { return }
-
-                    do {
-                        try await transactionProvider.withTransaction { tx in
-                            try await self.dispatch(record: delivery.event, transaction: tx)
+                try await KurrentProjection.withSubscriptionGroup(
+                    client: client, stream: stream, group: groupName,
+                    setup: subscriptionSetup, logger: logger
+                ) {
+                    let subscription = try await client.subscribePersistent(stream: stream, group: groupName)
+                    for try await delivery in subscription.events {
+                        if Task.isCancelled { return }
+                        do {
+                            try await transactionProvider.withTransaction { tx in
+                                try await self.dispatch(record: delivery.event, transaction: tx)
+                            }
+                            try await subscription.ack([delivery])
+                        } catch {
+                            try await handleFailure(error: error, delivery: delivery, subscription: subscription)
                         }
-                        try await subscription.ack([delivery])
-                    } catch {
-                        try await handleFailure(error: error, delivery: delivery, subscription: subscription)
                     }
                 }
             } catch is CancellationError {
@@ -448,19 +519,15 @@ public enum KurrentProjection {
             }
         }
 
-        /// Dispatch a single recorded event to all registered projectors within
-        /// the supplied transaction. Throws if any projector throws — TaskGroup
-        /// cancels remaining children, the throw bubbles to `withTransaction`
-        /// which rolls back.
+        /// Dispatch a single recorded event to every registered projector, one after
+        /// another in registration order, within the supplied transaction. Sequential
+        /// on purpose: all projectors share the transaction's single connection.
+        /// The first throw stops the rest and bubbles to `withTransaction`, which
+        /// rolls back.
         internal func dispatch(record: any RecordedEventLike, transaction tx: Provider.Transaction) async throws {
             let snapshot = _registrations.withLock { $0 }
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                for registration in snapshot {
-                    group.addTask {
-                        try await registration.dispatch(record, tx)
-                    }
-                }
-                try await group.waitForAll()
+            for registration in snapshot {
+                try await registration.dispatch(record, tx)
             }
         }
 

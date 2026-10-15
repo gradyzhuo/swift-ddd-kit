@@ -52,15 +52,23 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     private var subscriptions: [SubscriptionKey: InMemorySubscriptionSession] = [:]
     private var globalSequenceCounter: UInt64 = 0
 
+    private var groupSettings: [SubscriptionKey: PersistentSubscriptionSettings] = [:]
     private let deliveryDelay: Duration
+    private let requireExplicitGroups: Bool
 
+    /// - Parameter requireExplicitGroups: `false` (default) creates a group on first
+    ///   subscribe, replaying from the start — the pre-existing behavior. `true` makes
+    ///   `subscribePersistent` throw `.subscriptionGroupNotFound` for a group that was
+    ///   never ensured (or was deleted), mirroring a real cluster — use it to test
+    ///   group creation/recreation logic.
     /// - Parameter deliveryDelay: `.zero` (default) delivers to persistent-subscription
     ///   sessions synchronously as part of `append` — by the time `append` returns,
     ///   any running `PersistentSubscriptionRunner` has already processed the event,
     ///   so tests need no polling/sleep. Pass a non-zero delay to deliberately exercise
     ///   the eventual-consistency path instead.
-    public init(deliveryDelay: Duration = .zero) {
+    public init(deliveryDelay: Duration = .zero, requireExplicitGroups: Bool = false) {
         self.deliveryDelay = deliveryDelay
+        self.requireExplicitGroups = requireExplicitGroups
     }
 
     // MARK: - EventStoreClient
@@ -167,43 +175,68 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     }
 
     public func subscribePersistent(stream target: String, group: String) async throws -> any PersistentSubscriptionSession {
+        try validateSubscriptionTarget(target)
+        let key = SubscriptionKey(stream: target, group: group)
+        if groupSettings[key] == nil {
+            guard !requireExplicitGroups else {
+                throw EventStoreClientError.subscriptionGroupNotFound(stream: target, group: group)
+            }
+            try await ensurePersistentSubscription(stream: target, group: group, settings: .init())
+        }
+        // `ensure` always creates the session alongside the group.
+        return subscriptions[key]!
+    }
+
+    public func ensurePersistentSubscription(
+        stream target: String, group: String, settings: PersistentSubscriptionSettings
+    ) async throws {
+        try validateSubscriptionTarget(target)
+        let key = SubscriptionKey(stream: target, group: group)
+        guard groupSettings[key] == nil else { return }
+        groupSettings[key] = settings
+
+        let session = InMemorySubscriptionSession()
+        subscriptions[key] = session
+        // `.start`: replay everything already stored, in commit order, before live
+        // tail delivery — makes "seed events, then subscribe" tests deterministic.
+        // `.end`: only events appended from now on.
+        if settings.startFrom == .start {
+            for stored in matchingStoredEvents(for: target) {
+                session.deliver(stored)
+            }
+        }
+    }
+
+    public func deletePersistentSubscription(stream target: String, group: String) async throws {
+        let key = SubscriptionKey(stream: target, group: group)
+        groupSettings.removeValue(forKey: key)
+        subscriptions.removeValue(forKey: key)?
+            .end(throwing: EventStoreClientError.subscriptionGroupNotFound(stream: target, group: group))
+    }
+
+    /// Test helper: whether the group currently exists.
+    public func persistentSubscriptionExists(stream: String, group: String) -> Bool {
+        groupSettings[SubscriptionKey(stream: stream, group: group)] != nil
+    }
+
+    private func validateSubscriptionTarget(_ target: String) throws {
         // `$ce-<Category>` is the only system-projection convention this fake
         // understands (it's the only one `KurrentProjection` ever subscribes to).
         // Anything else starting with `$` — `$et-<EventType>`, `$all`, a raw
         // `$by_category`-style name, etc. — would otherwise create a session
         // that looks fine but silently never receives anything. Fail loudly
         // instead: a hung test with a clear error beats a hung test with none.
-        if target.hasPrefix("$") {
-            guard let category = categoryProjectionName(target) else {
-                throw EventStoreClientError.unsupportedProjection(stream: target)
-            }
-            // A category containing its own dash can never be produced by real
-            // KurrentDB's `$by_category` projection (see `systemCategory(forStreamName:)`),
-            // so no stream will ever be routed here — fail now instead of a session
-            // that silently never receives anything.
-            guard !category.contains("-") else {
-                throw EventStoreClientError.unroutableCategory(stream: target)
-            }
+        guard target.hasPrefix("$") else { return }
+        guard let category = categoryProjectionName(target) else {
+            throw EventStoreClientError.unsupportedProjection(stream: target)
         }
-
-        let key = SubscriptionKey(stream: target, group: group)
-        if let existing = subscriptions[key] {
-            return existing
+        // A category containing its own dash can never be produced by real
+        // KurrentDB's `$by_category` projection (see `systemCategory(forStreamName:)`),
+        // so no stream will ever be routed here — fail now instead of a session
+        // that silently never receives anything.
+        guard !category.contains("-") else {
+            throw EventStoreClientError.unroutableCategory(stream: target)
         }
-
-        let session = InMemorySubscriptionSession()
-        subscriptions[key] = session
-
-        // Deliberate design choice: replay everything already stored, in commit
-        // order, before switching to live tail delivery — real KurrentDB's start
-        // position is a server-side setting this codebase never configures, and
-        // replay-from-start is what makes "seed events, then subscribe" tests
-        // deterministic with no sleeps.
-        for stored in matchingStoredEvents(for: target) {
-            session.deliver(stored)
-        }
-
-        return session
     }
 
     // MARK: - Category / subscription routing
@@ -278,6 +311,10 @@ private final class InMemorySubscriptionSession: PersistentSubscriptionSession, 
 
     func deliver(_ event: any RecordedEventLike, retryCount: Int = 0) {
         continuation.yield(SubscriptionDelivery(event: event, retryCount: retryCount))
+    }
+
+    func end(throwing error: any Error) {
+        continuation.finish(throwing: error)
     }
 
     func ack(_ deliveries: [SubscriptionDelivery]) async throws {

@@ -90,124 +90,126 @@ struct KurrentProjectionTransactionalRunnerIntegrationTests {
 
     @Test("Successful dispatch commits the tx; ReadModel visible after run")
     func happyPath() async throws {
-        let kdb = KurrentDBClient.makeIntegrationTestClient()
-        let pg = Self.makePGClient()
-        let groupName = "tx-runner-happy-\(UUID().uuidString.prefix(8))"
-        // Projector's categoryRule is hardcoded `.custom("TxDemo")`, so the
-        // subscription must target `$ce-TxDemo` to actually receive the events
-        // appended by the coordinator under stream `TxDemo-{aggregateId}`.
-        let stream = "$ce-TxDemo"
+        try await KurrentDBClient.withPooledIntegrationTestClient { kdb in
+            let pg = Self.makePGClient()
+            let groupName = "tx-runner-happy-\(UUID().uuidString.prefix(8))"
+            // Projector's categoryRule is hardcoded `.custom("TxDemo")`, so the
+            // subscription must target `$ce-TxDemo` to actually receive the events
+            // appended by the coordinator under stream `TxDemo-{aggregateId}`.
+            let stream = "$ce-TxDemo"
 
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { await pg.run() }
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask { await pg.run() }
 
-            try await PostgresReadModelMigration.createTable(on: pg)
-            try await kdb.persistentSubscriptions(stream: stream, group: groupName).create { options in
-                options.settings.resolveLink = true
+                try await PostgresReadModelMigration.createTable(on: pg)
+                try await kdb.persistentSubscriptions(stream: stream, group: groupName).create { options in
+                    options.settings.resolveLink = true
+                }
+                defer { Task { try? await kdb.persistentSubscriptions(stream: stream, group: groupName).delete() } }
+
+                let aggregateId = UUID().uuidString
+                let event = DemoEvent(aggregateRootId: aggregateId, customerId: "alice")
+                let coordinator = KurrentStorageCoordinator<DemoProjector, CustomMetadata>(client: kdb, eventMapper: DemoEventMapper())
+                _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, metadata: nil)
+
+                let projector = DemoProjector(store: coordinator, throwOnApply: false)
+                let runner = KurrentProjection.TransactionalSubscriptionRunner(
+                    client: kdb,
+                    transactionProvider: PostgresTransactionProvider(client: pg),
+                    stream: stream,
+                    groupName: groupName
+                )
+                .register(
+                    projector: projector,
+                    storeFactory: { _ in PostgresTransactionalReadModelStore<DemoModel>() }
+                ) { record in
+                    demoAggregateId(from: record).map(DemoInput.init)
+                }
+
+                let task = Task { try await runner.run() }
+
+                // Poll up to 5 seconds for the read model to appear in PG via a non-tx fetch.
+                let nonTxStore = PostgresJSONReadModelStore<DemoModel>(client: pg)
+                let deadline = Date().addingTimeInterval(5.0)
+                var stored: StoredReadModel<DemoModel>? = nil
+                while Date() < deadline {
+                    stored = try await nonTxStore.fetch(byId: aggregateId)
+                    if stored != nil { break }
+                    try await Task.sleep(for: .milliseconds(200))
+                }
+
+                task.cancel()
+                _ = try? await task.value
+
+                #expect(stored?.readModel.customerId == "alice")
+
+                group.cancelAll()
             }
-            defer { Task { try? await kdb.persistentSubscriptions(stream: stream, group: groupName).delete() } }
-
-            let aggregateId = UUID().uuidString
-            let event = DemoEvent(aggregateRootId: aggregateId, customerId: "alice")
-            let coordinator = KurrentStorageCoordinator<DemoProjector, CustomMetadata>(client: kdb, eventMapper: DemoEventMapper())
-            _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, metadata: nil)
-
-            let projector = DemoProjector(store: coordinator, throwOnApply: false)
-            let runner = KurrentProjection.TransactionalSubscriptionRunner(
-                client: kdb,
-                transactionProvider: PostgresTransactionProvider(client: pg),
-                stream: stream,
-                groupName: groupName
-            )
-            .register(
-                projector: projector,
-                storeFactory: { _ in PostgresTransactionalReadModelStore<DemoModel>() }
-            ) { record in
-                demoAggregateId(from: record).map(DemoInput.init)
-            }
-
-            let task = Task { try await runner.run() }
-
-            // Poll up to 5 seconds for the read model to appear in PG via a non-tx fetch.
-            let nonTxStore = PostgresJSONReadModelStore<DemoModel>(client: pg)
-            let deadline = Date().addingTimeInterval(5.0)
-            var stored: StoredReadModel<DemoModel>? = nil
-            while Date() < deadline {
-                stored = try await nonTxStore.fetch(byId: aggregateId)
-                if stored != nil { break }
-                try await Task.sleep(for: .milliseconds(200))
-            }
-
-            task.cancel()
-            _ = try? await task.value
-
-            #expect(stored?.readModel.customerId == "alice")
-
-            group.cancelAll()
         }
     }
 
     @Test("Failing projector rolls back tx; no ReadModel committed even on retry")
     func rollbackOnFailure() async throws {
-        let kdb = KurrentDBClient.makeIntegrationTestClient()
-        let pg = Self.makePGClient()
-        let groupName = "tx-runner-rollback-\(UUID().uuidString.prefix(8))"
-        // Projector's categoryRule is hardcoded `.custom("TxDemo")`, so the
-        // subscription must target `$ce-TxDemo` to actually receive the events
-        // appended by the coordinator under stream `TxDemo-{aggregateId}`.
-        let stream = "$ce-TxDemo"
+        try await KurrentDBClient.withPooledIntegrationTestClient { kdb in
+            let pg = Self.makePGClient()
+            let groupName = "tx-runner-rollback-\(UUID().uuidString.prefix(8))"
+            // Projector's categoryRule is hardcoded `.custom("TxDemo")`, so the
+            // subscription must target `$ce-TxDemo` to actually receive the events
+            // appended by the coordinator under stream `TxDemo-{aggregateId}`.
+            let stream = "$ce-TxDemo"
 
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { await pg.run() }
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask { await pg.run() }
 
-            try await PostgresReadModelMigration.createTable(on: pg)
-            try await kdb.persistentSubscriptions(stream: stream, group: groupName).create { options in
-                options.settings.resolveLink = true
-            }
-            defer { Task { try? await kdb.persistentSubscriptions(stream: stream, group: groupName).delete() } }
-
-            let aggregateId = UUID().uuidString
-            let event = DemoEvent(aggregateRootId: aggregateId, customerId: "bob")
-            let coordinator = KurrentStorageCoordinator<DemoProjector, CustomMetadata>(client: kdb, eventMapper: DemoEventMapper())
-            _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, metadata: nil)
-
-            // Projector that always throws inside apply — every retry should also fail.
-            let projector = DemoProjector(store: coordinator, throwOnApply: true)
-
-            // Tight retry policy so the test exits quickly via .skip after a couple of retries.
-            struct QuickSkip: KurrentProjection.RetryPolicy {
-                func decide(error: any Error, retryCount: Int) -> KurrentProjection.NackAction {
-                    retryCount >= 1 ? .skip : .retry
+                try await PostgresReadModelMigration.createTable(on: pg)
+                try await kdb.persistentSubscriptions(stream: stream, group: groupName).create { options in
+                    options.settings.resolveLink = true
                 }
+                defer { Task { try? await kdb.persistentSubscriptions(stream: stream, group: groupName).delete() } }
+
+                let aggregateId = UUID().uuidString
+                let event = DemoEvent(aggregateRootId: aggregateId, customerId: "bob")
+                let coordinator = KurrentStorageCoordinator<DemoProjector, CustomMetadata>(client: kdb, eventMapper: DemoEventMapper())
+                _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, metadata: nil)
+
+                // Projector that always throws inside apply — every retry should also fail.
+                let projector = DemoProjector(store: coordinator, throwOnApply: true)
+
+                // Tight retry policy so the test exits quickly via .skip after a couple of retries.
+                struct QuickSkip: KurrentProjection.RetryPolicy {
+                    func decide(error: any Error, retryCount: Int) -> KurrentProjection.NackAction {
+                        retryCount >= 1 ? .skip : .retry
+                    }
+                }
+
+                let runner = KurrentProjection.TransactionalSubscriptionRunner(
+                    client: kdb,
+                    transactionProvider: PostgresTransactionProvider(client: pg),
+                    stream: stream,
+                    groupName: groupName,
+                    retryPolicy: QuickSkip()
+                )
+                .register(
+                    projector: projector,
+                    storeFactory: { _ in PostgresTransactionalReadModelStore<DemoModel>() }
+                ) { record in
+                    demoAggregateId(from: record).map(DemoInput.init)
+                }
+
+                let task = Task { try await runner.run() }
+
+                // Wait long enough for at least 2 dispatch attempts to finish (initial + 1 retry → skip).
+                try await Task.sleep(for: .seconds(3))
+                task.cancel()
+                _ = try? await task.value
+
+                // Verify NO read model was committed even though dispatch was triggered.
+                let nonTxStore = PostgresJSONReadModelStore<DemoModel>(client: pg)
+                let stored = try await nonTxStore.fetch(byId: aggregateId)
+                #expect(stored == nil, "Read model should not be committed when projector throws — got \(String(describing: stored?.readModel))")
+
+                group.cancelAll()
             }
-
-            let runner = KurrentProjection.TransactionalSubscriptionRunner(
-                client: kdb,
-                transactionProvider: PostgresTransactionProvider(client: pg),
-                stream: stream,
-                groupName: groupName,
-                retryPolicy: QuickSkip()
-            )
-            .register(
-                projector: projector,
-                storeFactory: { _ in PostgresTransactionalReadModelStore<DemoModel>() }
-            ) { record in
-                demoAggregateId(from: record).map(DemoInput.init)
-            }
-
-            let task = Task { try await runner.run() }
-
-            // Wait long enough for at least 2 dispatch attempts to finish (initial + 1 retry → skip).
-            try await Task.sleep(for: .seconds(3))
-            task.cancel()
-            _ = try? await task.value
-
-            // Verify NO read model was committed even though dispatch was triggered.
-            let nonTxStore = PostgresJSONReadModelStore<DemoModel>(client: pg)
-            let stored = try await nonTxStore.fetch(byId: aggregateId)
-            #expect(stored == nil, "Read model should not be committed when projector throws — got \(String(describing: stored?.readModel))")
-
-            group.cancelAll()
         }
     }
 }
@@ -229,16 +231,17 @@ struct KurrentProjectionTransactionalRunnerConvenienceTests {
 
     @Test("Convenience init produces a runner using PostgresTransactionProvider")
     func convenienceInitWorks() async throws {
-        let kdb = KurrentDBClient.makeIntegrationTestClient()
-        let pg = Self.makePGClient()
+        try await KurrentDBClient.withPooledIntegrationTestClient { kdb in
+            let pg = Self.makePGClient()
 
-        let runner = KurrentProjection.TransactionalSubscriptionRunner(
-            client: kdb,
-            pgClient: pg,
-            stream: "$ce-Test",
-            groupName: "test-group"
-        )
-        // Compile-time check — `runner` is a TransactionalSubscriptionRunner<PostgresTransactionProvider>
-        let _: KurrentProjection.TransactionalSubscriptionRunner<PostgresTransactionProvider> = runner
+            let runner = KurrentProjection.TransactionalSubscriptionRunner(
+                client: kdb,
+                pgClient: pg,
+                stream: "$ce-Test",
+                groupName: "test-group"
+            )
+            // Compile-time check — `runner` is a TransactionalSubscriptionRunner<PostgresTransactionProvider>
+            let _: KurrentProjection.TransactionalSubscriptionRunner<PostgresTransactionProvider> = runner
+        }
     }
 }

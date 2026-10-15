@@ -20,3 +20,10 @@ public actor InMemoryReadModelStore<Model: ReadModel & Sendable>: ReadModelStore
         storage.removeValue(forKey: id)
     }
 }
+
+extension InMemoryReadModelStore: ReadModelSnapshotPurging {
+    public func purgeSnapshots(ofTypes typeNames: [String]) async throws {
+        guard typeNames.contains(Model.readModelTypeName) else { return }
+        storage.removeAll()
+    }
+}

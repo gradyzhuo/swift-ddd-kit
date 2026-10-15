@@ -127,6 +127,7 @@ targets: [
         </thead>
         <tbody>
           <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.9">1.4.0-beta.9</a></td><td><span lang="en">Template variables framework: <code>TemplateVariables</code>, <code>TemplateVariablesDefinition</code>, <code>VariablesGeneratorPlugin</code>. <code>ForwardingRule.translate</code> returns an array.</span><span lang="zh-Hant">Template variables 框架：<code>TemplateVariables</code>、<code>TemplateVariablesDefinition</code>、<code>VariablesGeneratorPlugin</code>。<code>ForwardingRule.translate</code> 改為回傳陣列。</span></td></tr>
+          <tr><td><span lang="en">Unreleased</span><span lang="zh-Hant">未發行</span></td><td><span lang="en"><strong>Postgres read models, production-ready</strong>: monotonic snapshots by default, runner-managed subscription groups, <code>KurrentProjection.rebuild</code>, stable <code>readModelTypeName</code>, and the generated <code>apply()</code> no longer aborts a fold.</span><span lang="zh-Hant"><strong>Postgres read model 上線強化</strong>：預設 monotonic snapshot、runner 自行管理 subscription group、<code>KurrentProjection.rebuild</code>、穩定的 <code>readModelTypeName</code>，且生成的 <code>apply()</code> 不再中斷整個 fold。</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -621,6 +622,11 @@ swift run generate variables    Sources/MyContext/variables.yaml    -o Generated
       <h3><span lang="en">API Reference</span><span lang="zh-Hant">API 文件</span></h3>
       <p lang="en">DocC reference for every module of the latest release, with a version menu for older minors and <code>main</code>.</p>
       <p lang="zh-Hant">最新版本每個模組的 DocC 參考文件，可用版本選單切換到較舊的 minor 版本與 <code>main</code>。</p>
+    </a>
+    <a class="doc-card" href="https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/readmodelpersistencepostgres/gettingstarted" target="_blank" rel="noopener">
+      <h3><span lang="en">Getting Started: Postgres read models</span><span lang="zh-Hant">快速上手：Postgres read model</span></h3>
+      <p lang="en">Project KurrentDB events into a queryable Postgres table in five steps, with write modes and rebuilding.</p>
+      <p lang="zh-Hant">五個步驟把 KurrentDB 事件投影到可查詢的 Postgres 資料表，並說明寫入模式與重建。</p>
     </a>
     <a class="doc-card" href="https://github.com/gradyzhuo/swift-ddd-kit#readme" target="_blank" rel="noopener">
       <h3>README</h3>

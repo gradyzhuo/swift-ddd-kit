@@ -3,6 +3,7 @@ import ReadModelPersistence
 import EventSourcing
 import PostgresNIO
 import Foundation
+import Logging
 
 public struct PostgresJSONReadModelStore<Model: ReadModel & Sendable>: ReadModelStore
     where Model.ID == String
@@ -10,15 +11,24 @@ public struct PostgresJSONReadModelStore<Model: ReadModel & Sendable>: ReadModel
     private let client: PostgresClient
     private let typeName: String
     private let tableName: String
+    private let writeMode: SnapshotWriteMode
+    private let logger = Logger(label: "PostgresJSONReadModelStore")
 
-    public init(client: PostgresClient, tableName: String = "read_model_snapshots") {
-        precondition(
-            tableName.range(of: #"^[a-zA-Z_][a-zA-Z0-9_$]*$"#, options: .regularExpression) != nil,
-            "tableName must be a valid SQL identifier (letters, digits, underscores, dollar signs; must start with a letter or underscore)"
-        )
+    /// - Parameters:
+    ///   - client: The Postgres client the store reads and writes through.
+    ///   - tableName: Base table name; the physical table depends on `writeMode`
+    ///     (see ``SnapshotWriteMode``). Create it with
+    ///     `PostgresReadModelMigration.createTable(on:tableName:writeMode:)`.
+    ///   - writeMode: Defaults to `.monotonic`.
+    public init(
+        client: PostgresClient,
+        tableName: String = "read_model_snapshots",
+        writeMode: SnapshotWriteMode = .monotonic
+    ) {
         self.client = client
-        self.typeName = String(describing: Model.self)
-        self.tableName = tableName
+        self.typeName = Model.readModelTypeName
+        self.tableName = SnapshotTable.resolve(baseName: tableName, mode: writeMode)
+        self.writeMode = writeMode
     }
 
     public func fetch(byId id: String) async throws -> StoredReadModel<Model>? {
@@ -46,12 +56,15 @@ public struct PostgresJSONReadModelStore<Model: ReadModel & Sendable>: ReadModel
                 throw ReadModelStoreError.saveFailed(id: readModel.id, cause: EncodingError.invalidValue(readModel, .init(codingPath: [], debugDescription: "JSON is not valid UTF-8")))
             }
             let rev = Int64(bitPattern: revision)
-            try await client.query("""
-                INSERT INTO \(unescaped: tableName) (id, type, data, revision, updated_at)
-                VALUES (\(readModel.id), \(typeName), \(jsonString)::jsonb, \(rev), now())
-                ON CONFLICT (id, type) DO UPDATE
-                    SET data = \(jsonString)::jsonb, revision = \(rev), updated_at = now()
-                """)
+            let rows = try await client.query(SnapshotUpsert.query(
+                table: tableName, id: readModel.id, typeName: typeName,
+                json: jsonString, revision: rev, mode: writeMode
+            ))
+            if writeMode == .monotonic, try await rows.collect().isEmpty {
+                logger.debug("skipped stale snapshot write", metadata: [
+                    "id": "\(readModel.id)", "type": "\(typeName)", "revision": "\(revision)",
+                ])
+            }
         } catch let e as ReadModelStoreError {
             throw e
         } catch {

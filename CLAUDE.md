@@ -51,7 +51,8 @@ DDDKit (umbrella re-export)
 ├── EventBus         — In-memory event bus (EventBus class)
 ├── MigrationUtility — Event schema migration framework
 ├── DomainEventGenerator — YAML→Swift code generation library
-└── TestUtility      — Helpers for integration tests against KurrentDB
+├── TestUtility      — Helpers for integration tests against KurrentDB
+└── ProjectorGeneratorFixture — Test-only fixture compiled with ModelGeneratorPlugin to exercise generated projector protocols (not documented)
 ```
 
 ### Key Protocols
@@ -80,6 +81,16 @@ DDDKit (umbrella re-export)
 **`EventSourcingProjector`** (EventSourcing) — CQRS read side. Requires `StorageCoordinator: EventStorageCoordinator`, `Input: CQRSProjectorInput`, and `ReadModelType: ReadModel`. The `execute(input:)` default fetches events and folds them into a `ReadModel` via `apply(readModel:events:)`.
 
 **`ReadModel`** (EventSourcing) — `Codable` type with an `id` for read-optimized projections.
+
+**`SnapshotWriteMode`** (ReadModelPersistencePostgres) — `.monotonic` (default; only a strictly newer revision replaces a row, older/equal writes are skipped with a debug log, table `<base>_monotonic`) or `.overwrite` (last write wins, table `<base>`; pre-existing behaviour; for a single consumer with in-order delivery or an existing `read_model_snapshots` table). Pass the same `tableName`/`writeMode` to `PostgresReadModelMigration`, the stores and `PostgresReadModelSnapshots`.
+
+**`ReadModelSnapshotPurging`** (ReadModelPersistence) — Backend capability to drop all snapshots of given `readModelTypeName`s; implemented by `PostgresReadModelSnapshots` and `InMemoryReadModelStore`.
+
+**`ReadModel.readModelTypeName`** (EventSourcing) — Stored `type` key of a snapshot; defaults to `String(describing: Self.self)`. Override it for a name that survives Swift renames.
+
+**`KurrentProjection.SubscriptionSetup`** (KurrentSupport) — Runner option: `.ensure(PersistentSubscriptionSettings)` (default; creates the group, recreates it and throws `subscriptionGroupNotFound` if it disappears) or `.manual`.
+
+**`KurrentProjection.rebuild`** (KurrentSupport) — Deletes the group, purges the listed read models' snapshots via `ReadModelSnapshotPurging`, recreates the group from the start. Stop consumers first; every step is idempotent.
 
 **`DomainEventBus`** (DDDCore/EventBus) — Publish events and subscribe by event type. `EventBus` is the in-memory implementation.
 

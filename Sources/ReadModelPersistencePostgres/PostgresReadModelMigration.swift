@@ -3,19 +3,18 @@ import PostgresNIO
 /// Utility for setting up the read model snapshot table in PostgreSQL.
 public enum PostgresReadModelMigration {
 
-    /// Creates the `read_model_snapshots` table if it does not already exist.
+    /// Creates the snapshot table for `writeMode` if it does not already exist.
     ///
-    /// This is idempotent — safe to call on every startup.
-    ///
-    /// - Parameters:
-    ///   - client: An active `PostgresClient`.
-    ///   - tableName: Table name to create (default: `"read_model_snapshots"`).
+    /// Idempotent — safe to call on every startup. The physical table is
+    /// `tableName` for `.overwrite` and `tableName + "_monotonic"` for `.monotonic`.
     public static func createTable(
         on client: PostgresClient,
-        tableName: String = "read_model_snapshots"
+        tableName: String = "read_model_snapshots",
+        writeMode: SnapshotWriteMode = .monotonic
     ) async throws {
+        let table = SnapshotTable.resolve(baseName: tableName, mode: writeMode)
         try await client.query("""
-            CREATE TABLE IF NOT EXISTS \(unescaped: tableName) (
+            CREATE TABLE IF NOT EXISTS \(unescaped: table) (
                 id         TEXT        NOT NULL,
                 type       TEXT        NOT NULL,
                 data       JSONB       NOT NULL,

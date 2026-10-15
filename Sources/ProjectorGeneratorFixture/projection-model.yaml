@@ -1,0 +1,5 @@
+OrderSummary:
+  model: readModel
+  events:
+    - OrderCreated
+    - OrderAmountUpdated

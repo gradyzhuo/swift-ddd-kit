@@ -14,45 +14,34 @@ private struct TestModel: ReadModel, Sendable {
     var value: String
 }
 
+private struct RenamedModel: ReadModel, Sendable {
+    static var readModelTypeName: String { "Stable.Name" }
+    typealias ID = String
+    let id: String
+}
+
 // MARK: - Test Helper
 
 private func withStore<T>(
+    writeMode: SnapshotWriteMode = .monotonic,
     _ body: (PostgresJSONReadModelStore<TestModel>) async throws -> T
 ) async throws -> T {
-    let client = PostgresClient(
-        configuration: .init(
-            host: "localhost",
-            port: 5432,
-            username: "ddd",
-            password: "ddd",
-            database: "ddd",
-            tls: .disable
-        )
-    )
+    let client = PostgresClient(configuration: .testDefault)
     let task = Task { await client.run() }
     defer { task.cancel() }
 
-    try await client.query("""
-        CREATE TABLE IF NOT EXISTS read_model_snapshots_test (
-            id         TEXT        NOT NULL,
-            type       TEXT        NOT NULL,
-            data       JSONB       NOT NULL,
-            revision   BIGINT      NOT NULL,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            PRIMARY KEY (id, type)
-        )
-        """)
-
+    try await PostgresReadModelMigration.createTable(
+        on: client, tableName: "read_model_snapshots_test", writeMode: writeMode
+    )
     let store = PostgresJSONReadModelStore<TestModel>(
-        client: client,
-        tableName: "read_model_snapshots_test"
+        client: client, tableName: "read_model_snapshots_test", writeMode: writeMode
     )
     return try await body(store)
 }
 
 // MARK: - Tests
 
-@Suite("PostgresJSONReadModelStore")
+@Suite("PostgresJSONReadModelStore", .serialized)
 struct PostgresJSONReadModelStoreTests {
 
     @Test("fetch 不存在的 id 回傳 nil")
@@ -104,5 +93,73 @@ struct PostgresJSONReadModelStoreTests {
             let result = try await store.fetch(byId: id)
             #expect(result == nil)
         }
+    }
+
+    @Test("monotonic: an older revision is skipped, not thrown, and the newer snapshot survives")
+    func monotonicSkipsOlder() async throws {
+        let id = UUID().uuidString
+        try await withStore(writeMode: .monotonic) { store in
+            try await store.save(readModel: TestModel(id: id, value: "rev6"), revision: 6)
+            try await store.save(readModel: TestModel(id: id, value: "rev5"), revision: 5)
+            let stored = try await store.fetch(byId: id)
+            #expect(stored?.readModel.value == "rev6")
+            #expect(stored?.revision == 6)
+            try await store.delete(byId: id)
+        }
+    }
+
+    @Test("monotonic: an equal revision is skipped")
+    func monotonicSkipsEqual() async throws {
+        let id = UUID().uuidString
+        try await withStore(writeMode: .monotonic) { store in
+            try await store.save(readModel: TestModel(id: id, value: "first"), revision: 3)
+            try await store.save(readModel: TestModel(id: id, value: "second"), revision: 3)
+            #expect(try await store.fetch(byId: id)?.readModel.value == "first")
+            try await store.delete(byId: id)
+        }
+    }
+
+    @Test("overwrite: the last write wins even with an older revision")
+    func overwriteLastWins() async throws {
+        let id = UUID().uuidString
+        try await withStore(writeMode: .overwrite) { store in
+            try await store.save(readModel: TestModel(id: id, value: "rev6"), revision: 6)
+            try await store.save(readModel: TestModel(id: id, value: "rev0"), revision: 0)
+            let stored = try await store.fetch(byId: id)
+            #expect(stored?.readModel.value == "rev0")
+            #expect(stored?.revision == 0)
+            try await store.delete(byId: id)
+        }
+    }
+
+    @Test("Modes never share rows: a monotonic write is invisible to an overwrite store")
+    func modesUseSeparateTables() async throws {
+        let id = UUID().uuidString
+        try await withStore(writeMode: .monotonic) { mono in
+            try await mono.save(readModel: TestModel(id: id, value: "mono"), revision: 1)
+            try await withStore(writeMode: .overwrite) { over -> Void in
+                let fetched = try await over.fetch(byId: id)
+                #expect(fetched == nil)
+            }
+            try await mono.delete(byId: id)
+        }
+    }
+
+    @Test("Rows are keyed by readModelTypeName")
+    func usesReadModelTypeName() async throws {
+        let id = UUID().uuidString
+        let client = PostgresClient(configuration: .testDefault)
+        let task = Task { await client.run() }
+        defer { task.cancel() }
+        try await PostgresReadModelMigration.createTable(on: client, tableName: "read_model_snapshots_test")
+        let store = PostgresJSONReadModelStore<RenamedModel>(client: client, tableName: "read_model_snapshots_test")
+        try await store.save(readModel: RenamedModel(id: id), revision: 1)
+        let rows = try await client.query(
+            "SELECT type FROM read_model_snapshots_test_monotonic WHERE id = \(id)"
+        )
+        var types: [String] = []
+        for try await (type,) in rows.decode((String,).self) { types.append(type) }
+        #expect(types == ["Stable.Name"])
+        try await store.delete(byId: id)
     }
 }

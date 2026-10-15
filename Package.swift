@@ -344,6 +344,13 @@ let package = Package(
         .testTarget(
             name: "TemplateVariablesDemoTests",
             dependencies: ["TemplateVariablesDemo", "TemplateVariables"]),
+        .target(
+            name: "ProjectorGeneratorFixture",
+            dependencies: ["DDDKit"],
+            plugins: ["DomainEventGeneratorPlugin", "ModelGeneratorPlugin"]),
+        .testTarget(
+            name: "ProjectorGeneratorFixtureTests",
+            dependencies: ["ProjectorGeneratorFixture", "DDDKit"]),
         .plugin(
           name: "VariablesGeneratorPlugin",
           capability: .buildTool(),
