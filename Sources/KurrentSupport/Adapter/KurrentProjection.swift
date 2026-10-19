@@ -8,6 +8,7 @@
 
 import KurrentDB
 import Logging
+import Foundation
 import Synchronization
 import EventSourcing
 import ReadModelPersistence
@@ -77,6 +78,11 @@ import ReadModelPersistence
 /// `KurrentDBClient` — pass an `InMemoryEventStoreClient` (see the
 /// `KurrentSupportInMemory` target) to exercise `run()`/`register()` in unit tests
 /// with no live KurrentDB instance.
+///
+/// ## Reacting to committed writes
+///
+/// Both runners accept opt-in after-commit hooks via `onCommitted(_:)`; see
+/// ``KurrentProjection/CommittedProjection`` for when they fire and what they see.
 ///
 /// ## Phase 2 (deferred)
 ///
@@ -163,6 +169,114 @@ public enum KurrentProjection {
         }
     }
 
+    /// What one subscription delivery made durable, handed to the hooks registered with
+    /// `onCommitted(_:)` on ``PersistentSubscriptionRunner`` and ``TransactionalSubscriptionRunner``.
+    ///
+    /// ## When a hook fires
+    ///
+    /// - ``TransactionalSubscriptionRunner``: after `withTransaction` returned, i.e. the
+    ///   delivery's transaction committed. Never on rollback.
+    /// - ``PersistentSubscriptionRunner``: after every registration finished without
+    ///   throwing, i.e. every store save of the delivery succeeded.
+    ///
+    /// In both runners a hook does not fire when the delivery failed (projector or store
+    /// threw — it is nacked instead), or when no registration handled it (every
+    /// registration's `eventFilter` rejected it or its `extractInput` returned `nil`).
+    /// It is queued right after the commit, before the ack, and fires whether or not the
+    /// ack then succeeds: the write is durable either way. If the ack fails, KurrentDB
+    /// redelivers the event and the hook may see it again (usually with no
+    /// ``writtenReadModels``, since the fold has nothing new).
+    ///
+    /// ## Isolation
+    ///
+    /// Hooks never run on the subscription loop. Each runner hands committed deliveries
+    /// to one background task (started by `run()` only when a hook is registered) that
+    /// calls the hooks one at a time, in registration order, for one delivery after
+    /// another in commit order. So a slow hook delays later *hooks*, never the next
+    /// delivery, its commit or its ack, and a hook can't cause a nack or a redelivery.
+    /// The hand-off queue is unbounded: a hook that is permanently slower than the
+    /// subscription grows it without limit — move heavy work onto your own queue.
+    /// When `run()` returns, already queued deliveries are still delivered to the hooks.
+    ///
+    /// ## Single process only
+    ///
+    /// A hook fires only in the process that handled the delivery. Other processes
+    /// (another replica of the same consumer group, a web tier holding WebSockets) are
+    /// not told; fanning out across processes (e.g. Postgres `NOTIFY`, a message bus) is
+    /// the application's job.
+    public struct CommittedProjection: Sendable, Equatable {
+
+        /// One read model row saved while handling the delivery.
+        public struct WrittenReadModel: Sendable, Hashable {
+            /// The model's `ReadModel.readModelTypeName`.
+            public let readModelTypeName: String
+            public let id: String
+
+            public init(readModelTypeName: String, id: String) {
+                self.readModelTypeName = readModelTypeName
+                self.id = id
+            }
+        }
+
+        /// Id of the source event.
+        public let eventId: UUID
+        /// Type of the source event.
+        public let eventType: String
+        /// Stream the source event was originally appended to, e.g. `"Order-42"`.
+        public let streamName: String
+        /// The source event's revision, as reported by `RecordedEventLike.revision`.
+        public let revision: UInt64
+        /// Read models saved for this delivery, in registration order. Lists only
+        /// `register(projector:…)` registrations that actually saved — not those whose
+        /// fold found no new events — and never closure registrations
+        /// (`register(eventFilter:extractInput:execute:)`), whose writes the runner can't see.
+        public let writtenReadModels: [WrittenReadModel]
+
+        /// The ids of ``writtenReadModels``.
+        public var readModelIds: [String] { writtenReadModels.map(\.id) }
+
+        public init(eventId: UUID, eventType: String, streamName: String, revision: UInt64, writtenReadModels: [WrittenReadModel]) {
+            self.eventId = eventId
+            self.eventType = eventType
+            self.streamName = streamName
+            self.revision = revision
+            self.writtenReadModels = writtenReadModels
+        }
+
+        init(record: any RecordedEventLike, writtenReadModels: [WrittenReadModel]) {
+            self.init(
+                eventId: record.id, eventType: record.eventType, streamName: record.streamName,
+                revision: record.revision, writtenReadModels: writtenReadModels
+            )
+        }
+    }
+
+    /// A hook registered with `onCommitted(_:)`. Non-throwing: handle your own errors.
+    public typealias CommitHook = @Sendable (CommittedProjection) async -> Void
+
+    /// Hands committed deliveries from the subscription loop to one background task that
+    /// runs the hooks in order. Only created when at least one hook is registered.
+    struct CommitNotifier: Sendable {
+        private let continuation: AsyncStream<CommittedProjection>.Continuation
+
+        static func start(hooks: [CommitHook]) -> CommitNotifier? {
+            guard !hooks.isEmpty else { return nil }
+            let (stream, continuation) = AsyncStream.makeStream(of: CommittedProjection.self)
+            Task {
+                for await committed in stream {
+                    for hook in hooks { await hook(committed) }
+                }
+            }
+            return CommitNotifier(continuation: continuation)
+        }
+
+        func notify(_ committed: CommittedProjection) { continuation.yield(committed) }
+        func finish() { continuation.finish() }
+    }
+
+    /// `nil` = no registration handled the event; otherwise the read models saved.
+    typealias DispatchOutcome = [CommittedProjection.WrittenReadModel]?
+
     public final class PersistentSubscriptionRunner: Sendable {
 
         private let client: any EventStoreClient
@@ -175,6 +289,7 @@ public enum KurrentProjection {
         // Registrations are appended via `register` (chainable, sync) and read by `run()`.
         // Convention: register before run. Lock is defensive, not for concurrent register/run.
         private let _registrations = Mutex<[Registration]>([])
+        private let _commitHooks = Mutex<[CommitHook]>([])
 
         public init(
             client: any EventStoreClient,
@@ -236,25 +351,29 @@ public enum KurrentProjection {
               Projector.Input: Sendable
         {
             let registration = Registration(dispatch: { record in
-                guard Self._shouldDispatch(eventType: record.eventType, filter: eventFilter) else { return }
-                guard let input = extractInput(record) else { return }
+                guard Self._shouldDispatch(eventType: record.eventType, filter: eventFilter) else { return nil }
+                guard let input = extractInput(record) else { return nil }
 
                 // Incremental fold: fetch from stored revision, apply, save.
+                let readModel: Store.Model
                 if let stored = try await store.fetch(byId: input.id) {
                     guard let result = try await projector.store.fetchEvents(
                         byId: input.id, afterRevision: stored.revision
-                    ) else { return }
-                    if result.events.isEmpty { return }
-                    var readModel = stored.readModel
-                    try projector.apply(readModel: &readModel, events: result.events)
-                    try await store.save(readModel: readModel, revision: result.latestRevision)
+                    ) else { return [] }
+                    if result.events.isEmpty { return [] }
+                    var folded = stored.readModel
+                    try projector.apply(readModel: &folded, events: result.events)
+                    try await store.save(readModel: folded, revision: result.latestRevision)
+                    readModel = folded
                 } else {
-                    guard let result = try await projector.store.fetchEvents(byId: input.id) else { return }
-                    guard !result.events.isEmpty else { return }
-                    guard var readModel = try projector.buildReadModel(input: input) else { return }
-                    try projector.apply(readModel: &readModel, events: result.events)
-                    try await store.save(readModel: readModel, revision: result.latestRevision)
+                    guard let result = try await projector.store.fetchEvents(byId: input.id) else { return [] }
+                    guard !result.events.isEmpty else { return [] }
+                    guard var folded = try projector.buildReadModel(input: input) else { return [] }
+                    try projector.apply(readModel: &folded, events: result.events)
+                    try await store.save(readModel: folded, revision: result.latestRevision)
+                    readModel = folded
                 }
+                return [.init(readModelTypeName: Store.Model.readModelTypeName, id: readModel.id)]
             })
             _registrations.withLock { $0.append(registration) }
             return self
@@ -269,26 +388,46 @@ public enum KurrentProjection {
             let registration = Registration(dispatch: { record in
                 guard Self._shouldDispatch(
                     eventType: record.eventType, filter: eventFilter
-                ) else { return }
-                guard let input = extractInput(record) else { return }
+                ) else { return nil }
+                guard let input = extractInput(record) else { return nil }
                 try await execute(input)
+                return []
             })
             _registrations.withLock { $0.append(registration) }
             return self
         }
 
+        /// Add a hook called after each delivery's store saves succeeded.
+        ///
+        /// Opt-in; with no hook registered `run()` starts no extra task. Register hooks
+        /// before calling `run()`; several hooks run one after another in registration
+        /// order. See ``KurrentProjection/CommittedProjection`` for exactly when a hook
+        /// fires, its ordering and isolation guarantees, and the single-process caveat.
+        @discardableResult
+        public func onCommitted(_ hook: @escaping CommitHook) -> Self {
+            _commitHooks.withLock { $0.append(hook) }
+            return self
+        }
+
         /// Dispatch a single recorded event to all registered projectors in parallel.
         /// Throws if any projector throws (TaskGroup semantics — others are cancelled).
-        internal func dispatch(record: any RecordedEventLike) async throws {
+        /// Returns `nil` if no registration handled the event, otherwise the read models
+        /// saved, in registration order.
+        @discardableResult
+        internal func dispatch(record: any RecordedEventLike) async throws -> DispatchOutcome {
             let snapshot = _registrations.withLock { $0 }
-            try await withThrowingTaskGroup(of: Void.self) { group in
-                for registration in snapshot {
+            let outcomes = try await withThrowingTaskGroup(of: (Int, DispatchOutcome).self) { group in
+                for (index, registration) in snapshot.enumerated() {
                     group.addTask {
-                        try await registration.dispatch(record)
+                        (index, try await registration.dispatch(record))
                     }
                 }
-                try await group.waitForAll()
+                var outcomes = [DispatchOutcome](repeating: nil, count: snapshot.count)
+                for try await (index, outcome) in group { outcomes[index] = outcome }
+                return outcomes
             }
+            let handled = outcomes.compactMap { $0 }
+            return handled.isEmpty ? nil : handled.flatMap { $0 }
         }
 
         /// Subscribe to the persistent subscription and dispatch each event to all
@@ -304,7 +443,12 @@ public enum KurrentProjection {
         /// Cancellation is observed between events, not mid-dispatch — once an event
         /// enters `dispatch(record:)` it runs to completion (or until the registered
         /// closures themselves observe `Task.isCancelled`).
+        ///
+        /// Hooks added with ``onCommitted(_:)`` are queued after a delivery's saves
+        /// succeeded and before its ack, and run off the subscription loop.
         public func run() async throws {
+            let notifier = CommitNotifier.start(hooks: _commitHooks.withLock { $0 })
+            defer { notifier?.finish() }
             try await KurrentProjection.withSubscriptionGroup(
                 client: client, stream: stream, group: groupName,
                 setup: subscriptionSetup, logger: logger
@@ -313,7 +457,10 @@ public enum KurrentProjection {
                 for try await delivery in subscription.events {
                     if Task.isCancelled { return }
                     do {
-                        try await dispatch(record: delivery.event)
+                        let written = try await dispatch(record: delivery.event)
+                        if let notifier, let written {
+                            notifier.notify(CommittedProjection(record: delivery.event, writtenReadModels: written))
+                        }
                         try await subscription.ack([delivery])
                     } catch {
                         try await handleFailure(error: error, delivery: delivery, subscription: subscription)
@@ -362,7 +509,7 @@ public enum KurrentProjection {
     }
 
     fileprivate struct Registration: Sendable {
-        let dispatch: @Sendable (any RecordedEventLike) async throws -> Void
+        let dispatch: @Sendable (any RecordedEventLike) async throws -> DispatchOutcome
     }
 
     /// Transactional projection runner — every event triggers a single shared
@@ -385,6 +532,7 @@ public enum KurrentProjection {
         // Registrations: closure captures projector + storeFactory + extractInput;
         // signature is (any RecordedEventLike, Provider.Transaction) async throws -> Void.
         private let _registrations = Mutex<[TransactionalRegistration<Provider.Transaction>]>([])
+        private let _commitHooks = Mutex<[CommitHook]>([])
 
         public init(
             client: any EventStoreClient,
@@ -447,30 +595,47 @@ public enum KurrentProjection {
               Projector.Input: Sendable
         {
             let registration = TransactionalRegistration<Provider.Transaction>(dispatch: { record, tx in
-                guard Self._shouldDispatchTx(eventType: record.eventType, filter: eventFilter) else { return }
-                guard let input = extractInput(record) else { return }
+                guard Self._shouldDispatchTx(eventType: record.eventType, filter: eventFilter) else { return nil }
+                guard let input = extractInput(record) else { return nil }
                 let store = storeFactory(tx)
 
                 // Incremental fold: fetch from stored revision, apply, save.
+                let readModel: Store.Model
                 if let stored = try await store.fetch(byId: input.id, in: tx) {
                     // Incremental path: only events newer than stored revision
                     guard let result = try await projector.store.fetchEvents(
                         byId: input.id, afterRevision: stored.revision
-                    ) else { return }
-                    if result.events.isEmpty { return }
-                    var readModel = stored.readModel
-                    try projector.apply(readModel: &readModel, events: result.events)
-                    try await store.save(readModel: readModel, revision: result.latestRevision, in: tx)
+                    ) else { return [] }
+                    if result.events.isEmpty { return [] }
+                    var folded = stored.readModel
+                    try projector.apply(readModel: &folded, events: result.events)
+                    try await store.save(readModel: folded, revision: result.latestRevision, in: tx)
+                    readModel = folded
                 } else {
                     // Full replay path
-                    guard let result = try await projector.store.fetchEvents(byId: input.id) else { return }
-                    guard !result.events.isEmpty else { return }
-                    guard var readModel = try projector.buildReadModel(input: input) else { return }
-                    try projector.apply(readModel: &readModel, events: result.events)
-                    try await store.save(readModel: readModel, revision: result.latestRevision, in: tx)
+                    guard let result = try await projector.store.fetchEvents(byId: input.id) else { return [] }
+                    guard !result.events.isEmpty else { return [] }
+                    guard var folded = try projector.buildReadModel(input: input) else { return [] }
+                    try projector.apply(readModel: &folded, events: result.events)
+                    try await store.save(readModel: folded, revision: result.latestRevision, in: tx)
+                    readModel = folded
                 }
+                return [.init(readModelTypeName: Store.Model.readModelTypeName, id: readModel.id)]
             })
             _registrations.withLock { $0.append(registration) }
+            return self
+        }
+
+        /// Add a hook called after each delivery's transaction committed.
+        ///
+        /// Opt-in; with no hook registered `run()` starts no extra task. Register hooks
+        /// before calling `run()`; several hooks run one after another in registration
+        /// order. Never called for a rolled-back transaction. See
+        /// ``KurrentProjection/CommittedProjection`` for exactly when a hook fires, its
+        /// ordering and isolation guarantees, and the single-process caveat.
+        @discardableResult
+        public func onCommitted(_ hook: @escaping CommitHook) -> Self {
+            _commitHooks.withLock { $0.append(hook) }
             return self
         }
 
@@ -495,7 +660,12 @@ public enum KurrentProjection {
         /// success, rolls back on any failure (then runs through `RetryPolicy`).
         ///
         /// Cancellation is observed between events, not mid-dispatch.
+        ///
+        /// Hooks added with ``onCommitted(_:)`` are queued after the commit and before
+        /// the ack, and run off the subscription loop.
         public func run() async throws {
+            let notifier = CommitNotifier.start(hooks: _commitHooks.withLock { $0 })
+            defer { notifier?.finish() }
             do {
                 try await KurrentProjection.withSubscriptionGroup(
                     client: client, stream: stream, group: groupName,
@@ -505,8 +675,11 @@ public enum KurrentProjection {
                     for try await delivery in subscription.events {
                         if Task.isCancelled { return }
                         do {
-                            try await transactionProvider.withTransaction { tx in
+                            let written = try await transactionProvider.withTransaction { tx in
                                 try await self.dispatch(record: delivery.event, transaction: tx)
+                            }
+                            if let notifier, let written {
+                                notifier.notify(CommittedProjection(record: delivery.event, writtenReadModels: written))
                             }
                             try await subscription.ack([delivery])
                         } catch {
@@ -523,12 +696,18 @@ public enum KurrentProjection {
         /// another in registration order, within the supplied transaction. Sequential
         /// on purpose: all projectors share the transaction's single connection.
         /// The first throw stops the rest and bubbles to `withTransaction`, which
-        /// rolls back.
-        internal func dispatch(record: any RecordedEventLike, transaction tx: Provider.Transaction) async throws {
+        /// rolls back. Returns `nil` if no registration handled the event, otherwise the
+        /// read models saved, in registration order.
+        @discardableResult
+        internal func dispatch(record: any RecordedEventLike, transaction tx: Provider.Transaction) async throws -> DispatchOutcome {
             let snapshot = _registrations.withLock { $0 }
+            var written: DispatchOutcome = nil
             for registration in snapshot {
-                try await registration.dispatch(record, tx)
+                if let saved = try await registration.dispatch(record, tx) {
+                    written = (written ?? []) + saved
+                }
             }
+            return written
         }
 
         private func handleFailure(
@@ -554,6 +733,6 @@ public enum KurrentProjection {
     }
 
     fileprivate struct TransactionalRegistration<Transaction: Sendable>: Sendable {
-        let dispatch: @Sendable (any RecordedEventLike, Transaction) async throws -> Void
+        let dispatch: @Sendable (any RecordedEventLike, Transaction) async throws -> DispatchOutcome
     }
 }
