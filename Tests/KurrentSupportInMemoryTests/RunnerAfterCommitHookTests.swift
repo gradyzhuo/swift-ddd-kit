@@ -384,3 +384,80 @@ struct PersistentAfterCommitHookTests {
         #expect(recorder.all.map(\.streamName) == ["Booking-b-1", "Booking-b-2"])
     }
 }
+
+// MARK: - Ordering across run() restarts of the same runner instance
+
+/// Tracks hook calls: how many run at once, and the order they started in.
+private final class ConcurrencyProbe: Sendable {
+    let state = Mutex<(inFlight: Int, maxInFlight: Int, started: [String])>((0, 0, []))
+    func hook(_ committed: KurrentProjection.CommittedProjection) async {
+        let isFirst = state.withLock { s -> Bool in
+            s.inFlight += 1
+            s.maxInFlight = max(s.maxInFlight, s.inFlight)
+            s.started.append(committed.streamName)
+            return s.started.count == 1
+        }
+        // The very first hook call is still suspended while run() ends and restarts.
+        if isFirst { try? await Task.sleep(for: .milliseconds(300)) }
+        state.withLock { $0.inFlight -= 1 }
+    }
+    var started: [String] { state.withLock { $0.started } }
+    var maxInFlight: Int { state.withLock { $0.maxInFlight } }
+}
+
+@Suite("onCommitted — ordering across run() restarts")
+struct AfterCommitHookRestartTests {
+
+    /// Commits b-1 (hook suspends), ends `run()` by deleting the group (the runner
+    /// recreates it and throws — the documented restart path), appends b-2, calls
+    /// `run()` again on the same instance, and checks no two hook calls overlapped.
+    private func restart(
+        client: InMemoryEventStoreClient,
+        probe: ConcurrencyProbe,
+        run: @escaping @Sendable () async throws -> Void
+    ) async throws {
+        let coordinator = KurrentStorageCoordinator<BookingProjector, CustomMetadata>(client: client, eventMapper: HookMapper())
+        try await append(Booked(aggregateRootId: "b-1"), id: "b-1", to: coordinator)
+
+        let first = Task { try await run() }
+        try await waitUntil { probe.started.count == 1 }
+        try await client.deletePersistentSubscription(stream: "$ce-Booking", group: "g")
+        _ = await first.result  // run() ended (throws subscriptionGroupNotFound)
+
+        try await append(Booked(aggregateRootId: "b-2"), id: "b-2", to: coordinator)
+        let second = Task { try await run() }
+        // Recreated group replays b-1, then b-2.
+        try await waitUntil { probe.started.contains("Booking-b-2") }
+        second.cancel()
+
+        #expect(probe.maxInFlight == 1)
+        #expect(probe.started.first == "Booking-b-1")
+        #expect(probe.started.last == "Booking-b-2")
+    }
+
+    @Test("PersistentSubscriptionRunner: hooks from a restarted run() wait for earlier ones")
+    func persistentRestart() async throws {
+        let client = InMemoryEventStoreClient()
+        let probe = ConcurrencyProbe()
+        let runner = KurrentProjection.PersistentSubscriptionRunner(client: client, stream: "$ce-Booking", groupName: "g")
+            .register(extractInput: { $0.streamName }, execute: { _ in })
+            .onCommitted { await probe.hook($0) }
+        try await restart(client: client, probe: probe) { try await runner.run() }
+    }
+
+    @Test("TransactionalSubscriptionRunner: hooks from a restarted run() wait for earlier ones")
+    func transactionalRestart() async throws {
+        let client = InMemoryEventStoreClient()
+        let probe = ConcurrencyProbe()
+        let coordinator = KurrentStorageCoordinator<BookingProjector, CustomMetadata>(client: client, eventMapper: HookMapper())
+        let shared = SharedRows()
+        let runner = KurrentProjection.TransactionalSubscriptionRunner(
+            client: client, transactionProvider: RecordingProvider(), stream: "$ce-Booking", groupName: "g"
+        )
+        .register(projector: BookingProjector(store: coordinator), storeFactory: { _ in TxStore(shared: shared) }) {
+            BookingInput(id: $0.streamName.replacingOccurrences(of: "Booking-", with: ""))
+        }
+        .onCommitted { await probe.hook($0) }
+        try await restart(client: client, probe: probe) { try await runner.run() }
+    }
+}

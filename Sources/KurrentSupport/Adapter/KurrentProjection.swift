@@ -189,14 +189,21 @@ public enum KurrentProjection {
     ///
     /// ## Isolation
     ///
-    /// Hooks never run on the subscription loop. Each runner hands committed deliveries
-    /// to one background task (started by `run()` only when a hook is registered) that
-    /// calls the hooks one at a time, in registration order, for one delivery after
-    /// another in commit order. So a slow hook delays later *hooks*, never the next
-    /// delivery, its commit or its ack, and a hook can't cause a nack or a redelivery.
-    /// The hand-off queue is unbounded: a hook that is permanently slower than the
-    /// subscription grows it without limit — move heavy work onto your own queue.
-    /// When `run()` returns, already queued deliveries are still delivered to the hooks.
+    /// Hooks never run on the subscription loop. Each runner instance hands committed
+    /// deliveries to one background task (started by the first `onCommitted(_:)`, so a
+    /// runner without hooks starts none) that calls the hooks one at a time, in
+    /// registration order, for one delivery after another in commit order. So a slow hook
+    /// delays later *hooks*, never the next delivery, its commit or its ack, and a hook
+    /// can't cause a nack or a redelivery. The hand-off queue is unbounded: a hook that is
+    /// permanently slower than the subscription grows it without limit — move heavy work
+    /// onto your own queue.
+    ///
+    /// The ordering is per runner instance and holds across `run()` calls: when `run()`
+    /// returns or throws, queued deliveries still reach the hooks, and calling `run()`
+    /// again on the same instance (the restart pattern) queues later commits strictly
+    /// behind them — hook calls never overlap. A *new* runner instance has its own queue;
+    /// don't rely on ordering between instances. The queue ends when the runner is
+    /// deallocated (after draining what was already queued).
     ///
     /// ## Single process only
     ///
@@ -226,10 +233,15 @@ public enum KurrentProjection {
         public let streamName: String
         /// The source event's revision, as reported by `RecordedEventLike.revision`.
         public let revision: UInt64
-        /// Read models saved for this delivery, in registration order. Lists only
-        /// `register(projector:…)` registrations that actually saved — not those whose
-        /// fold found no new events — and never closure registrations
-        /// (`register(eventFilter:extractInput:execute:)`), whose writes the runner can't see.
+        /// Read models whose save was issued and returned without error for this delivery
+        /// (in this commit, for the transactional runner), in registration order.
+        ///
+        /// A registration whose fold found no new events issues no save and is not listed;
+        /// closure registrations (`register(eventFilter:extractInput:execute:)`) are never
+        /// listed, since the runner can't see their writes. A listed save may still have
+        /// been a no-op in the store: a `.monotonic` Postgres store skips an upsert when an
+        /// equal-or-newer snapshot is already durable. Either way the stored row is at least
+        /// as new as this delivery, so treating the list as a "refresh these" signal is safe.
         public let writtenReadModels: [WrittenReadModel]
 
         /// The ids of ``writtenReadModels``.
@@ -255,23 +267,45 @@ public enum KurrentProjection {
     public typealias CommitHook = @Sendable (CommittedProjection) async -> Void
 
     /// Hands committed deliveries from the subscription loop to one background task that
-    /// runs the hooks in order. Only created when at least one hook is registered.
-    struct CommitNotifier: Sendable {
-        private let continuation: AsyncStream<CommittedProjection>.Continuation
-
-        static func start(hooks: [CommitHook]) -> CommitNotifier? {
-            guard !hooks.isEmpty else { return nil }
-            let (stream, continuation) = AsyncStream.makeStream(of: CommittedProjection.self)
-            Task {
-                for await committed in stream {
-                    for hook in hooks { await hook(committed) }
-                }
-            }
-            return CommitNotifier(continuation: continuation)
+    /// runs the hooks in order. One per runner instance, shared by every `run()` call so
+    /// ordering survives restarts. The task and queue are created on the first
+    /// `onCommitted`; the queue ends when the runner is deallocated.
+    final class CommitDispatcher: Sendable {
+        private final class Hooks: Sendable {
+            let list = Mutex<[CommitHook]>([])
         }
 
-        func notify(_ committed: CommittedProjection) { continuation.yield(committed) }
-        func finish() { continuation.finish() }
+        private let hooks = Hooks()
+        private let continuation = Mutex<AsyncStream<CommittedProjection>.Continuation?>(nil)
+
+        init() {}
+
+        deinit { continuation.withLock { $0?.finish() } }
+
+        func add(_ hook: @escaping CommitHook) {
+            hooks.list.withLock { $0.append(hook) }
+            continuation.withLock { continuation in
+                guard continuation == nil else { return }
+                let (stream, newContinuation) = AsyncStream.makeStream(of: CommittedProjection.self)
+                // Captures only the hook list, not `self`, so the runner (and with it this
+                // dispatcher and the continuation) can still be deallocated.
+                let hooks = self.hooks
+                Task {
+                    for await committed in stream {
+                        for hook in hooks.list.withLock({ $0 }) { await hook(committed) }
+                    }
+                }
+                continuation = newContinuation
+            }
+        }
+
+        /// No-op (and no `CommittedProjection` built) when no hook is registered.
+        func notify(record: any RecordedEventLike, writtenReadModels: DispatchOutcome) {
+            guard let writtenReadModels else { return }
+            continuation.withLock { continuation in
+                continuation?.yield(CommittedProjection(record: record, writtenReadModels: writtenReadModels))
+            }
+        }
     }
 
     /// `nil` = no registration handled the event; otherwise the read models saved.
@@ -289,7 +323,7 @@ public enum KurrentProjection {
         // Registrations are appended via `register` (chainable, sync) and read by `run()`.
         // Convention: register before run. Lock is defensive, not for concurrent register/run.
         private let _registrations = Mutex<[Registration]>([])
-        private let _commitHooks = Mutex<[CommitHook]>([])
+        private let commitDispatcher = CommitDispatcher()
 
         public init(
             client: any EventStoreClient,
@@ -399,13 +433,13 @@ public enum KurrentProjection {
 
         /// Add a hook called after each delivery's store saves succeeded.
         ///
-        /// Opt-in; with no hook registered `run()` starts no extra task. Register hooks
+        /// Opt-in; a runner with no hook starts no extra task. Register hooks
         /// before calling `run()`; several hooks run one after another in registration
         /// order. See ``KurrentProjection/CommittedProjection`` for exactly when a hook
         /// fires, its ordering and isolation guarantees, and the single-process caveat.
         @discardableResult
         public func onCommitted(_ hook: @escaping CommitHook) -> Self {
-            _commitHooks.withLock { $0.append(hook) }
+            commitDispatcher.add(hook)
             return self
         }
 
@@ -447,8 +481,6 @@ public enum KurrentProjection {
         /// Hooks added with ``onCommitted(_:)`` are queued after a delivery's saves
         /// succeeded and before its ack, and run off the subscription loop.
         public func run() async throws {
-            let notifier = CommitNotifier.start(hooks: _commitHooks.withLock { $0 })
-            defer { notifier?.finish() }
             try await KurrentProjection.withSubscriptionGroup(
                 client: client, stream: stream, group: groupName,
                 setup: subscriptionSetup, logger: logger
@@ -458,9 +490,7 @@ public enum KurrentProjection {
                     if Task.isCancelled { return }
                     do {
                         let written = try await dispatch(record: delivery.event)
-                        if let notifier, let written {
-                            notifier.notify(CommittedProjection(record: delivery.event, writtenReadModels: written))
-                        }
+                        commitDispatcher.notify(record: delivery.event, writtenReadModels: written)
                         try await subscription.ack([delivery])
                     } catch {
                         try await handleFailure(error: error, delivery: delivery, subscription: subscription)
@@ -532,7 +562,7 @@ public enum KurrentProjection {
         // Registrations: closure captures projector + storeFactory + extractInput;
         // signature is (any RecordedEventLike, Provider.Transaction) async throws -> Void.
         private let _registrations = Mutex<[TransactionalRegistration<Provider.Transaction>]>([])
-        private let _commitHooks = Mutex<[CommitHook]>([])
+        private let commitDispatcher = CommitDispatcher()
 
         public init(
             client: any EventStoreClient,
@@ -628,14 +658,14 @@ public enum KurrentProjection {
 
         /// Add a hook called after each delivery's transaction committed.
         ///
-        /// Opt-in; with no hook registered `run()` starts no extra task. Register hooks
+        /// Opt-in; a runner with no hook starts no extra task. Register hooks
         /// before calling `run()`; several hooks run one after another in registration
         /// order. Never called for a rolled-back transaction. See
         /// ``KurrentProjection/CommittedProjection`` for exactly when a hook fires, its
         /// ordering and isolation guarantees, and the single-process caveat.
         @discardableResult
         public func onCommitted(_ hook: @escaping CommitHook) -> Self {
-            _commitHooks.withLock { $0.append(hook) }
+            commitDispatcher.add(hook)
             return self
         }
 
@@ -664,8 +694,6 @@ public enum KurrentProjection {
         /// Hooks added with ``onCommitted(_:)`` are queued after the commit and before
         /// the ack, and run off the subscription loop.
         public func run() async throws {
-            let notifier = CommitNotifier.start(hooks: _commitHooks.withLock { $0 })
-            defer { notifier?.finish() }
             do {
                 try await KurrentProjection.withSubscriptionGroup(
                     client: client, stream: stream, group: groupName,
@@ -678,9 +706,7 @@ public enum KurrentProjection {
                             let written = try await transactionProvider.withTransaction { tx in
                                 try await self.dispatch(record: delivery.event, transaction: tx)
                             }
-                            if let notifier, let written {
-                                notifier.notify(CommittedProjection(record: delivery.event, writtenReadModels: written))
-                            }
+                            commitDispatcher.notify(record: delivery.event, writtenReadModels: written)
                             try await subscription.ack([delivery])
                         } catch {
                             try await handleFailure(error: error, delivery: delivery, subscription: subscription)
