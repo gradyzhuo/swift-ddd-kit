@@ -64,4 +64,46 @@ struct PublishedLanguageEventTests {
         let json = try PublishedLanguageEvent.wireEncoder.encode(event)
         #expect(!String(decoding: json, as: UTF8.self).contains("partitionKey"))
     }
+
+    // MARK: actorId
+
+    private func sample(actorId: String? = nil) -> PublishedLanguageEvent {
+        PublishedLanguageEvent(
+            eventId: "e-1", eventType: "T.v1",
+            occurredAt: Date(timeIntervalSince1970: 0),
+            recipientIds: ["u-1"], payload: ["k": "v"], actorId: actorId
+        )
+    }
+
+    /// Pre-actorId wire shape must still decode.
+    @Test func decodesLegacyPayloadWithoutActorId() throws {
+        let legacy = """
+        {"eventId":"e-1","eventType":"T.v1","occurredAt":"2026-08-14T01:02:03Z",\
+        "recipientIds":["u-1"],"payload":{"a":"b"}}
+        """
+        let event = try PublishedLanguageEvent.wireDecoder.decode(
+            PublishedLanguageEvent.self, from: Data(legacy.utf8)
+        )
+        #expect(event.actorId == nil)
+    }
+
+    @Test func omitsNilActorIdFromEncodedForm() throws {
+        let json = try PublishedLanguageEvent.wireEncoder.encode(sample())
+        #expect(!String(decoding: json, as: UTF8.self).contains("actorId"))
+    }
+
+    @Test func roundTripPreservesActorId() throws {
+        let event = sample(actorId: "acct-1")
+        let json = try PublishedLanguageEvent.wireEncoder.encode(event)
+        #expect(String(decoding: json, as: UTF8.self).contains("\"actorId\":\"acct-1\""))
+        let decoded = try PublishedLanguageEvent.wireDecoder.decode(PublishedLanguageEvent.self, from: json)
+        #expect(decoded.actorId == "acct-1")
+        #expect(decoded == event)
+    }
+
+    @Test func equatableDistinguishesActorIds() {
+        #expect(sample(actorId: "a") != sample(actorId: "b"))
+        #expect(sample(actorId: "a") != sample(actorId: nil))
+        #expect(sample(actorId: "a") == sample(actorId: "a"))
+    }
 }
