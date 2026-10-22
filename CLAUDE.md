@@ -92,6 +92,8 @@ DDDKit (umbrella re-export)
 
 **`KurrentProjection.rebuild`** (KurrentSupport) — Deletes the group, purges the listed read models' snapshots via `ReadModelSnapshotPurging`, recreates the group from the start. Stop consumers first; every step is idempotent.
 
+**`KurrentProjection.CommittedProjection` / `onCommitted(_:)`** (KurrentSupport) — Opt-in after-commit hooks on both runners. Queued after a delivery's commit (transactional) or successful saves (persistent), before the ack; never on rollback/failure/filtered/nil-input. Run on one background task per runner instance, shared across `run()` restarts (in order, never overlapping, off the subscription loop — a slow hook never delays the next delivery; unbounded queue; no ordering across instances). `writtenReadModels` = saves issued that returned without error (a `.monotonic` store may have skipped it because an equal-or-newer row is durable). Fires only in the handling process.
+
 **`DomainEventBus`** (DDDCore/EventBus) — Publish events and subscribe by event type. `EventBus` is the in-memory implementation.
 
 ### Code Generation (Plugins)
