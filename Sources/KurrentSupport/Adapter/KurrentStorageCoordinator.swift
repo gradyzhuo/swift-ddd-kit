@@ -34,6 +34,7 @@ public final class KurrentStorageCoordinator<
         version: UInt64?,
         metadata: Metadata?
     ) async throws -> UInt64? {
+        guard !events.isEmpty else { return nil }
         let streamName = StreamNaming.getStreamName(id: id)
         let encoder = JSONEncoder()
         let metadataBytes: Data? = try metadata.map { try encoder.encode($0) }
@@ -50,7 +51,24 @@ public final class KurrentStorageCoordinator<
         // with the existing stream instead of silently succeeding under
         // `.any` (which skips the concurrency check altogether).
         let expectedRevision: StreamRevision = version.map { .at($0) } ?? .noStream
-        return try await client.append(events: eventDataList, toStream: streamName, category: StreamNaming.category, expectedRevision: expectedRevision)
+        do {
+            return try await client.append(events: eventDataList, toStream: streamName, category: StreamNaming.category, expectedRevision: expectedRevision)
+        } catch let error as KurrentError {
+            switch error {
+            case let .wrongExpectedVersion(_, current):
+                let actual: UInt64? = switch current {
+                    case .noStream: nil
+                    case let .revision(revision): revision
+                }
+                throw DDDError.commitConflict(id: id, expected: version, actual: actual)
+            case .resourceDeleted:
+                throw DDDError.streamPurged(id: id)
+            default:
+                throw error
+            }
+        } catch EventStoreClientError.wrongExpectedRevision(let current) {
+            throw DDDError.commitConflict(id: id, expected: version, actual: current)
+        }
     }
 
     public func fetchEvents(byId id: String) async throws
@@ -75,14 +93,13 @@ public final class KurrentStorageCoordinator<
                 return nil
             }
 
-            let events = eventWrappers.map(\.event)
-            let sortedEvents = events.sorted {
-                $0.occurred < $1.occurred
-            }
-
-            return (events: sortedEvents, latestRevision: latestRevision)
+            // Stream order is revision order; do not re-sort.
+            return (events: eventWrappers.map(\.event), latestRevision: latestRevision)
         } catch EventStoreClientError.streamNotFound {
             logger.warning("Skip an error happened, stream not found: \(streamName)")
+            return nil
+        } catch KurrentError.resourceDeleted {
+            // Tombstoned by `purge`.
             return nil
         } catch {
             logger.error("The error happened when fetching events: \(error)")
@@ -112,13 +129,12 @@ public final class KurrentStorageCoordinator<
                 return (events: [], latestRevision: revision)
             }
 
-            let sortedEvents = eventWrappers.map(\.event).sorted {
-                $0.occurred < $1.occurred
-            }
-
-            return (events: sortedEvents, latestRevision: latestRevision)
+            return (events: eventWrappers.map(\.event), latestRevision: latestRevision)
         } catch EventStoreClientError.streamNotFound {
             logger.warning("Skip an error happened, stream not found: \(streamName)")
+            return nil
+        } catch KurrentError.resourceDeleted {
+            // Tombstoned by `purge`.
             return nil
         } catch {
             logger.error("The error happened when fetching events: \(error)")
@@ -126,8 +142,14 @@ public final class KurrentStorageCoordinator<
         }
     }
 
+    /// Tombstones the stream: the id can never be written again, even if it never
+    /// existed. KurrentDB keeps the data until a scavenge.
     public func purge(byId id: String) async throws {
         let streamName = StreamNaming.getStreamName(id: id)
-        try await self.client.deleteStream(name: streamName, expectedRevision: .streamExists)
+        do {
+            try await client.tombstoneStream(name: streamName)
+        } catch KurrentError.resourceDeleted {
+            // Already purged.
+        }
     }
 }
