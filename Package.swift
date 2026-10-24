@@ -149,6 +149,24 @@ let package = Package(
                 "DDDCore",
                 "EventSourcing",
             ]),
+        // Internal (not a product): the EventStore contract as throwing check
+        // functions, shared by every backend's tests. No `Testing` import.
+        .target(
+            name: "EventStoreContract",
+            dependencies: [
+                "DDDCore",
+                "EventSourcing",
+            ]),
+        .testTarget(
+            name: "EventStoreContractTests",
+            dependencies: [
+                "EventStoreContract",
+                "EventSourcing",
+                "DDDCore",
+                "KurrentSupport",
+                "KurrentSupportInMemory",
+                "ReadModelPersistence",
+            ]),
         .target(
             name: "ReadModelPersistencePostgres",
             dependencies: [
