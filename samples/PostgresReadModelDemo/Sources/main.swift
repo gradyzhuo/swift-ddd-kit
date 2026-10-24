@@ -111,7 +111,7 @@ try await withThrowingTaskGroup(of: Void.self) { group in
 
     // Step 1: Create order → full replay, snapshot saved to Postgres
     print("── Step 1: OrderCreated")
-    _ = try await coordinator.append(
+    var revision = try await coordinator.append(
         events: [OrderCreated(orderId: orderId, customerId: "customer-42", totalAmount: 1000)],
         byId: orderId, version: nil, metadata: nil)
     printModel("→ ReadModel (full replay → saved to Postgres)",
@@ -119,17 +119,17 @@ try await withThrowingTaskGroup(of: Void.self) { group in
 
     // Step 2: Update amount → incremental replay, snapshot updated
     print("── Step 2: OrderAmountUpdated")
-    _ = try await coordinator.append(
+    revision = try await coordinator.append(
         events: [OrderAmountUpdated(orderId: orderId, newAmount: 1500)],
-        byId: orderId, version: nil, metadata: nil)
+        byId: orderId, version: revision, metadata: nil)
     printModel("→ ReadModel (incremental → updated in Postgres)",
                try await stateful.execute(input: input))
 
     // Step 3: Cancel order → incremental replay
     print("── Step 3: OrderCancelled")
-    _ = try await coordinator.append(
+    revision = try await coordinator.append(
         events: [OrderCancelled(aggregateRootId: orderId)],
-        byId: orderId, version: nil, metadata: nil)
+        byId: orderId, version: revision, metadata: nil)
     printModel("→ ReadModel (incremental → updated in Postgres)",
                try await stateful.execute(input: input))
 

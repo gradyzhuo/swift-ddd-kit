@@ -1,39 +1,39 @@
 import DDDCore
 import Foundation
 
-/// A thread-safe, in-memory implementation of `EventStore`.
-/// Suitable for testing, prototyping, or use cases that do not require persistence.
+/// A thread-safe, in-memory `EventStore` that follows the `EventStore` contract:
+/// revisions start at 0, `version: nil` requires a new stream, a mismatch throws
+/// `DDDError.commitConflict`, and `purge` makes an id permanently unwritable.
 ///
-/// Stores typed metadata side-by-side with events. `fetchEvents` returns events
-/// as appended — it does NOT populate `event.metadata` on read (the heterogeneous
-/// `[any DomainEvent]` makes generic typed assignment impractical). Tests that
-/// need to verify metadata round-trip should either inspect the store's
-/// `recordedMetadata(byId:)` helper or use the Kurrent integration tests.
+/// Events are kept as appended — no serialization, no mapper — so `fetchEvents`
+/// does NOT populate `event.metadata`. Use `recordedMetadata(byId:)` to check
+/// what `append` received.
 public actor InMemoryEventStore<Metadata: EventMetadata>: EventStore {
 
     private struct Entry {
         var events: [any DomainEvent]
-        var metadata: [Metadata?]   // 1:1 with events; one entry per appended event
-        var revision: UInt64
+        var metadata: [Metadata?]   // 1:1 with events
     }
 
     private var store: [String: Entry] = [:]
+    private var purged: Set<String> = []
 
     public init() {}
 
     public func fetchEvents(byId id: String) async throws
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         guard let entry = store[id] else { return nil }
-        return (events: entry.events, latestRevision: entry.revision)
+        return (events: entry.events, latestRevision: UInt64(entry.events.count - 1))
     }
 
     public func fetchEvents(byId id: String, afterRevision revision: UInt64) async throws
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         guard let entry = store[id] else { return nil }
-        let startIndex = Int(revision)
-        guard startIndex <= entry.events.count else { return nil }
-        let newEvents = Array(entry.events[startIndex...])
-        return (events: newEvents, latestRevision: entry.revision)
+        let start = Int(revision) + 1
+        guard start < entry.events.count else {
+            return (events: [], latestRevision: revision)
+        }
+        return (events: Array(entry.events[start...]), latestRevision: UInt64(entry.events.count - 1))
     }
 
     public func append(
@@ -42,27 +42,38 @@ public actor InMemoryEventStore<Metadata: EventMetadata>: EventStore {
         version: UInt64?,
         metadata: Metadata?
     ) async throws -> UInt64? {
-        let existing = store[id]?.events ?? []
-        let existingMetadata = store[id]?.metadata ?? []
-        if let expectedVersion = version, let currentRevision = store[id]?.revision {
-            guard currentRevision == expectedVersion else {
-                throw InMemoryStorageCoordinatorError.versionConflict(
-                    expected: expectedVersion, actual: currentRevision
-                )
+        guard !events.isEmpty else { return nil }
+        guard !purged.contains(id) else { throw DDDError.streamPurged(id: id) }
+
+        var entry = store[id] ?? Entry(events: [], metadata: [])
+        let tail: UInt64? = entry.events.isEmpty ? nil : UInt64(entry.events.count - 1)
+        guard tail == version else {
+            if let replayed = Self.idempotentRevision(of: events, in: entry.events, expected: version) {
+                return replayed
             }
+            throw DDDError.commitConflict(id: id, expected: version, actual: tail)
         }
-        let newMetadata = existingMetadata + Array(repeating: metadata, count: events.count)
-        let newRevision = UInt64(existing.count + events.count)
-        store[id] = Entry(
-            events: existing + events,
-            metadata: newMetadata,
-            revision: newRevision
-        )
-        return newRevision
+        entry.events.append(contentsOf: events)
+        entry.metadata.append(contentsOf: Array(repeating: metadata, count: events.count))
+        store[id] = entry
+        return UInt64(entry.events.count - 1)
     }
 
     public func purge(byId id: String) async throws {
+        purged.insert(id)
         store.removeValue(forKey: id)
+    }
+
+    /// KurrentDB's id de-duplication: a batch whose ids equal the stored events
+    /// right after `expected` was already written, so answer with its last revision.
+    private static func idempotentRevision(
+        of events: [any DomainEvent], in stored: [any DomainEvent], expected: UInt64?
+    ) -> UInt64? {
+        let start = expected.map { Int($0) + 1 } ?? 0
+        let end = start + events.count
+        guard end <= stored.count else { return nil }
+        guard stored[start..<end].map({ $0.id }) == events.map({ $0.id }) else { return nil }
+        return UInt64(end - 1)
     }
 
     // MARK: - Test inspection helpers
@@ -74,6 +85,7 @@ public actor InMemoryEventStore<Metadata: EventMetadata>: EventStore {
     }
 }
 
+@available(*, deprecated, message: "No longer thrown. InMemoryEventStore throws DDDError.commitConflict.")
 public enum InMemoryStorageCoordinatorError: Error {
     case versionConflict(expected: UInt64, actual: UInt64)
 }
