@@ -78,4 +78,15 @@ struct InMemoryEventStoreClientTombstoneTests {
             _ = try await client.append(events: [sample("c")], toStream: "Order-1", category: "Order", expectedRevision: .noStream)
         }
     }
+
+    @Test("a huge expected revision conflicts instead of trapping", arguments: [UInt64.max, UInt64.max - 1, UInt64(Int.max), UInt64(Int.max) + 1])
+    func hugeRevisionConflicts(revision: UInt64) async throws {
+        let client = InMemoryEventStoreClient()
+        _ = try await client.append(events: [sample("a")], toStream: "Order-1", category: "Order", expectedRevision: .noStream)
+        await #expect(throws: EventStoreClientError.wrongExpectedRevision(current: 0)) {
+            _ = try await client.append(events: [sample("b")], toStream: "Order-1", category: "Order", expectedRevision: .at(revision))
+        }
+        let records = try await client.readStream(name: "Order-1", from: .start, resolveLinks: true)
+        #expect(records.count == 1)
+    }
 }

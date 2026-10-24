@@ -268,7 +268,12 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         let start: Int
         switch expected {
         case .noStream: start = 0
-        case let .at(revision): start = Int(revision) + 1
+        case let .at(revision):
+            // Compare in `UInt64` first: a revision at or beyond the stored count
+            // has nothing after it to match, and `Int(revision) + 1` would trap
+            // for huge values.
+            guard revision < UInt64(stored.count) else { return nil }
+            start = Int(revision) + 1
         case .any, .streamExists: return nil
         }
         let end = start + events.count
