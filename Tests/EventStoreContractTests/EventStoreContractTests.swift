@@ -11,4 +11,11 @@ struct EventStoreContractTests {
             InMemoryEventStore<ContractMetadata>()
         }
     }
+
+    @Test("InMemoryEventStore: huge versions conflict instead of trapping")
+    func inMemoryEventStoreHugeVersions() async throws {
+        try await EventStoreContract.checkHugeVersionConflicts {
+            InMemoryEventStore<ContractMetadata>()
+        }
+    }
 }

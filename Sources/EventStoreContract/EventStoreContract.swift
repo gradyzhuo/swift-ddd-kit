@@ -137,6 +137,31 @@ public enum EventStoreContract {
         try require(fetchedMissing == nil, rule, "a failed append created the stream")
     }
 
+    /// A `version` far beyond the tail (up to `UInt64.max`) is just a mismatch and
+    /// must throw `commitConflict`, not trap. Not part of `checkAll` yet:
+    /// `InMemoryEventStoreClient`'s id de-duplication still converts the expected
+    /// revision with `Int(_:)`, so the Kurrent-over-in-memory run would trap. Call
+    /// it explicitly for stores known to handle it.
+    public static func checkHugeVersionConflicts<S: EventStore>(
+        _ make: Make<S>
+    ) async throws where S.Metadata == ContractMetadata {
+        let rule = "3.4 any mismatched version conflicts"
+        let store = try await make()
+        let id = newId()
+        _ = try await store.append(events: events(1, id: id), byId: id, version: nil, metadata: nil)
+
+        for version in [UInt64.max, UInt64.max - 1, UInt64(Int.max), UInt64(Int.max) + 1] {
+            let conflict = try await expectDDDError(.commitConflict, rule) {
+                try await store.append(events: events(1, id: id), byId: id, version: version, metadata: nil)
+            }
+            try require(
+                conflict.commitConflict == DDDError.CommitConflict(id: id, expected: version, actual: 0),
+                rule, "version \(version): \(String(describing: conflict.commitConflict))")
+        }
+        let fetched = try await store.fetchEvents(byId: id)
+        try require(fetched?.events.count == 1, rule, "a failed append wrote events")
+    }
+
     public static func checkIdempotentResend<S: EventStore>(
         _ make: Make<S>
     ) async throws where S.Metadata == ContractMetadata {
