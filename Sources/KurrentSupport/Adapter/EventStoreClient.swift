@@ -11,20 +11,12 @@
 //  two conformances.
 //
 
+import EventSourcing
 import Foundation
 import KurrentDB
 
-/// A single stored/delivered event, decoupled from the concrete KurrentDB `RecordedEvent`.
-public protocol RecordedEventLike: Sendable {
-    var id: UUID { get }
-    var eventType: String { get }
-    var revision: UInt64 { get }
-    var customMetadata: Data { get }
-    /// Name of the stream this event was originally appended to — e.g. `"Order-42"`,
-    /// even when delivered via a resolved `$ce-Order` category-projection link.
-    var streamName: String { get }
-    func decode<T: Decodable>(to type: T.Type) throws -> T?
-}
+/// Moved to EventSourcing in 1.5; kept here so existing `KurrentSupport` imports compile.
+public typealias RecordedEventLike = EventSourcing.RecordedEventLike
 
 /// An event pushed by a persistent-subscription session, with its redelivery count.
 public struct SubscriptionDelivery: Sendable {
