@@ -31,11 +31,11 @@ struct OrderProjectorInput: CQRSProjectorInput {
 struct OrderProjector: OrderSummaryProjectorProtocol {
     typealias ReadModelType = OrderSummary
     typealias Input = OrderProjectorInput
-    typealias Store = InMemoryStorageCoordinator<CustomMetadata>
+    typealias Store = InMemoryEventStore<CustomMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    let store: InMemoryStorageCoordinator<CustomMetadata>
+    let store: InMemoryEventStore<CustomMetadata>
 
     func buildReadModel(input: Input) throws -> OrderSummary? {
         OrderSummary(id: input.id, customerId: "", totalAmount: 0, status: "unknown")
@@ -96,7 +96,7 @@ try await withThrowingTaskGroup(of: Void.self) { group in
     // ── Ensure table exists (idempotent) ────────────────────────────────────
     try await PostgresReadModelMigration.createTable(on: pgClient)
 
-    let coordinator = InMemoryStorageCoordinator<CustomMetadata>()
+    let coordinator = InMemoryEventStore<CustomMetadata>()
     let pgStore     = PostgresJSONReadModelStore<OrderSummary>(client: pgClient)
     let projector   = OrderProjector(store: coordinator)
     let stateful    = StatefulEventSourcingProjector(projector: projector, store: pgStore)

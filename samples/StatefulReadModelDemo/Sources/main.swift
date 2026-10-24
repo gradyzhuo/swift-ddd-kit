@@ -31,11 +31,11 @@ struct OrderProjectorInput: CQRSProjectorInput {
 struct OrderProjector: EventSourcingProjector, OrderSummaryProjectorProtocol {
     typealias ReadModelType = OrderSummary
     typealias Input = OrderProjectorInput
-    typealias Store = InMemoryStorageCoordinator<CustomMetadata>
+    typealias Store = InMemoryEventStore<CustomMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    let store: InMemoryStorageCoordinator<CustomMetadata>
+    let store: InMemoryEventStore<CustomMetadata>
 
     func buildReadModel(input: Input) throws -> OrderSummary? {
         OrderSummary(id: input.id, customerId: "", totalAmount: 0, status: "unknown")
@@ -73,7 +73,7 @@ func printModel(_ label: String, _ result: CQRSProjectorOutput<OrderSummary>?) {
 // StatefulEventSourcingProjector wraps any EventSourcingProjector + ReadModelStore,
 // providing incremental (snapshot-based) projection without changing the projector itself.
 
-let coordinator = InMemoryStorageCoordinator<CustomMetadata>()
+let coordinator = InMemoryEventStore<CustomMetadata>()
 let store       = InMemoryReadModelStore<OrderSummary>()
 let projector   = OrderProjector(store: coordinator)
 let stateful    = StatefulEventSourcingProjector(projector: projector, store: store)
