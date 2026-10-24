@@ -29,10 +29,11 @@ public actor InMemoryEventStore<Metadata: EventMetadata>: EventStore {
     public func fetchEvents(byId id: String, afterRevision revision: UInt64) async throws
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         guard let entry = store[id] else { return nil }
-        let start = Int(revision) + 1
-        guard start < entry.events.count else {
+        // Compare in UInt64 first: `Int(revision) + 1` traps for revisions near UInt64.max.
+        guard revision < UInt64(entry.events.count - 1) else {
             return (events: [], latestRevision: revision)
         }
+        let start = Int(revision) + 1
         return (events: Array(entry.events[start...]), latestRevision: UInt64(entry.events.count - 1))
     }
 
@@ -69,7 +70,15 @@ public actor InMemoryEventStore<Metadata: EventMetadata>: EventStore {
     private static func idempotentRevision(
         of events: [any DomainEvent], in stored: [any DomainEvent], expected: UInt64?
     ) -> UInt64? {
-        let start = expected.map { Int($0) + 1 } ?? 0
+        let start: Int
+        if let expected {
+            // Bail out in UInt64 before converting: `Int(expected) + 1` traps for
+            // versions near UInt64.max, and such a version can never match anyway.
+            guard expected < UInt64(stored.count) else { return nil }
+            start = Int(expected) + 1
+        } else {
+            start = 0
+        }
         let end = start + events.count
         guard end <= stored.count else { return nil }
         guard stored[start..<end].map({ $0.id }) == events.map({ $0.id }) else { return nil }
