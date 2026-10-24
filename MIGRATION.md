@@ -198,12 +198,12 @@
 
 ## 新增功能
 
-### `InMemoryStorageCoordinator`（EventSourcing 模組）
+### `InMemoryEventStore`（EventSourcing 模組）
 
-新增 thread-safe 的 in-memory 實作，適用於測試或不需要 KurrentDB 的場景：
+新增 thread-safe 的 in-memory 實作，適用於測試或不需要 KurrentDB 的場景（1.5 起由 `InMemoryStorageCoordinator` 更名為 `InMemoryEventStore`，行為依 EventStore 契約：revision 從 0 起算、`version: nil` 要求 stream 尚不存在、版本不符丟 `DDDError.commitConflict`、重送相同 event id 回傳原 revision、`purge` 後 `append` 丟 `streamPurged`）：
 
 ```swift
-let coordinator = InMemoryStorageCoordinator()
+let coordinator = InMemoryEventStore<CustomMetadata>()
 // conforms to EventStorageCoordinator
 ```
 
@@ -280,11 +280,11 @@ Add `Metadata` to your store's generic parameters:
 + let store: KurrentStorageCoordinator<OrderStreamNaming, CustomMetadata>
 ```
 
-Same for `InMemoryStorageCoordinator`:
+Same for the in-memory store (named `InMemoryStorageCoordinator` before 1.5, now `InMemoryEventStore`):
 
 ```diff
 - typealias Store = InMemoryStorageCoordinator
-+ typealias Store = InMemoryStorageCoordinator<CustomMetadata>
++ typealias Store = InMemoryEventStore<CustomMetadata>
 ```
 
 ### Step 3 — Update call sites
