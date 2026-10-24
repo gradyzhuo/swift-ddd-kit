@@ -49,6 +49,9 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     }
 
     private var streams: [String: [StoredEvent]] = [:]
+    /// Names tombstoned via `tombstoneStream`. Like a real cluster, every later
+    /// read/append/delete/tombstone of them throws `KurrentError.resourceDeleted`.
+    private var tombstoned: Set<String> = []
     private var subscriptions: [SubscriptionKey: InMemorySubscriptionSession] = [:]
     private var globalSequenceCounter: UInt64 = 0
 
@@ -84,9 +87,16 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         // routing, same as `LiveEventStoreClient` ignores it — see `EventStoreClient.append`'s
         // doc comment. `$ce-<Category>` routing must match what real KurrentDB derives
         // from the stream name itself.
+        if tombstoned.contains(name) { throw KurrentError.resourceDeleted(resource: name) }
         let systemCategory = Self.systemCategory(forStreamName: name)
         var existing = streams[name] ?? []
         let lastRevision = existing.last?.revision
+
+        // KurrentDB de-duplicates by event id: resending a batch that is already
+        // stored right after the expected position succeeds without writing.
+        if let replayed = Self.idempotentRevision(of: events, in: existing, expected: expectedRevision) {
+            return replayed
+        }
 
         switch expectedRevision {
         case .any:
@@ -135,6 +145,7 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         from revision: RevisionCursor,
         resolveLinks: Bool
     ) async throws -> [any RecordedEventLike] {
+        if tombstoned.contains(name) { throw KurrentError.resourceDeleted(resource: name) }
         guard let entry = streams[name] else {
             throw EventStoreClientError.streamNotFound
         }
@@ -151,6 +162,7 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     }
 
     public func deleteStream(name: String, expectedRevision: StreamRevision) async throws {
+        if tombstoned.contains(name) { throw KurrentError.resourceDeleted(resource: name) }
         let existing = streams[name]
         let lastRevision = existing?.last?.revision
 
@@ -171,6 +183,12 @@ public actor InMemoryEventStoreClient: EventStoreClient {
             }
         }
 
+        streams.removeValue(forKey: name)
+    }
+
+    public func tombstoneStream(name: String) async throws {
+        guard !tombstoned.contains(name) else { throw KurrentError.resourceDeleted(resource: name) }
+        tombstoned.insert(name)
         streams.removeValue(forKey: name)
     }
 
@@ -240,6 +258,24 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     }
 
     // MARK: - Category / subscription routing
+
+    /// Only `.noStream` and `.at(n)` are covered — the cases the EventStore
+    /// contract uses.
+    private static func idempotentRevision(
+        of events: [EventData], in stored: [StoredEvent], expected: StreamRevision
+    ) -> UInt64? {
+        guard !events.isEmpty else { return nil }
+        let start: Int
+        switch expected {
+        case .noStream: start = 0
+        case let .at(revision): start = Int(revision) + 1
+        case .any, .streamExists: return nil
+        }
+        let end = start + events.count
+        guard end <= stored.count else { return nil }
+        guard stored[start..<end].map({ $0.id }) == events.map({ $0.id }) else { return nil }
+        return stored[end - 1].revision
+    }
 
     private func matchingStoredEvents(for target: String) -> [StoredEvent] {
         if let category = categoryProjectionName(target) {
