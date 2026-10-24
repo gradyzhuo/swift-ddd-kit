@@ -89,8 +89,10 @@ public protocol EventStoreClient: Sendable {
 }
 
 extension EventStoreClient {
-    /// Conformers written before 1.5 keep compiling; `KurrentStorageCoordinator.purge`
-    /// through them fails at run time until they implement or forward this.
+    /// Conformers written before 1.5 keep compiling, but `KurrentStorageCoordinator.purge`
+    /// through them fails at run time until they implement or forward this. Deprecated so
+    /// the compiler warns at every conformance that silently relies on it.
+    @available(*, deprecated, message: "Implement or forward tombstoneStream(name:); KurrentStorageCoordinator.purge calls it.")
     public func tombstoneStream(name: String) async throws {
         throw EventStoreClientError.tombstoneUnsupported
     }
