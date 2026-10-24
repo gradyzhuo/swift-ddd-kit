@@ -6,7 +6,7 @@
 //  that exercise `KurrentStorageCoordinator`/`KurrentProjection.PersistentSubscriptionRunner`
 //  end to end without a live cluster.
 //
-//  Styled after `EventSourcing`'s `InMemoryStorageCoordinator`, one layer lower:
+//  Styled after `EventSourcing`'s `InMemoryEventStore`, one layer lower:
 //  this fakes KurrentDB's own append/read/delete + persistent-subscription push,
 //  not swift-ddd-kit's abstract `EventStore`.
 //

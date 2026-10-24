@@ -9,7 +9,7 @@ import Foundation
 /// `[any DomainEvent]` makes generic typed assignment impractical). Tests that
 /// need to verify metadata round-trip should either inspect the store's
 /// `recordedMetadata(byId:)` helper or use the Kurrent integration tests.
-public actor InMemoryStorageCoordinator<Metadata: EventMetadata>: EventStore {
+public actor InMemoryEventStore<Metadata: EventMetadata>: EventStore {
 
     private struct Entry {
         var events: [any DomainEvent]
@@ -77,3 +77,6 @@ public actor InMemoryStorageCoordinator<Metadata: EventMetadata>: EventStore {
 public enum InMemoryStorageCoordinatorError: Error {
     case versionConflict(expected: UInt64, actual: UInt64)
 }
+
+@available(*, deprecated, renamed: "InMemoryEventStore", message: "Renamed in 1.5 and now follows the EventStore contract: revisions start at 0, `version: nil` requires a new stream, conflicts throw DDDError.commitConflict. Removed in 1.6 at the earliest.")
+public typealias InMemoryStorageCoordinator<Metadata: EventMetadata> = InMemoryEventStore<Metadata>
