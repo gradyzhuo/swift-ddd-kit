@@ -334,3 +334,81 @@ it via structured concurrency.
 
 Return `[]` where you returned `nil`. When one record yields several events, give each a
 stable, distinct `eventId` (see `ForwardingRule`'s doc comment).
+
+## 1.5.0 — EventStore contract
+
+`EventStorageCoordinator` 的實作現在遵守同一份語意契約（見 `docs/superpowers/specs/2026-10-23-eventstore-contract-design.md`）。以下依影響程度列出。
+
+### 1. Production `purge` 改為 tombstone（永久）
+
+`KurrentStorageCoordinator.purge` 現在呼叫 KurrentDB `tombstone(.any)`：
+
+- Stream 永遠無法再寫入；之後對同一 id `append` 會丟 `DDDError.streamPurged`（code 502）。先 purge 再用同一個 id 重建 aggregate 的做法不再可行。
+- 對從未寫過的 id 呼叫 `purge` 也會成功，並讓該 id 永久保留（之後無法寫入）。不要 purge 之後還會使用的 id。
+- `EventSourcingRepository.purge` 不再先 `find`：未知的 id 不再丟 `aggregateNotFound`，已 soft-delete 的 aggregate 現在可以被 purge。
+
+### 2. 自訂 `EventStoreClient` wrapper / decorator 必須轉呼叫 `tombstoneStream(name:)`
+
+`EventStoreClient` 新增 `tombstoneStream(name:)`。舊的 conformance 仍可編譯（協定擴充提供標為 deprecated 的預設實作，會有警告），但 `purge` 在執行時丟 `EventStoreClientError.tombstoneUnsupported`，stream 也不會被 purge。
+
+```swift
+struct LoggingClient: EventStoreClient {
+    let base: any EventStoreClient
+    // ...其他 requirement...
++   func tombstoneStream(name: String) async throws {
++       try await base.tombstoneStream(name: name)
++   }
+}
+```
+
+### 3. 版本衝突統一丟 `DDDError.commitConflict`
+
+`KurrentStorageCoordinator` 與 `InMemoryEventStore` 在衝突時都丟 `DDDError.commitConflict`（code 501），取代 `EventStoreClientError.wrongExpectedRevision`、`KurrentError.wrongExpectedVersion`、`InMemoryStorageCoordinatorError.versionConflict`：
+
+```diff
+- } catch KurrentError.wrongExpectedVersion { ... }
++ } catch let error as DDDError where error.code == .commitConflict {
++     let conflict = error.commitConflict   // CommitConflict { id, expected, actual }
++     ...
++ }
+```
+
+### 4. 新增的 enum case
+
+`DDDError.Code` 新增 `commitConflict`(501)、`streamPurged`(502)、`storeUnavailable`(503)、`storeCorrupted`(504)；`EventStoreClientError` 新增 `tombstoneUnsupported`。沒有 `default` 的 exhaustive `switch` 需要補上這些 case。
+
+### 5. swift-kurrentdb 下限為 2.6.0
+
+```diff
+- .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.0.0")
++ .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0")
+```
+
+### 6. 其他行為變更
+
+- 空陣列的 `append` 直接回傳 `nil`，不寫入也不呼叫 client。
+- 對已存在的 stream 傳 `version: nil` 會衝突（`nil` 代表要求 stream 尚不存在）。
+- `fetchEvents` 依 stream 回傳的順序，不再依 `occurred` 排序。
+- `EventSourcingRepository.save` 在沒有新事件時不呼叫 store。
+- `InMemoryStorageCoordinator` 更名為 `InMemoryEventStore`，revision 從 0 起算；詳見上方〈新增功能〉的 `InMemoryEventStore`。
+
+### 7. Generator 產出檔的 import 改變（source-breaking）
+
+產出檔現在 import `Foundation`、`DDDCore`、`EventSourcing`，不再 import `KurrentSupport`／`KurrentDB`。若 `event.yaml` 以不再 import 的模組限定型別（例如 `KurrentSupport.CustomMetadata`），或使用只有 KurrentSupport／KurrentDB 提供的非限定型別，重新生成後會編譯失敗；KurrentSupport 的 typealias 無法補救，因為該模組沒被 import。二選一：
+
+```diff
+- actorMetadata: KurrentSupport.CustomMetadata
++ actorMetadata: EventSourcing.CustomMetadata   # 或非限定的 CustomMetadata
+```
+
+或在 `event-generator-config.yaml` 補上依賴：
+
+```yaml
+accessModifier: public
+dependencies:
+  - KurrentSupport
+```
+
+### 8. 型別移到 EventSourcing
+
+`RecordedEventLike`、`EventTypeMapper`、`CustomMetadata` 移到 `EventSourcing` 模組；`KurrentSupport` 保留同名 typealias，既有的 `import KurrentSupport` 程式碼不需修改。

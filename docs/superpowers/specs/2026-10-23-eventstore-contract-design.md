@@ -1,6 +1,6 @@
 # A. `EventStore` 語意契約 — 設計
 
-日期：2026-10-23（rev 4：依「減法」原則重寫，優先沿用既有機制）
+日期：2026-10-23（rev 5：generator import 改變改列 source-breaking；rev 4：依「減法」原則重寫，優先沿用既有機制）
 系列：A（本份）→ B `2026-10-23-persistent-event-store-design.md` → C `2026-10-23-eventstore-ci-platform-design.md`。B、C 依賴本份。
 版本：1.5.0。
 
@@ -128,10 +128,11 @@ behaviour change
 
 source-breaking
 - swift-kurrentdb 下限提高到 §4 所述的 patch 版本。
+- generator 產出檔的 import 由 `KurrentSupport`／`KurrentDB` 改為 `Foundation`／`DDDCore`／`EventSourcing`（見 `GeneratedImports.swift`）。YAML 中以不再 import 的模組限定的型別（例如 `KurrentSupport.CustomMetadata`），或只有 KurrentSupport／KurrentDB 才提供的非限定型別，重新生成後編不過；KurrentSupport 的 typealias 無法補救，因為該模組根本沒被 import。處理方式：改寫為 `EventSourcing.CustomMetadata`（或非限定的 `CustomMetadata`），或在 `event-generator-config.yaml` 加上 `dependencies: [KurrentSupport]`。
 - `DDDError.Code` 新增 501–504、`EventStoreClientError` 新增 `tombstoneUnsupported`：沒有 `default` 的 `switch` 會編不過。
 
 source-compatible
-- 三個型別下移（typealias）、generator import 改變、`tombstoneStream` 有預設實作。
+- 三個型別下移（typealias；只對仍 import KurrentSupport 的程式碼有效）、`tombstoneStream` 有預設實作（編譯時會有 deprecation 警告）。
 
 ## 9. 減法紀錄
 相對 rev 3，以下機制被移除，改由既有行為承擔：
