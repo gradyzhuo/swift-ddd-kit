@@ -380,7 +380,7 @@ struct LoggingClient: EventStoreClient {
 ### 5. swift-kurrentdb 下限為 2.6.0
 
 ```diff
-- .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.0.0")
+- .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.3.0")
 + .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0")
 ```
 
