@@ -66,6 +66,11 @@ private final class InMemoryCoordinator: EventStore {
     typealias Metadata = TestMetadata
     let _store: Mutex<[String: (events: [any DomainEvent], revision: UInt64)]> = .init([:])
     let _appendCallCount: Mutex<Int> = .init(0)
+    let _purgedIds: Mutex<[String]> = .init([])
+
+    var purgedIds: [String] {
+        _purgedIds.withLock { $0 }
+    }
     
     var store: [String: (events: [any DomainEvent], revision: UInt64)]{
         get{
@@ -100,6 +105,7 @@ private final class InMemoryCoordinator: EventStore {
     }
 
     func purge(byId id: String) async throws {
+        _purgedIds.withLock { $0.append(id) }
         store.removeValue(forKey: id)
     }
 }
@@ -208,11 +214,24 @@ struct EventSourcingRepositoryTests {
         }
     }
 
-    @Test("purge 不存在的 aggregate 拋錯")
-    func purgeNonExistentThrows() async throws {
-        let repo = ItemRepository(store: .init())
-        await #expect(throws: (any Error).self) {
-            try await repo.purge(byId: "ghost")
-        }
+    @Test("purge 不存在的 aggregate 不拋錯，直接交給 store")
+    func purgeNonExistentGoesToStore() async throws {
+        let coordinator = InMemoryCoordinator()
+        let repo = ItemRepository(store: coordinator)
+        try await repo.purge(byId: "ghost")
+        #expect(coordinator.purgedIds == ["ghost"])
+    }
+
+    @Test("沒有未提交事件時 save 不呼叫 store")
+    func saveWithoutEventsSkipsStore() async throws {
+        let coordinator = InMemoryCoordinator()
+        let repo = ItemRepository(store: coordinator)
+        let item = try Item(id: "item-1", name: "apple")
+        try await repo.save(aggregateRoot: item)
+        #expect(coordinator.appendCallCount == 1)
+
+        try await repo.save(aggregateRoot: item)
+
+        #expect(coordinator.appendCallCount == 1)
     }
 }
