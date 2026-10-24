@@ -67,6 +67,12 @@ public struct LiveEventStoreClient: EventStoreClient {
         }
     }
 
+    public func tombstoneStream(name: String) async throws {
+        _ = try await client.streams(specified: name).tombstone {
+            $0.expectedRevision = .any
+        }
+    }
+
     public func subscribePersistent(stream: String, group: String) async throws -> any PersistentSubscriptionSession {
         if let category = CategoryProjectionStream.category(forStream: stream), category.contains("-") {
             // A dashed category can never receive anything on a real cluster (see
