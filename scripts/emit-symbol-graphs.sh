@@ -26,7 +26,7 @@ output=$(cd "$2" && pwd)
 
 # DDDKit only re-exports other modules; generate and DDDKitCLI are executables;
 # TemplateVariablesDemo is a demo of the VariablesGeneratorPlugin.
-EXCLUDED=" DDDKit generate DDDKitCLI TemplateVariablesDemo ProjectorGeneratorFixture "
+EXCLUDED=" DDDKit generate DDDKitCLI TemplateVariablesDemo ProjectorGeneratorFixture EventStoreContract "
 
 graphs=$(mktemp -d)
 cd "$source"
