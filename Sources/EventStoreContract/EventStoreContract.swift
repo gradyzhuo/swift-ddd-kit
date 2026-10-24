@@ -179,16 +179,39 @@ public enum EventStoreContract {
         let resentAppend = try await store.append(events: appended, byId: id, version: 1, metadata: nil)
         try require(resentAppend == 2, rule, "resent append returned \(String(describing: resentAppend)), expected 2")
 
-        let fetched = try await store.fetchEvents(byId: id)
-        try require(fetched?.events.count == 3, rule, "a resend wrote events again")
+        let expectedIds = (created + appended).map { $0.id }
+        func requireUnchanged(_ step: String) async throws {
+            let fetched = try await store.fetchEvents(byId: id)
+            try require(fetched?.events.map { $0.id } == expectedIds, rule, "\(step) changed the stream")
+            try require(fetched?.latestRevision == 2, rule, "\(step): latestRevision \(String(describing: fetched?.latestRevision)), expected 2")
+        }
+        try await requireUnchanged("a resend")
+
+        // The matched segment is no longer the tail: the answer is the last revision
+        // of that segment, not the current tail.
+        let resentCreateLater = try await store.append(events: created, byId: id, version: nil, metadata: nil)
+        try require(resentCreateLater == 1, rule, "resent create after a later append returned \(String(describing: resentCreateLater)), expected 1 (its own last revision, not the tail)")
+        try await requireUnchanged("resending the create batch after a later append")
+
+        // The ids exist in the stream, but not right after the expected position.
+        _ = try await expectDDDError(.commitConflict, rule) {
+            try await store.append(events: appended, byId: id, version: nil, metadata: nil)
+        }
+        try await requireUnchanged("resending a batch at the wrong position")
+        _ = try await expectDDDError(.commitConflict, rule) {
+            try await store.append(events: created, byId: id, version: 0, metadata: nil)
+        }
+        try await requireUnchanged("resending a batch at a shifted position")
 
         _ = try await expectDDDError(.commitConflict, rule) {
             try await store.append(events: events(1, id: id), byId: id, version: 1, metadata: nil)
         }
+        try await requireUnchanged("a conflicting append")
         let partial = [created[0], ContractEvent(aggregateRootId: id, value: 9)]
         _ = try await expectDDDError(.commitConflict, rule) {
             try await store.append(events: partial, byId: id, version: nil, metadata: nil)
         }
+        try await requireUnchanged("a partially overlapping batch")
     }
 
     public static func checkConcurrentAppendsOneWins<S: EventStore>(
@@ -196,20 +219,28 @@ public enum EventStoreContract {
     ) async throws where S.Metadata == ContractMetadata {
         let rule = "3.4 concurrent appends at the same version"
         let store = try await make()
-        let id = newId()
-        _ = try await store.append(events: events(1, id: id), byId: id, version: nil, metadata: nil)
 
-        async let first = attemptAppend(store, id: id, version: 0)
-        async let second = attemptAppend(store, id: id, version: 0)
-        let results = await [first, second]
+        for round in 0..<concurrentRounds {
+            let id = newId()
+            let seed = events(1, id: id)
+            _ = try await store.append(events: seed, byId: id, version: nil, metadata: nil)
 
-        let successes = results.filter { if case .success = $0 { true } else { false } }
-        try require(successes.count == 1, rule, "\(successes.count) of 2 appends succeeded")
-        for case let .failure(error) in results {
-            try require((error as? DDDError)?.code == .commitConflict, rule, "loser threw \(error)")
+            let firstBatch = [ContractEvent(aggregateRootId: id, value: 1)]
+            let secondBatch = [ContractEvent(aggregateRootId: id, value: 2)]
+            async let first = attemptAppend(store, firstBatch, id: id, version: 0)
+            async let second = attemptAppend(store, secondBatch, id: id, version: 0)
+            let results = await [(firstBatch, first), (secondBatch, second)]
+
+            let winners = results.filter { if case .success = $0.1 { true } else { false } }
+            try require(winners.count == 1, rule, "round \(round): \(winners.count) of 2 appends succeeded")
+            for case let (_, .failure(error)) in results {
+                try require((error as? DDDError)?.code == .commitConflict, rule, "round \(round): loser threw \(error)")
+            }
+            let fetched = try await store.fetchEvents(byId: id)
+            let expected = (seed + winners[0].0).map { $0.id }
+            try require(fetched?.events.map { $0.id } == expected, rule, "round \(round): stream is not the seed followed by exactly the winner's events")
+            try require(fetched?.latestRevision == 1, rule, "round \(round): latestRevision \(String(describing: fetched?.latestRevision)), expected 1")
         }
-        let fetched = try await store.fetchEvents(byId: id)
-        try require(fetched?.events.count == 2, rule, "stream has \(String(describing: fetched?.events.count)) events, expected 2")
     }
 
     // MARK: - §3.3
@@ -262,9 +293,18 @@ public enum EventStoreContract {
         try await store.purge(byId: neverWritten)
         let fetchedNever = try await store.fetchEvents(byId: neverWritten)
         try require(fetchedNever == nil, rule, "purging an unknown id made it readable")
+        let fetchedNeverAfter = try await store.fetchEvents(byId: neverWritten, afterRevision: 0)
+        try require(fetchedNeverAfter == nil, rule, "purging an unknown id made it readable after a revision")
         _ = try await expectDDDError(.streamPurged, rule) {
             try await store.append(events: events(1, id: neverWritten), byId: neverWritten, version: nil, metadata: nil)
         }
+        // §3.4/§3.5: a purged id rejects every non-empty append, whatever the version.
+        _ = try await expectDDDError(.streamPurged, rule) {
+            try await store.append(events: events(1, id: neverWritten), byId: neverWritten, version: 0, metadata: nil)
+        }
+        try await store.purge(byId: neverWritten)
+        let fetchedNeverAgain = try await store.fetchEvents(byId: neverWritten)
+        try require(fetchedNeverAgain == nil, rule, "a second purge of an unknown id made it readable")
     }
 
     // MARK: - §3.2 / §3.4, serialized stores only
@@ -297,6 +337,29 @@ public enum EventStoreContract {
         }
         try require(conflict.commitConflict?.actual == 2, rule, "conflict actual \(String(describing: conflict.commitConflict?.actual)), expected the real tail 2")
 
+        // Interleaved: skipping must continue past an unmapped/undecodable event, and
+        // revisions are the real stream revisions, not positions among mapped events.
+        let interleaved = newId()
+        let firstMapped = ContractEvent(aggregateRootId: interleaved, value: 1)
+        let secondMapped = ContractEvent(aggregateRootId: interleaved, value: 3)
+        let interleavedEvents: [any DomainEvent] = [
+            ContractUnmappedEvent(aggregateRootId: interleaved),
+            firstMapped,
+            ContractUndecodableEvent(aggregateRootId: interleaved),
+            secondMapped,
+            ContractUnmappedEvent(aggregateRootId: interleaved),
+        ]
+        let interleavedTail = try await store.append(events: interleavedEvents, byId: interleaved, version: nil, metadata: nil)
+        try require(interleavedTail == 4, rule, "interleaved append returned \(String(describing: interleavedTail)), expected 4")
+        let fetchedInterleaved = try await store.fetchEvents(byId: interleaved)
+        try require(
+            fetchedInterleaved?.events.map { $0.id } == [firstMapped.id, secondMapped.id],
+            rule, "interleaved: expected both mapped events in order, got \(String(describing: fetchedInterleaved?.events.map { $0.id }))")
+        try require(fetchedInterleaved?.latestRevision == 3, rule, "interleaved latestRevision \(String(describing: fetchedInterleaved?.latestRevision)), expected 3")
+        let afterInterleaved = try await store.fetchEvents(byId: interleaved, afterRevision: 1)
+        try require(afterInterleaved?.events.map { $0.id } == [secondMapped.id], rule, "interleaved after 1 did not return exactly the mapped event at revision 3")
+        try require(afterInterleaved?.latestRevision == 3, rule, "interleaved after 1 latestRevision \(String(describing: afterInterleaved?.latestRevision)), expected 3")
+
         let onlyUnmapped = newId()
         _ = try await store.append(events: [ContractUnmappedEvent(aggregateRootId: onlyUnmapped)], byId: onlyUnmapped, version: nil, metadata: nil)
         let fetchedOnlyUnmapped = try await store.fetchEvents(byId: onlyUnmapped)
@@ -318,6 +381,17 @@ public enum EventStoreContract {
         try require(read.count == 2, rule, "read \(read.count) ContractEvents, expected 2")
         try require(read[0].metadata == tagged, rule, "metadata \(String(describing: read[0].metadata)), expected \(tagged)")
         try require(read[1].metadata == nil, rule, "nil metadata came back as \(String(describing: read[1].metadata))")
+
+        // `metadata` applies to every event of the batch, not just the first.
+        let batchId = newId()
+        let batchTag = ContractMetadata(tag: "m-batch")
+        _ = try await store.append(events: events(2, id: batchId), byId: batchId, version: nil, metadata: batchTag)
+        let fetchedBatch = try await store.fetchEvents(byId: batchId)
+        let readBatch = fetchedBatch?.events.compactMap { $0 as? ContractEvent } ?? []
+        try require(readBatch.count == 2, rule, "batch: read \(readBatch.count) ContractEvents, expected 2")
+        try require(
+            readBatch.allSatisfy { $0.metadata == batchTag }, rule,
+            "batch metadata \(readBatch.map { String(describing: $0.metadata) }), expected \(batchTag) on both events")
     }
 
     // MARK: - Helpers
@@ -350,11 +424,13 @@ public enum EventStoreContract {
         }
     }
 
+    static let concurrentRounds = 20
+
     static func attemptAppend<S: EventStore>(
-        _ store: S, id: String, version: UInt64
+        _ store: S, _ batch: [ContractEvent], id: String, version: UInt64
     ) async -> Result<UInt64?, any Error> where S.Metadata == ContractMetadata {
         do {
-            return .success(try await store.append(events: events(1, id: id), byId: id, version: version, metadata: nil))
+            return .success(try await store.append(events: batch, byId: id, version: version, metadata: nil))
         } catch {
             return .failure(error)
         }
