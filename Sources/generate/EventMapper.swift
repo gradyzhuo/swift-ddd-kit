@@ -57,7 +57,7 @@ struct GenerateEventMapperCommand: ParsableCommand {
         
         let accessModifier = accessModifier?.value ?? configuration.accessModifier
         
-        let defaultDependencies = ["Foundation", "DDDCore", "KurrentSupport", "KurrentDB"]
+        let defaultDependencies = GeneratedImports.eventMapper
         let configDependencies = configuration.dependencies ?? []
         let headerGenerator = HeaderGenerator(dependencies: defaultDependencies + configDependencies)
         
