@@ -27,6 +27,10 @@ extension DDDError {
         case projectorConstructionFailed = 301
         case aggregateOperationNotAllowed = 202
         case eventsNotFound = 401
+        case commitConflict = 501
+        case streamPurged = 502
+        case storeUnavailable = 503
+        case storeCorrupted = 504
     }
 }
 
@@ -90,5 +94,50 @@ extension DDDError {
     @available(*, deprecated, renamed: "projectorOperationFailed(projectorType:id:reason:userInfos:)")
     public static func presenterOperationFailed(presenterType: String, id: String, reason: String, userInfos: [String: Sendable]? = nil) -> Self {
         projectorOperationFailed(projectorType: presenterType, id: id, reason: reason, userInfos: userInfos)
+    }
+}
+
+// MARK: - EventStore errors
+
+extension DDDError {
+    /// Payload of a `commitConflict` error: the stream's tail revision did not
+    /// match what the caller expected. `nil` means "no stream".
+    ///
+    /// Diagnostic only — do not show it to end users verbatim.
+    public struct CommitConflict: Sendable, Equatable {
+        public let id: String
+        public let expected: UInt64?
+        public let actual: UInt64?
+
+        public init(id: String, expected: UInt64?, actual: UInt64?) {
+            self.id = id
+            self.expected = expected
+            self.actual = actual
+        }
+    }
+
+    /// `EventStore.append` found the stream somewhere other than `expected`.
+    /// Nothing was written.
+    public static func commitConflict(id: String, expected: UInt64?, actual: UInt64?) -> Self {
+        let errorCode = DDDError.Code.commitConflict
+        let conflict = CommitConflict(id: id, expected: expected, actual: actual)
+        let expectedText = expected.map { "\($0)" } ?? "no stream"
+        let actualText = actual.map { "\($0)" } ?? "no stream"
+        let message = "[\(errorCode)] Append to \(id) expected \(expectedText) but found \(actualText)."
+        return .init(code: errorCode, message: message, userInfos: ["commitConflict": conflict])
+    }
+
+    /// The conflict details when `code == .commitConflict`, otherwise `nil`.
+    public var commitConflict: CommitConflict? {
+        guard code == .commitConflict else { return nil }
+        return userInfos["commitConflict"] as? CommitConflict
+    }
+
+    /// `EventStore.append` targeted an id that was purged. Nothing was written,
+    /// and the id can never be written again.
+    public static func streamPurged(id: String) -> Self {
+        let errorCode = DDDError.Code.streamPurged
+        let message = "[\(errorCode)] \(id) was purged and cannot be written again."
+        return .init(code: errorCode, message: message, userInfos: ["id": id])
     }
 }
