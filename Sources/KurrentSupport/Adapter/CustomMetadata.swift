@@ -1,9 +1,4 @@
 import EventSourcing
 
-public struct CustomMetadata: EventMetadata {
-    public let operatorId: String
-
-    public init(operatorId: String) {
-        self.operatorId = operatorId
-    }
-}
+/// Moved to EventSourcing in 1.5; kept here so existing `KurrentSupport` imports compile.
+public typealias CustomMetadata = EventSourcing.CustomMetadata

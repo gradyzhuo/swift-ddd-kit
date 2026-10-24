@@ -56,7 +56,7 @@ struct GenerateModelCommand: ParsableCommand {
         
         let accessModifier = accessModifier?.value ?? configuration.accessModifier
         
-        let defaultDependencies = ["Foundation", "DDDCore", "EventSourcing"]
+        let defaultDependencies = GeneratedImports.projectionModel
         let configDependencies = configuration.dependencies ?? []
         let headerGenerator = HeaderGenerator(dependencies: defaultDependencies + configDependencies)
         

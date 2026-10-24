@@ -49,6 +49,7 @@ extension EventSourcingRepository {
     }
 
     public func save(aggregateRoot: AggregateRootType) async throws {
+        guard !aggregateRoot.events.isEmpty else { return }
         let metadata = EventMetadataContext<Store.Metadata>.current
         let latestRevision: UInt64? = try await store.append(
             events: aggregateRoot.events,
@@ -71,11 +72,8 @@ extension EventSourcingRepository {
         try await save(aggregateRoot: aggregateRoot)
     }
 
-    /// 危険操作!! 完全移除，不可恢復
+    /// 危険操作!! 完全移除，不可恢復。該 id 之後永遠無法再寫入，不論先前是否存在。
     public func purge(byId id: AggregateRootType.ID) async throws {
-        guard let _ = try await find(byId: id) else {
-            throw DDDError.aggregateNotFound(usecase: "DeleteAggregateRoot", aggregateRootType: AggregateRootType.self, aggregateRootId: "\(id)")
-        }
         try await store.purge(byId: id)
     }
 }

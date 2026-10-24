@@ -61,11 +61,11 @@ private final class Widget: AggregateRoot, @unchecked Sendable {
 
 private final class WidgetRepository: EventSourcingRepository {
     typealias AggregateRootType = Widget
-    typealias Store = InMemoryStorageCoordinator<TestMetadata>
+    typealias Store = InMemoryEventStore<TestMetadata>
 
-    let store: InMemoryStorageCoordinator<TestMetadata>
+    let store: InMemoryEventStore<TestMetadata>
 
-    init(store: InMemoryStorageCoordinator<TestMetadata>) {
+    init(store: InMemoryEventStore<TestMetadata>) {
         self.store = store
     }
 }
@@ -77,7 +77,7 @@ struct EventSourcingRepositoryMetadataTests {
 
     @Test("save inside withValue propagates metadata to the store")
     func saveWithAmbientMetadata() async throws {
-        let store = InMemoryStorageCoordinator<TestMetadata>()
+        let store = InMemoryEventStore<TestMetadata>()
         let repo = WidgetRepository(store: store)
         let widget = try Widget(id: "w-1", name: "alpha")
 
@@ -91,7 +91,7 @@ struct EventSourcingRepositoryMetadataTests {
 
     @Test("save outside withValue records nil metadata (no crash)")
     func saveWithoutAmbient() async throws {
-        let store = InMemoryStorageCoordinator<TestMetadata>()
+        let store = InMemoryEventStore<TestMetadata>()
         let repo = WidgetRepository(store: store)
         let widget = try Widget(id: "w-2", name: "beta")
 
@@ -103,7 +103,7 @@ struct EventSourcingRepositoryMetadataTests {
 
     @Test("Two saves under different withValue scopes record their respective metadata")
     func saveAcrossScopes() async throws {
-        let store = InMemoryStorageCoordinator<TestMetadata>()
+        let store = InMemoryEventStore<TestMetadata>()
         let repo = WidgetRepository(store: store)
         let widget1 = try Widget(id: "w-3", name: "gamma")
         let widget2 = try Widget(id: "w-4", name: "delta")
@@ -123,7 +123,7 @@ struct EventSourcingRepositoryMetadataTests {
 
     @Test("Multiple events from one save share the same metadata bytes")
     func batchSaveSharesMetadata() async throws {
-        let store = InMemoryStorageCoordinator<TestMetadata>()
+        let store = InMemoryEventStore<TestMetadata>()
         let repo = WidgetRepository(store: store)
         let widget = try Widget(id: "w-5", name: "first")
         // Append another event to the same aggregate so save flushes both

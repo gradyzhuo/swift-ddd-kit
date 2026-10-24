@@ -21,13 +21,13 @@ public struct OrderSummaryInput: CQRSProjectorInput {
 public struct OrderSummaryProjector: OrderSummaryProjectorProtocol {
     public typealias ReadModelType = OrderSummary
     public typealias Input = OrderSummaryInput
-    public typealias Store = InMemoryStorageCoordinator<CustomMetadata>
+    public typealias Store = InMemoryEventStore<CustomMetadata>
 
     public static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    public let store: InMemoryStorageCoordinator<CustomMetadata>
+    public let store: InMemoryEventStore<CustomMetadata>
 
-    public init(store: InMemoryStorageCoordinator<CustomMetadata>) { self.store = store }
+    public init(store: InMemoryEventStore<CustomMetadata>) { self.store = store }
 
     public func buildReadModel(input: Input) throws -> OrderSummary? { OrderSummary(id: input.id) }
 

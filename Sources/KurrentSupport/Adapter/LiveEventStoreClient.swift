@@ -7,6 +7,7 @@
 //  `KurrentProjection` verbatim; behavior is unchanged from before the seam existed.
 //
 
+import EventSourcing
 import Foundation
 import KurrentDB
 import Synchronization
@@ -63,6 +64,12 @@ public struct LiveEventStoreClient: EventStoreClient {
     public func deleteStream(name: String, expectedRevision: StreamRevision) async throws {
         _ = try await client.streams(specified: name).delete {
             $0.expectedRevision = expectedRevision
+        }
+    }
+
+    public func tombstoneStream(name: String) async throws {
+        _ = try await client.streams(specified: name).tombstone {
+            $0.expectedRevision = .any
         }
     }
 

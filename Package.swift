@@ -66,7 +66,9 @@ let package = Package(
        ]),
     ],
     dependencies: [
-        .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.3.0"),
+        // 2.6.0: reading a tombstoned stream throws KurrentError.resourceDeleted,
+        // which KurrentStorageCoordinator maps to "purged" (EventStore contract §3.5).
+        .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.19.0"),
         // Floor matches async-http-client's own declared floor (2.81.0); already
         // resolved to 2.97.0 transitively, so this adds no new version constraint.
@@ -148,6 +150,24 @@ let package = Package(
             dependencies: [
                 "DDDCore",
                 "EventSourcing",
+            ]),
+        // Internal (not a product): the EventStore contract as throwing check
+        // functions, shared by every backend's tests. No `Testing` import.
+        .target(
+            name: "EventStoreContract",
+            dependencies: [
+                "DDDCore",
+                "EventSourcing",
+            ]),
+        .testTarget(
+            name: "EventStoreContractTests",
+            dependencies: [
+                "EventStoreContract",
+                "EventSourcing",
+                "DDDCore",
+                "KurrentSupport",
+                "KurrentSupportInMemory",
+                "ReadModelPersistence",
             ]),
         .target(
             name: "ReadModelPersistencePostgres",

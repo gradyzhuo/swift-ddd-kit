@@ -31,11 +31,11 @@ struct OrderProjectorInput: CQRSProjectorInput {
 struct OrderProjector: EventSourcingProjector, OrderSummaryProjectorProtocol {
     typealias ReadModelType = OrderSummary
     typealias Input = OrderProjectorInput
-    typealias Store = InMemoryStorageCoordinator<CustomMetadata>
+    typealias Store = InMemoryEventStore<CustomMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("Order") }
 
-    let store: InMemoryStorageCoordinator<CustomMetadata>
+    let store: InMemoryEventStore<CustomMetadata>
 
     func buildReadModel(input: Input) throws -> OrderSummary? {
         OrderSummary(id: input.id, customerId: "", totalAmount: 0, status: "unknown")
@@ -73,7 +73,7 @@ func printModel(_ label: String, _ result: CQRSProjectorOutput<OrderSummary>?) {
 // StatefulEventSourcingProjector wraps any EventSourcingProjector + ReadModelStore,
 // providing incremental (snapshot-based) projection without changing the projector itself.
 
-let coordinator = InMemoryStorageCoordinator<CustomMetadata>()
+let coordinator = InMemoryEventStore<CustomMetadata>()
 let store       = InMemoryReadModelStore<OrderSummary>()
 let projector   = OrderProjector(store: coordinator)
 let stateful    = StatefulEventSourcingProjector(projector: projector, store: store)
@@ -85,23 +85,23 @@ print("=== Stateful ReadModel Demo ===\n")
 
 // Step 1: Create order → full replay (no snapshot in store)
 print("── Step 1: OrderCreated")
-_ = try await coordinator.append(
+var revision = try await coordinator.append(
     events: [OrderCreated(orderId: orderId, customerId: "customer-42", totalAmount: 1000)],
     byId: orderId, version: nil, metadata: nil)
 printModel("→ ReadModel (full replay)", try await stateful.execute(input: input))
 
 // Step 2: Update amount → incremental replay
 print("── Step 2: OrderAmountUpdated")
-_ = try await coordinator.append(
+revision = try await coordinator.append(
     events: [OrderAmountUpdated(orderId: orderId, newAmount: 1500)],
-    byId: orderId, version: nil, metadata: nil)
+    byId: orderId, version: revision, metadata: nil)
 printModel("→ ReadModel (incremental)", try await stateful.execute(input: input))
 
 // Step 3: Cancel order → incremental replay
 print("── Step 3: OrderCancelled")
-_ = try await coordinator.append(
+revision = try await coordinator.append(
     events: [OrderCancelled(aggregateRootId: orderId)],
-    byId: orderId, version: nil, metadata: nil)
+    byId: orderId, version: revision, metadata: nil)
 printModel("→ ReadModel (incremental)", try await stateful.execute(input: input))
 
 print("=== Done ===")
