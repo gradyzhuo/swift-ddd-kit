@@ -1,14 +1,4 @@
-//
-//  EventTypeMapper.swift
-//
-//
-//  Created by Grady Zhuo on 2024/6/6.
-//
-
-import DDDCore
 import EventSourcing
-import Foundation
 
-public protocol EventTypeMapper: Sendable {
-    func mapping(eventData: any RecordedEventLike) throws -> (any DomainEvent)?
-}
+/// Moved to EventSourcing in 1.5; kept here so existing `KurrentSupport` imports compile.
+public typealias EventTypeMapper = EventSourcing.EventTypeMapper

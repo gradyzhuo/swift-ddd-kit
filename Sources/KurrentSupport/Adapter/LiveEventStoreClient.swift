@@ -7,6 +7,7 @@
 //  `KurrentProjection` verbatim; behavior is unchanged from before the seam existed.
 //
 
+import EventSourcing
 import Foundation
 import KurrentDB
 import Synchronization
