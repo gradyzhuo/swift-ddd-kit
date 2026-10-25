@@ -30,4 +30,22 @@ struct DDDErrorStoreCodesTests {
         #expect(error.code == .streamPurged)
         #expect(error.userInfos["id"] as? String == "o-1")
     }
+
+    @Test("storeUnavailable carries reason, path and detail")
+    func storeUnavailablePayload() {
+        let error = DDDError.storeUnavailable(reason: .occupied, path: "/tmp/store", detail: "EWOULDBLOCK")
+        #expect(error.code == .storeUnavailable)
+        #expect(error.storeUnavailableReason == .occupied)
+        #expect(error.userInfos["path"] as? String == "/tmp/store")
+        #expect(error.userInfos["detail"] as? String == "EWOULDBLOCK")
+        #expect(DDDError.storeCorrupted(stream: "Order-1").storeUnavailableReason == nil)
+    }
+
+    @Test("storeCorrupted carries the stream name")
+    func storeCorruptedPayload() {
+        let error = DDDError.storeCorrupted(stream: "Order-1")
+        #expect(error.code == .storeCorrupted)
+        #expect(error.corruptedStream == "Order-1")
+        #expect(DDDError.streamPurged(id: "o-1").corruptedStream == nil)
+    }
 }

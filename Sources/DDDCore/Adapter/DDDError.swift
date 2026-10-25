@@ -140,4 +140,50 @@ extension DDDError {
         let message = "[\(errorCode)] \(id) was purged and cannot be written again."
         return .init(code: errorCode, message: message, userInfos: ["id": id])
     }
+
+    /// Why a store could not serve a request (`code == .storeUnavailable`).
+    public enum StoreUnavailableReason: String, Sendable, Equatable {
+        /// The location is not a file URL or points at a regular file.
+        case invalidLocation
+        /// The stream name is longer than the store can map to a file name.
+        case streamNameTooLong
+        /// Reading or writing failed. Nothing was written.
+        case io
+        /// Another open store instance holds the location.
+        case occupied
+        /// The store was closed.
+        case closed
+    }
+
+    /// The store could not serve the request. Nothing was written.
+    public static func storeUnavailable(reason: StoreUnavailableReason, path: String, detail: String? = nil) -> Self {
+        let errorCode = DDDError.Code.storeUnavailable
+        var message = "[\(errorCode)] \(reason.rawValue): \(path)"
+        var userInfos: [String: Sendable] = ["reason": reason, "path": path]
+        if let detail {
+            message += " (\(detail))"
+            userInfos["detail"] = detail
+        }
+        return .init(code: errorCode, message: message, userInfos: userInfos)
+    }
+
+    /// The reason when `code == .storeUnavailable`, otherwise `nil`.
+    public var storeUnavailableReason: StoreUnavailableReason? {
+        guard code == .storeUnavailable else { return nil }
+        return userInfos["reason"] as? StoreUnavailableReason
+    }
+
+    /// The stored data of `stream` cannot be read. Only that stream is affected;
+    /// `purge` clears it; the id stays unwritable afterwards.
+    public static func storeCorrupted(stream: String) -> Self {
+        let errorCode = DDDError.Code.storeCorrupted
+        let message = "[\(errorCode)] The stored data of \(stream) cannot be read."
+        return .init(code: errorCode, message: message, userInfos: ["stream": stream])
+    }
+
+    /// The stream name when `code == .storeCorrupted`, otherwise `nil`.
+    public var corruptedStream: String? {
+        guard code == .storeCorrupted else { return nil }
+        return userInfos["stream"] as? String
+    }
 }
