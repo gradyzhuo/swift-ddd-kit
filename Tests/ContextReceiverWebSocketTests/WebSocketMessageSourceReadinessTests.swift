@@ -1,4 +1,3 @@
-#if os(Linux)
 import ContextReceiver
 import ContextReceiverWebSocket
 import Logging
@@ -82,4 +81,3 @@ struct WebSocketMessageSourceReadinessTests {
         }
     }
 }
-#endif

@@ -317,12 +317,8 @@ let package = Package(
             dependencies: [
                 "ContextReceiver",
                 .product(name: "Logging", package: "swift-log"),
-                // Platform-conditional so macOS never compiles swift-websocket (or its
-                // HTTPTypes header type) at all. Without the condition, `swift build`
-                // on macOS fails for the whole package — including for
-                // OpportunityContext developers who never touch the receiver.
-                .product(name: "WSClient", package: "swift-websocket", condition: .when(platforms: [.linux])),
-                .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(platforms: [.linux])),
+                .product(name: "WSClient", package: "swift-websocket"),
+                .product(name: "HTTPTypes", package: "swift-http-types"),
             ],
             path: "Sources/ContextReceiverWebSocket"
         ),
@@ -330,9 +326,9 @@ let package = Package(
             name: "ContextReceiverWebSocketTests",
             dependencies: [
                 "ContextReceiver",
-                .target(name: "ContextReceiverWebSocket", condition: .when(platforms: [.linux])),
+                .target(name: "ContextReceiverWebSocket"),
                 .product(name: "Logging", package: "swift-log"),
-                .product(name: "HTTPTypes", package: "swift-http-types", condition: .when(platforms: [.linux])),
+                .product(name: "HTTPTypes", package: "swift-http-types"),
             ],
             path: "Tests/ContextReceiverWebSocketTests"
         ),
@@ -342,7 +338,7 @@ let package = Package(
                 "ContextReceiver",
                 "ContextForwarder",
                 "PublishedLanguage",
-                .target(name: "ContextReceiverWebSocket", condition: .when(platforms: [.linux])),
+                .target(name: "ContextReceiverWebSocket"),
                 .product(name: "AsyncHTTPClient", package: "async-http-client"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "NIOCore", package: "swift-nio"),

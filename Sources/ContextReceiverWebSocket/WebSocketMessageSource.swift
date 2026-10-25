@@ -1,4 +1,3 @@
-#if os(Linux)
 import ContextReceiver
 import Foundation
 import HTTPTypes
@@ -237,4 +236,3 @@ private struct BrokerNotice: Decodable {
     let result: String?
     let errorMsg: String?
 }
-#endif
