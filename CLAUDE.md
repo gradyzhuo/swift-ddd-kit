@@ -25,7 +25,7 @@ swift run generate event --input Sources/MyTarget/event.yaml --config Sources/My
 swift run generate projection --input Sources/MyTarget/projection-model.yaml
 ```
 
-`DDDCoreTests` and `KurrentSupportIntegrationTests` require a local KurrentDB instance (connects to `localhost`). `EventSourcingTests` uses an in-memory `InMemoryEventStore` and can run without KurrentDB. `EventStoreContractTests` runs the shared `EventStore` contract (`EventStoreContract` target, internal, not a product) against every in-repo store — no KurrentDB needed. `KurrentSupportInMemoryTests` exercises `KurrentStorageCoordinator`/`KurrentProjection.PersistentSubscriptionRunner` end to end against `InMemoryEventStoreClient` (`KurrentSupportInMemory` target) — no KurrentDB needed either.
+`DDDCoreTests` and `KurrentSupportIntegrationTests` require a local KurrentDB instance (connects to `localhost`). `EventSourcingTests` uses an in-memory `InMemoryEventStore` and can run without KurrentDB. `EventStoreContractTests` runs the shared `EventStore` contract (`EventStoreContract` target, internal, not a product) against every in-repo store — no KurrentDB needed. `KurrentSupportInMemoryTests` exercises `KurrentStorageCoordinator`/`KurrentProjection.PersistentSubscriptionRunner` end to end against `InMemoryEventStoreClient` (`KurrentSupportInMemory` target) — no KurrentDB needed either. `LocalEventStoreTests` covers `PersistentEventStore` on disk (temporary directories, no services); `EventStoreContractTests` also runs the contract against it.
 
 ## Documentation Site
 
@@ -46,6 +46,7 @@ DDDKit is a Domain-Driven Design + Event Sourcing framework for Server-Side Swif
 DDDKit (umbrella re-export)
 ├── DDDCore          — Core DDD protocols: Entity, DomainEvent, AggregateRoot, DomainEventBus
 ├── EventSourcing    — Abstract event sourcing patterns: EventStorageCoordinator, EventSourcingRepository, EventSourcingProjector, ReadModel, CQRSProjectorInput/Output; also `RecordedEventLike`, `EventTypeMapper`, `CustomMetadata` (moved from KurrentSupport in 1.5; KurrentSupport keeps typealiases)
+├── LocalEventStore  — PersistentEventStore: file-backed EventStore (one JSON file per stream, atomic writes, one open instance per directory)
 ├── KurrentSupport   — KurrentDB adapter: KurrentStorageCoordinator, EventTypeMapper, DomainEventBus+KurrentDB
 ├── KurrentSupportInMemory — In-memory KurrentDB test double: InMemoryEventStoreClient (no live server needed)
 ├── EventBus         — In-memory event bus (EventBus class)
@@ -73,6 +74,8 @@ DDDKit (umbrella re-export)
 **`EventStore` contract** (EventSourcing, spec `docs/superpowers/specs/2026-10-23-eventstore-contract-design.md`) — revisions start at 0; empty `append` is a no-op returning `nil`; `version: nil` requires no stream; mismatch throws `DDDError.commitConflict` (501, `error.commitConflict`); resending the same event ids returns the original revision; `purge` is permanent for any id (`append` then throws `streamPurged`, 502). Events come back in stream order. `InMemoryEventStore` (renamed from `InMemoryStorageCoordinator`) and `KurrentStorageCoordinator` follow it; `EventStoreContract.checkAll` checks a store against it. `EventStoreContract.checkHugeVersionConflicts` is a separate check (not in `checkAll`) until real-KurrentDB behaviour for huge revisions is verified by the live contract test. `EventSourcingRepository.save` returns early without calling the store when the aggregate has no new events; `purge` calls `store.purge` directly (no `aggregateNotFound` for unknown ids). swift-kurrentdb floor is 2.6.0.
 
 **`KurrentStorageCoordinator<StreamNaming: EventStreamNaming, Metadata: EventMetadata>`** (KurrentSupport) — Concrete `EventStore` wrapping an `any EventStoreClient` (not `KurrentDBClient` directly — see below). Stream names come from `StreamNaming`. The typed `Metadata?` passed to `append` is JSON-encoded into KurrentDB's `customMetadata` field; nil metadata writes no bytes.
+
+**`PersistentEventStore<StreamNaming, Metadata>`** (LocalEventStore) — `EventStore` backed by a directory: `<hex of stream name>.json` per stream, whole file replaced with `Data.write(.atomic)` on every append, `purge` rewrites it as `purged: true` with no records (the payload leaves the file; also clears a corrupted stream, and the id stays unwritable). `open(directory:eventMapper:)` takes a `flock` on `<directory>/.lock` (second open → `storeUnavailable(.occupied)`), `close()` releases it. Share one instance between the repository and the projectors (on the Kurrent path each projector builds its own coordinator; here a second `open` of the directory fails). Not durable across power loss (no fsync). Errors: `storeUnavailable` (503, `error.storeUnavailableReason`) and `storeCorrupted` (504, `error.corruptedStream`).
 
 **`EventTypeMapper`** (KurrentSupport) — Converts an `any RecordedEventLike` (decoupled from KurrentDB's concrete `RecordedEvent`) into a typed `DomainEvent`. Implementations switch on `eventData.eventType`.
 
