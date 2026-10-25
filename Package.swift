@@ -112,6 +112,7 @@ let package = Package(
             name: "DDDKit", dependencies: [
                 "DDDCore",
                 "EventSourcing",
+                "LocalEventStore",
                 "KurrentSupport",
                 "EventBus",
                 "ReadModelPersistence",
