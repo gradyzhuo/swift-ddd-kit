@@ -11,8 +11,10 @@ import Logging
 /// An `EventStore` backed by one directory: one JSON file per stream, replaced
 /// atomically on every write, so a process crash leaves each file either old or new.
 ///
-/// - One open instance per directory (`open` fails with `.occupied` otherwise).
-///   Share that instance between the repository and the projectors that read it.
+/// - One open instance per directory (a second `open` fails with `.occupied`, even
+///   with other `StreamNaming`/`Metadata` types), so each store instance, and with it
+///   each `StreamNaming` type, needs its own directory. Share that instance between
+///   the repository and the projectors that read it.
 /// - Not durable across power loss or an OS crash: atomic writes are not fsynced,
 ///   so the latest writes can be lost and a just-replaced file can read back
 ///   corrupted (`storeCorrupted` for that stream only; `purge` clears it but
@@ -22,6 +24,9 @@ import Logging
 ///   supported.
 /// - Every append rewrites the whole stream file; meant for aggregate streams with
 ///   a bounded number of events.
+/// - Stream names are limited to 120 UTF-8 bytes (longer ones fail with
+///   `storeUnavailable(reason: .streamNameTooLong)`), a known limitation compared
+///   with KurrentDB.
 public actor PersistentEventStore<StreamNaming: EventStreamNaming, Metadata: EventMetadata>: EventStore {
     let directory: URL
     let eventMapper: any EventTypeMapper
@@ -63,11 +68,14 @@ public actor PersistentEventStore<StreamNaming: EventStreamNaming, Metadata: Eve
             }
         }
         let descriptor = try acquireDirectoryLock(in: directory)
+        // Expected #IsolatedConformances warning (Swift 6.2+): silencing it would need
+        // `EventStreamNaming: SendableMetatype` (6.2+ only) or `Sendable` (AggregateRoot types can't).
         return PersistentEventStore(directory: directory, eventMapper: eventMapper, lockDescriptor: descriptor)
     }
 
     /// Releases the directory. Idempotent; every later operation throws
-    /// `storeUnavailable(reason: .closed)`.
+    /// `storeUnavailable(reason: .closed)`, except an empty `append`, which returns
+    /// `nil` before any other check, as the contract requires.
     public func close() {
         guard let descriptor = lockDescriptor else { return }
         lockDescriptor = nil
