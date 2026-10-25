@@ -170,6 +170,21 @@ let package = Package(
                 "ReadModelPersistence",
             ]),
         .target(
+            name: "LocalEventStore",
+            dependencies: [
+                "DDDCore",
+                "EventSourcing",
+                .product(name: "Logging", package: "swift-log"),
+            ]),
+        .testTarget(
+            name: "LocalEventStoreTests",
+            dependencies: [
+                "LocalEventStore",
+                "EventStoreContract",
+                "EventSourcing",
+                "DDDCore",
+            ]),
+        .target(
             name: "ReadModelPersistencePostgres",
             dependencies: [
                 "ReadModelPersistence",
