@@ -1,4 +1,3 @@
-#if os(Linux)
 import AsyncHTTPClient
 import Foundation
 import Logging
@@ -180,4 +179,3 @@ private struct SubscriptionNeverAttached: Error, CustomStringConvertible {
         "subscription 'itest' never attached to topic \(topic) within \(timeout)"
     }
 }
-#endif

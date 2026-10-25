@@ -820,7 +820,7 @@ change.
 Two modules move Published Language events between bounded contexts over Apache Pulsar, without either side depending on a Pulsar client library:
 
 - **`ContextForwarder`** (produce side) — `PulsarRESTPublisher` posts a `PublishedLanguageEvent` to Pulsar's REST produce endpoint (`/topics/persistent/{tenant}/{namespace}/{topic}`). No Pulsar SDK, no binary protocol — just `AsyncHTTPClient`.
-- **`ContextReceiver`** (consume side, portable) + **`ContextReceiverWebSocket`** (Linux-only transport) — `ContextReceiver` drives a `PulsarMessageSource` into a `PublishedLanguageHandler`, handling flow control and settlement. `WebSocketMessageSource` is the concrete transport, talking to Pulsar's WebSocket consumer endpoint (`/ws/v2/consumer/...`).
+- **`ContextReceiver`** (consume side, portable) + **`ContextReceiverWebSocket`** (Pulsar WebSocket transport) — `ContextReceiver` drives a `PulsarMessageSource` into a `PublishedLanguageHandler`, handling flow control and settlement. `WebSocketMessageSource` is the concrete transport, talking to Pulsar's WebSocket consumer endpoint (`/ws/v2/consumer/...`).
 
 ### The payload asymmetry
 
@@ -854,9 +854,9 @@ Semantics mirror `decodeBody`: absent metadata is `nil`, never an error (events 
 
 Pulsar's WebSocket API has no "send to DLQ now" command. `ContextReceiver` maps a permanent failure (an undecodable payload, or a handler classifying its own error as non-retryable) to `ReceiveDisposition.dropToDeadLetter`, which the transport implements as a negative-acknowledge. The message only actually parks in the dead letter topic once `maxRedeliverCount` is exhausted — both `maxRedeliverCount` and `deadLetterTopic` must be set on `ConsumerEndpoint.Settings`, or a message the host has explicitly given up on will redeliver forever instead of parking. `DeadLetterMonitor` polls the DLQ's backlog via the admin API so a growing park pile can page someone.
 
-### macOS limitation
+### Platforms
 
-`ContextReceiverWebSocket` only builds on Linux. The underlying `swift-websocket` dependency fails to compile on the macOS 26 SDK: `WebSocketOutboundWriter.swift:210` extends `ByteBuffer` with a method that needs `@available(macOS 26, iOS 26, tvOS 26, *)` and doesn't have it, so the extension is unconditionally unavailable there. `ContextReceiverWebSocket`'s target dependencies on `WSClient`/`HTTPTypes` are therefore platform-conditioned to Linux only (see `Package.swift`), which is also why `WebSocketMessageSource.swift` and every test that imports it are wrapped in `#if os(Linux)` — this keeps `swift build`/`swift test` green on macOS for every other target while the receiver itself only ever runs in Linux production. The upstream fix is a single missing `@available` annotation; until it lands (or the pin changes), macOS developers can still build and test `ContextReceiver`, `ContextForwarder`, and everything else — only the WebSocket transport and its own tests are unavailable to them.
+`ContextReceiverWebSocket` builds on Linux and macOS 15+ (`swift-websocket` 1.5.x compiles on the macOS 26 SDK too). Its offline tests run everywhere; only the live-broker suite needs a running Pulsar.
 
 ### The WebSocket transport is single-use — supervision is the host's job
 
@@ -945,7 +945,7 @@ docker run --rm --network host -v "$PWD":/src -w /src \
   bash -c 'swift test --filter ContextReceiverIntegrationTests'
 ```
 
-This suite needs Linux (the transport under test only builds there) and a live broker, so it deliberately stays out of CI — `.github/workflows/swift-build-testing.yml` only runs the offline suites.
+This suite needs a live broker, so it deliberately stays out of CI — `.github/workflows/swift-build-testing.yml` only runs the offline suites.
 
 ## Modules
 
@@ -963,7 +963,7 @@ This suite needs Linux (the transport under test only builds there) and a live b
 | `PublishedLanguage` | `PublishedLanguageEvent` — the wire envelope shared by both sides of cross-context Pulsar events |
 | `ContextForwarder` | Produce side: `PulsarRESTPublisher`, `ForwarderGroup` — posts events over Pulsar's REST endpoint, no Pulsar SDK |
 | `ContextReceiver` | Consume side (portable): `ContextReceiver` runner, `PulsarMessageSource` transport seam, `DeadLetterMonitor` |
-| `ContextReceiverWebSocket` | Linux-only: `WebSocketMessageSource`, the concrete Pulsar WebSocket consumer transport |
+| `ContextReceiverWebSocket` | `WebSocketMessageSource`, the concrete Pulsar WebSocket consumer transport |
 | `TemplateVariables` | Runtime substitution engine: `PlaceholderSubstitution` |
 | `TemplateVariablesDefinition` | `variables.yaml` model, parser and generator, for building further generators |
 

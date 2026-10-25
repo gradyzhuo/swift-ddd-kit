@@ -1,4 +1,3 @@
-#if os(Linux)
 import ContextReceiver
 @testable import ContextReceiverWebSocket
 import HTTPTypes
@@ -41,4 +40,3 @@ struct WebSocketMessageSourceAuthTests {
         #expect(!endpoint.url.contains("token="))
     }
 }
-#endif
