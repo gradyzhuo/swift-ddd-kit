@@ -49,7 +49,7 @@ public actor InMemoryEventStore<Metadata: EventMetadata>: EventStore {
         var entry = store[id] ?? Entry(events: [], metadata: [])
         let tail: UInt64? = entry.events.isEmpty ? nil : UInt64(entry.events.count - 1)
         guard tail == version else {
-            if let replayed = Self.idempotentRevision(of: events, in: entry.events, expected: version) {
+            if let replayed = idempotentRevision(of: events.map({ $0.id }), in: entry.events.map({ $0.id }), expected: version) {
                 return replayed
             }
             throw DDDError.commitConflict(id: id, expected: version, actual: tail)
@@ -63,26 +63,6 @@ public actor InMemoryEventStore<Metadata: EventMetadata>: EventStore {
     public func purge(byId id: String) async throws {
         purged.insert(id)
         store.removeValue(forKey: id)
-    }
-
-    /// KurrentDB's id de-duplication: a batch whose ids equal the stored events
-    /// right after `expected` was already written, so answer with its last revision.
-    private static func idempotentRevision(
-        of events: [any DomainEvent], in stored: [any DomainEvent], expected: UInt64?
-    ) -> UInt64? {
-        let start: Int
-        if let expected {
-            // Bail out in UInt64 before converting: `Int(expected) + 1` traps for
-            // versions near UInt64.max, and such a version can never match anyway.
-            guard expected < UInt64(stored.count) else { return nil }
-            start = Int(expected) + 1
-        } else {
-            start = 0
-        }
-        let end = start + events.count
-        guard end <= stored.count else { return nil }
-        guard stored[start..<end].map({ $0.id }) == events.map({ $0.id }) else { return nil }
-        return UInt64(end - 1)
     }
 
     // MARK: - Test inspection helpers

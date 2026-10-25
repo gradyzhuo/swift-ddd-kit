@@ -168,6 +168,7 @@ let package = Package(
                 "KurrentSupport",
                 "KurrentSupportInMemory",
                 "ReadModelPersistence",
+                "LocalEventStore",
             ]),
         .target(
             name: "LocalEventStore",
