@@ -18,12 +18,15 @@ import Musl
 /// the same directory fails even inside the same process.
 func acquireDirectoryLock(in directory: URL) throws -> Int32 {
     let lockURL = directory.appendingPathComponent(".lock")
-    let descriptor = lockURL.withUnsafeFileSystemRepresentation { path -> Int32 in
-        guard let path else { return -1 }
-        return open(path, O_RDONLY | O_CREAT | O_CLOEXEC, 0o644)
+    // `errno` only describes the call that just failed, so it is captured right there.
+    let (descriptor, openError) = lockURL.withUnsafeFileSystemRepresentation { path -> (Int32, Int32) in
+        guard let path else { return (-1, EINVAL) }
+        let descriptor = open(path, O_RDONLY | O_CREAT | O_CLOEXEC, 0o644)
+        guard descriptor >= 0 else { return (-1, errno) }
+        return (descriptor, 0)
     }
     guard descriptor >= 0 else {
-        throw DDDError.storeUnavailable(reason: .io, path: lockURL.path, detail: "open failed, errno \(errno)")
+        throw DDDError.storeUnavailable(reason: .io, path: lockURL.path, detail: "open failed, errno \(openError)")
     }
     guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
         let code = errno
