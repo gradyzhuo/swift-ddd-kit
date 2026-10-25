@@ -122,6 +122,34 @@ struct PersistentEventStoreFileTests {
         await store.close()
     }
 
+    @Test("only a missing file means the stream does not exist: any other read failure is an I/O error")
+    func unreadableStreamFileIsAnIOError() async throws {
+        let directory = makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try open(directory)
+        let blocked = UUID().uuidString
+        let healthy = UUID().uuidString
+        let healthyEvent = ContractEvent(aggregateRootId: healthy, value: 1)
+        _ = try await store.append(events: [healthyEvent], byId: healthy, version: nil, metadata: nil)
+
+        // A directory where the stream file belongs: reading it fails, but not with "no such file".
+        let blockedPath = try fileURL(directory, id: blocked)
+        try FileManager.default.createDirectory(at: blockedPath, withIntermediateDirectories: false)
+
+        let event = ContractEvent(aggregateRootId: blocked, value: 2)
+        #expect(await dddError { _ = try await store.fetchEvents(byId: blocked) }?.storeUnavailableReason == .io)
+        #expect(await dddError { _ = try await store.fetchEvents(byId: blocked, afterRevision: 0) }?.storeUnavailableReason == .io)
+        #expect(await dddError { _ = try await store.append(events: [event], byId: blocked, version: nil, metadata: nil) }?
+            .storeUnavailableReason == .io)
+        #expect(await dddError { try await store.purge(byId: blocked) }?.storeUnavailableReason == .io)
+
+        var isDirectory: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: blockedPath.path, isDirectory: &isDirectory))
+        #expect(isDirectory.boolValue)
+        #expect(try await store.fetchEvents(byId: healthy)?.events.map { $0.id } == [healthyEvent.id])
+        await store.close()
+    }
+
     @Test("stream names that differ only in case use separate files")
     func caseSensitiveStreamNames() async throws {
         let directory = makeTemporaryDirectory()
