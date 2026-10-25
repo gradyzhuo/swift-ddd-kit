@@ -26,7 +26,7 @@ private struct WidgetRenamed: DomainEvent {
     var name: String
 }
 
-private final class Widget: AggregateRoot, @unchecked Sendable {
+private final class Widget: AggregateRoot {
     struct WidgetDeleted: DeletedEvent {
         typealias Metadata = TestMetadata
         var id: UUID = .init()
