@@ -143,11 +143,13 @@ extension DDDError {
 
     /// Why a store could not serve a request (`code == .storeUnavailable`).
     public enum StoreUnavailableReason: String, Sendable, Equatable {
-        /// The location is not a file URL or points at a regular file.
+        /// The location the store was opened on cannot be used (file store: not a
+        /// file URL, or a regular file where a directory is expected).
         case invalidLocation
-        /// The stream name is longer than the store can map to a file name.
+        /// The stream name is longer than the store can represent (file store: more
+        /// than 120 UTF-8 bytes, the most its file names allow).
         case streamNameTooLong
-        /// Reading or writing failed. Nothing was written.
+        /// Reading from or writing to the backing storage failed. Nothing was written.
         case io
         /// Another open store instance holds the location.
         case occupied
@@ -156,6 +158,14 @@ extension DDDError {
     }
 
     /// The store could not serve the request. Nothing was written.
+    ///
+    /// - Parameters:
+    ///   - reason: Why the store could not serve the request.
+    ///   - path: The location or file involved (file store: its directory or a
+    ///     stream's file), except for `.streamNameTooLong`, where it holds the
+    ///     stream name.
+    ///   - detail: Free-form diagnostic text. Do not parse it, and do not show it to
+    ///     end users verbatim.
     public static func storeUnavailable(reason: StoreUnavailableReason, path: String, detail: String? = nil) -> Self {
         let errorCode = DDDError.Code.storeUnavailable
         var message = "[\(errorCode)] \(reason.rawValue): \(path)"
@@ -173,8 +183,12 @@ extension DDDError {
         return userInfos["reason"] as? StoreUnavailableReason
     }
 
-    /// The stored data of `stream` cannot be read. Only that stream is affected;
-    /// `purge` clears it; the id stays unwritable afterwards.
+    /// The stored data of `stream` cannot be read. Other streams are unaffected.
+    /// (File store: its file does not decode, has an unknown format version or names
+    /// another stream.)
+    ///
+    /// `purge` discards that stream's events and leaves the id unwritable; it does
+    /// not repair the data.
     public static func storeCorrupted(stream: String) -> Self {
         let errorCode = DDDError.Code.storeCorrupted
         let message = "[\(errorCode)] The stored data of \(stream) cannot be read."
