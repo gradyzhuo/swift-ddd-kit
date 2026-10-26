@@ -176,6 +176,7 @@ struct OrderCreated: DomainEvent {
     var id: UUID = .init()
     var occurred: Date = .now
     var aggregateRootId: String
+    var metadata: CustomMetadata? = nil
     let customerId: String
 }
 
@@ -184,8 +185,19 @@ struct OrderCancelled: DeletedEvent {
     var id: UUID = .init()
     var occurred: Date = .now
     let aggregateRootId: String
+    var metadata: CustomMetadata? = nil
+
+    init(id: UUID, aggregateRootId: String, occurred: Date) {
+        self.id = id
+        self.aggregateRootId = aggregateRootId
+        self.occurred = occurred
+    }
 }
 ```
+
+`metadata` is filled in on read from the store's metadata (see [Event Metadata Pattern](#event-metadata-pattern-ambient-context));
+leave it `nil` when you create an event. `DeletedEvent` requires `init(id:aggregateRootId:occurred:)`
+so `markDelete()` can create it.
 
 ### 2. Implement an Aggregate Root
 
