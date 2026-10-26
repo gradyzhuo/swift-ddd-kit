@@ -76,7 +76,7 @@ jobs:
       - uses: SwiftyLab/setup-swift@latest
         with:
           swift-version: "6.4"
-      # Reference server for the EventStore contract; when bumping it, rerun this job and review (spec C §3, 1.5 changelog).
+      # Reference server for the EventStore contract; when bumping it, rerun this job and review (spec C §3, 1.4.0 changelog).
       - name: Start KurrentDB
         run: docker run -d --name kurrentdb -p 2113:2113 -e KURRENTDB_CLUSTER_SIZE=1 -e KURRENTDB_INSECURE=true kurrentplatform/kurrentdb:26.1.3
       - name: Wait for KurrentDB

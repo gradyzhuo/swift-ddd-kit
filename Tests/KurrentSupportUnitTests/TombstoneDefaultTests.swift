@@ -3,7 +3,7 @@ import Foundation
 import KurrentDB
 import KurrentSupport
 
-/// A conformer written before 1.5: it has no `tombstoneStream`.
+/// A conformer written before 1.4: it has no `tombstoneStream`.
 // The deprecation warning this conformance emits is the point; do not silence it.
 private struct LegacyClient: EventStoreClient {
     func append(events: [EventData], toStream name: String, category: String, expectedRevision: StreamRevision) async throws -> UInt64? { nil }

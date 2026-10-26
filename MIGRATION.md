@@ -200,7 +200,7 @@
 
 ### `InMemoryEventStore`（EventSourcing 模組）
 
-新增 thread-safe 的 in-memory 實作，適用於測試或不需要 KurrentDB 的場景（1.5 起由 `InMemoryStorageCoordinator` 更名為 `InMemoryEventStore`，行為依 EventStore 契約：revision 從 0 起算、`version: nil` 要求 stream 尚不存在、版本不符丟 `DDDError.commitConflict`、重送相同 event id 回傳原 revision、`purge` 後 `append` 丟 `streamPurged`）：
+新增 thread-safe 的 in-memory 實作，適用於測試或不需要 KurrentDB 的場景（1.4 起由 `InMemoryStorageCoordinator` 更名為 `InMemoryEventStore`，行為依 EventStore 契約：revision 從 0 起算、`version: nil` 要求 stream 尚不存在、版本不符丟 `DDDError.commitConflict`、重送相同 event id 回傳原 revision、`purge` 後 `append` 丟 `streamPurged`）：
 
 ```swift
 let coordinator = InMemoryEventStore<CustomMetadata>()
@@ -280,7 +280,7 @@ Add `Metadata` to your store's generic parameters:
 + let store: KurrentStorageCoordinator<OrderStreamNaming, CustomMetadata>
 ```
 
-Same for the in-memory store (named `InMemoryStorageCoordinator` before 1.5, now `InMemoryEventStore`):
+Same for the in-memory store (named `InMemoryStorageCoordinator` before 1.4, now `InMemoryEventStore`):
 
 ```diff
 - typealias Store = InMemoryStorageCoordinator
@@ -362,7 +362,7 @@ struct LoggingClient: EventStoreClient {
 }
 ```
 
-`tombstoneStream(name:)`, added in 1.5, does have a default but fails at run time; see 1.5.0 §2.
+`tombstoneStream(name:)`, added after beta.14, does have a default but fails at run time; see "EventStore contract" §2 below.
 
 ### Behaviour changes (the compiler will not point these out)
 
@@ -386,11 +386,11 @@ struct LoggingClient: EventStoreClient {
   the host resubscribes after a backoff. The new group starts from `subscriptionSettings.startFrom`
   (default `.end`); events written while the group was missing are not forwarded. No code change.
 
-## 1.5.0 — EventStore contract
+### EventStore contract (on main, not yet in a beta)
 
 `EventStorageCoordinator` 的實作現在遵守同一份語意契約（見 `docs/superpowers/specs/2026-10-23-eventstore-contract-design.md`）。以下依影響程度列出。
 
-### 1. Production `purge` 改為 tombstone（永久）
+#### 1. Production `purge` 改為 tombstone（永久）
 
 `KurrentStorageCoordinator.purge` 現在呼叫 KurrentDB `tombstone(.any)`：
 
@@ -398,7 +398,7 @@ struct LoggingClient: EventStoreClient {
 - 對從未寫過的 id 呼叫 `purge` 也會成功，並讓該 id 永久保留（之後無法寫入）。不要 purge 之後還會使用的 id。
 - `EventSourcingRepository.purge` 不再先 `find`：未知的 id 不再丟 `aggregateNotFound`，已 soft-delete 的 aggregate 現在可以被 purge。
 
-### 2. 自訂 `EventStoreClient` wrapper / decorator 必須轉呼叫 `tombstoneStream(name:)`
+#### 2. 自訂 `EventStoreClient` wrapper / decorator 必須轉呼叫 `tombstoneStream(name:)`
 
 `EventStoreClient` 新增 `tombstoneStream(name:)`。舊的 conformance 仍可編譯（協定擴充提供標為 deprecated 的預設實作，會有警告），但 `purge` 在執行時丟 `EventStoreClientError.tombstoneUnsupported`，stream 也不會被 purge。
 
@@ -412,7 +412,7 @@ struct LoggingClient: EventStoreClient {
 }
 ```
 
-### 3. 版本衝突統一丟 `DDDError.commitConflict`
+#### 3. 版本衝突統一丟 `DDDError.commitConflict`
 
 `KurrentStorageCoordinator` 與 `InMemoryEventStore` 在衝突時都丟 `DDDError.commitConflict`（code 501），取代 `EventStoreClientError.wrongExpectedRevision`、`KurrentError.wrongExpectedVersion`、`InMemoryStorageCoordinatorError.versionConflict`：
 
@@ -424,18 +424,18 @@ struct LoggingClient: EventStoreClient {
 + }
 ```
 
-### 4. 新增的 enum case
+#### 4. 新增的 enum case
 
 `DDDError.Code` 新增 `commitConflict`(501)、`streamPurged`(502)、`storeUnavailable`(503)、`storeCorrupted`(504)；`EventStoreClientError` 新增 `tombstoneUnsupported`。沒有 `default` 的 exhaustive `switch` 需要補上這些 case。
 
-### 5. swift-kurrentdb 下限為 2.6.0
+#### 5. swift-kurrentdb 下限為 2.6.0
 
 ```diff
 - .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.3.0")
 + .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0")
 ```
 
-### 6. 其他行為變更
+#### 6. 其他行為變更
 
 - 空陣列的 `append` 直接回傳 `nil`，不寫入也不呼叫 client。
 - 對已存在的 stream 傳 `version: nil` 會衝突（`nil` 代表要求 stream 尚不存在）。
@@ -443,7 +443,7 @@ struct LoggingClient: EventStoreClient {
 - `EventSourcingRepository.save` 在沒有新事件時不呼叫 store。
 - `InMemoryStorageCoordinator` 更名為 `InMemoryEventStore`，revision 從 0 起算；詳見上方〈新增功能〉的 `InMemoryEventStore`。
 
-### 7. Generator 產出檔的 import 改變（source-breaking）
+#### 7. Generator 產出檔的 import 改變（source-breaking）
 
 產出檔現在 import `Foundation`、`DDDCore`、`EventSourcing`，不再 import `KurrentSupport`／`KurrentDB`。若 `event.yaml` 以不再 import 的模組限定型別（例如 `KurrentSupport.CustomMetadata`），或使用只有 KurrentSupport／KurrentDB 提供的非限定型別，重新生成後會編譯失敗；KurrentSupport 的 typealias 無法補救，因為該模組沒被 import。二選一：
 
@@ -460,26 +460,26 @@ dependencies:
   - KurrentSupport
 ```
 
-### 8. 型別移到 EventSourcing
+#### 8. 型別移到 EventSourcing
 
 `RecordedEventLike`、`EventTypeMapper`、`CustomMetadata` 移到 `EventSourcing` 模組；`KurrentSupport` 保留同名 typealias，既有的 `import KurrentSupport` 程式碼不需修改。
 
-### 9. 新增 `PersistentEventStore`（`LocalEventStore`）
+#### 9. 新增 `PersistentEventStore`（`LocalEventStore`）
 
 新的 `LocalEventStore` 模組提供 `PersistentEventStore`：給 iOS／macOS app 用的檔案式 `EventStore`，每個 stream 一個 JSON 檔、每次寫入整檔原子取代，不需要 server。這是新增功能，既有程式碼不需要修改。用法與限制（一個目錄只能開一個 instance、repository 與 projector 共用同一個 instance、目錄位置、沒有 fsync、`.defaultIsolation(MainActor.self)` 下要把 aggregate、projector 與 read model 宣告為 `nonisolated`）見 README 的〈Local Event Store (iOS and macOS apps)〉。
 
-### 10. `DDDError.StoreUnavailableReason`
+#### 10. `DDDError.StoreUnavailableReason`
 
 `storeUnavailable`（503）帶一個 `DDDError.StoreUnavailableReason`，以 `error.storeUnavailableReason` 讀取：`invalidLocation`、`streamNameTooLong`、`io`、`occupied`、`closed`。`storeCorrupted`（504）以 `error.corruptedStream` 讀出無法讀取的 stream。目前只有 `PersistentEventStore` 丟這兩個 code。對 `StoreUnavailableReason` 寫沒有 `default` 的 `switch`，日後新增 case 時會編不過。
 
-### 11. iOS／Mac Catalyst 最低版本 18（source-breaking）
+#### 11. iOS／Mac Catalyst 最低版本 18（source-breaking）
 
 `Package.swift` 的 `platforms` 加上 `.iOS(.v18)`，這個值套用到本 package 的**每一個** product。以 iOS 或 Mac Catalyst 18 以下為目標建置任一 product 的專案會建置失敗（SwiftPM 回報該 product 要求 iOS 18.0），需把 deployment target 提高到 18。只建置 macOS 或 Linux 的專案不受影響（macOS 仍是 15+）。
 
-### 12. 新增三個 product（source-compatible）
+#### 12. 新增三個 product（source-compatible）
 
 `DDDCore`、`EventSourcing`、`LocalEventStore` 成為 library product，三者只依賴彼此、Foundation 與 swift-log，可建置於 iOS 18+。app 可以只依賴這三個，不必拉進 `DDDKit` umbrella 與 KurrentDB／Postgres 相依。既有的 `DDDKit` 等 product 不變。
 
-### 13. 超過 `Int64.max` 的預期 revision 改丟 `commitConflict`（behaviour change）
+#### 13. 超過 `Int64.max` 的預期 revision 改丟 `commitConflict`（behaviour change）
 
 KurrentDB 無法接受大於 `Int64.max` 的預期 revision，以前 `KurrentStorageCoordinator.append` 會把它送出去，得到 server 回的 gRPC 內部錯誤。現在 `version` 大於 `UInt64(Int64.max)` 時不送出 append，改丟 `DDDError.commitConflict`，`actual` 為讀 stream 得到的尾端 revision（stream 不存在時為 `nil`）；若該 stream 已被 tombstone，則丟 `streamPurged`。`Int64.max` 本身照常送出。

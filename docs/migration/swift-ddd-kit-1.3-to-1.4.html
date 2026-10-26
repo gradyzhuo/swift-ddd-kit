@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>swift-ddd-kit 1.3 → 1.5 Migration Guide</title>
-<meta name="description" content="Migration guide for projects depending on swift-ddd-kit, upgrading from 1.3 to 1.5 — the EventStore contract, permanent purge, PersistentEventStore, iOS 18 products, and everything shipped in the 1.4 betas.">
+<title>swift-ddd-kit 1.3 → 1.4 Migration Guide</title>
+<meta name="description" content="Migration guide for projects depending on swift-ddd-kit, upgrading from 1.3 to 1.4 — the EventStore contract, permanent purge, PersistentEventStore, iOS 18 products, and everything shipped in the 1.4 betas.">
 <meta name="x-migration-target" content="swift-ddd-kit">
 <meta name="x-migration-from" content="1.3">
-<meta name="x-migration-to" content="1.5">
+<meta name="x-migration-to" content="1.4">
 <meta name="x-document-kind" content="migration-guide">
 <meta name="x-audience" content="human,ai-agent">
 <style>
@@ -151,7 +151,7 @@
     <a href="../index.html">Home</a>
     <a href="../index.html#whats-new">What's new</a>
     <a href="./swift-ddd-kit-0.x-to-1.0.html">Migration 0.x→1.0</a>
-    <a href="./swift-ddd-kit-1.3-to-1.5.html" class="active">Migration 1.3→1.5</a>
+    <a href="./swift-ddd-kit-1.3-to-1.4.html" class="active">Migration 1.3→1.4</a>
     <a href="https://github.com/gradyzhuo/swift-ddd-kit">GitHub ↗</a>
   </div>
 </div></nav>
@@ -159,7 +159,7 @@
 <div class="wrap">
 
   <p class="kicker">Framework Migration Guide</p>
-  <h1>swift-ddd-kit &nbsp;1.3 → 1.5</h1>
+  <h1>swift-ddd-kit &nbsp;1.3 → 1.4</h1>
   <p class="sub">EventStore 契約、本機事件儲存與 iOS — 給「依賴 swift-ddd-kit 的下游專案」的升級指南，一併涵蓋 1.4 預覽版期間的變更</p>
 
   <div class="badges">
@@ -174,14 +174,14 @@
     <div class="arrowline">
       <div class="vchip old"><span class="t">FROM</span>1.3</div>
       <div class="arrow">→</div>
-      <div class="vchip new"><span class="t">TO</span>1.5</div>
+      <div class="vchip new"><span class="t">TO</span>1.4</div>
       <div style="flex:1"></div>
     </div>
     <p style="margin:10px 0 0;color:var(--muted);font-size:13.5px">
-      1.4.0 沒有正式發行，1.3.0 之後的下一個穩定版就是 1.5.0。1.5 把每個 <code>EventStore</code> 該怎麼做寫成一份契約
+      1.3.0 之後的下一個穩定版是 1.4.0。1.4 把每個 <code>EventStore</code> 該怎麼做寫成一份契約
       （revision 從 0 起算、版本不符一律丟 <code>DDDError.commitConflict</code>、<code>purge</code> 改為<b>永久</b>的 tombstone），
       新增檔案式的 <code>PersistentEventStore</code>，並讓 <code>DDDCore</code>、<code>EventSourcing</code>、<code>LocalEventStore</code>
-      以 product 發佈、可建置於 iOS 18+。1.4 預覽版帶來的 Postgres read model 強化、template variables 與 forwarder 變更也在本指南內。
+      以 product 發佈、可建置於 iOS 18+。1.4 預覽版期間已發佈的 Postgres read model 強化、template variables 與 forwarder 變更也在本指南內。
       <code>AggregateRoot</code> / <code>DomainEvent</code> / <code>Usecase</code> 的介面<b>不變</b>。
     </p>
   </div>
@@ -226,7 +226,7 @@
   <section id="ai-manifest" class="ai">
     <h2>🤖 AI Migration Manifest（機器可讀）</h2>
     <p class="lead">
-      若你是 AI agent，正在把一個依賴 <code>swift-ddd-kit</code> 的專案從 1.3 升到 1.5 —
+      若你是 AI agent，正在把一個依賴 <code>swift-ddd-kit</code> 的專案從 1.3 升到 1.4 —
       直接消化下方 JSON。每條規則含 <code>kind</code>（變更類型）、<code>mechanical</code>
       （能否純文字取代）、<code>before</code>/<code>after</code>、<code>action</code>（對下游要做什麼）。
       套用順序：先處理 <code>source-breaking</code> 讓專案編得過，再逐條檢查 <code>behaviour-change</code>
@@ -236,7 +236,7 @@
   "schema": "swift-ddd-kit-migration/v1",
   "package": "swift-ddd-kit",
   "from": "1.3",
-  "to": "1.5",
+  "to": "1.4",
   "domainLayerImpact": "none",
   "applyOrder": ["source-breaking", "behaviour-change", "new"],
   "rules": [
@@ -247,7 +247,7 @@
       "scope": "Package.swift of the downstream project, only if it depends on swift-kurrentdb directly",
       "before": ".package(url: \"https://github.com/gradyzhuo/swift-kurrentdb.git\", from: \"2.3.0\")",
       "after": ".package(url: \"https://github.com/gradyzhuo/swift-kurrentdb.git\", from: \"2.6.0\")",
-      "action": "swift-ddd-kit 1.5 requires swift-kurrentdb 2.6.0 or later (its reads report tombstoned streams as KurrentError.resourceDeleted). Raise any direct requirement below 2.6.0."
+      "action": "swift-ddd-kit 1.4 requires swift-kurrentdb 2.6.0 or later (its reads report tombstoned streams as KurrentError.resourceDeleted). Raise any direct requirement below 2.6.0."
     },
     {
       "id": "SB2",
@@ -410,7 +410,7 @@
   ],
   "downstreamProcedure": [
     "Use a Swift 6.1+ toolchain (SB6).",
-    "Bump swift-ddd-kit to from: \"1.5.0\"; raise any direct swift-kurrentdb requirement to 2.6.0 (SB1).",
+    "Bump swift-ddd-kit to from: \"1.4.0\"; raise any direct swift-kurrentdb requirement to 2.6.0 (SB1).",
     "Raise iOS / Mac Catalyst deployment targets to 18 (SB5).",
     "Rebuild and regenerate generated code; fix event.yaml types or add the KurrentSupport dependency (SB3).",
     "Fix ForwardingRule closures to return arrays (SB4).",
@@ -433,7 +433,7 @@
 
     <div class="card">
       <h3><span class="chgid">SB1</span> &nbsp;<span class="tag sig">dependency</span> &nbsp;swift-kurrentdb ≥ 2.6.0</h3>
-      <p>2.6.0 讓讀取已 tombstone 的 stream 回報 <code>KurrentError.resourceDeleted</code>，1.5 的 <code>purge</code> 語意依賴它。
+      <p>2.6.0 讓讀取已 tombstone 的 stream 回報 <code>KurrentError.resourceDeleted</code>，1.4 的 <code>purge</code> 語意依賴它。
          swift-ddd-kit 1.3 要求 <code>2.3.0</code>；若你的 <code>Package.swift</code> 直接依賴 swift-kurrentdb，下限要一起提高。</p>
       <pre class="diff"><span class="a">- .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.3.0")</span>
 <span class="d">+ .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0")</span></pre>
@@ -444,8 +444,8 @@
       <table>
         <thead><tr><th>型別</th><th>新增 case</th><th>來源</th></tr></thead>
         <tbody>
-          <tr><td><code>DDDError.Code</code></td><td><code>commitConflict</code>（501）、<code>streamPurged</code>（502）、<code>storeUnavailable</code>（503）、<code>storeCorrupted</code>（504）</td><td>1.5</td></tr>
-          <tr><td><code>EventStoreClientError</code></td><td><code>tombstoneUnsupported</code></td><td>1.5</td></tr>
+          <tr><td><code>DDDError.Code</code></td><td><code>commitConflict</code>（501）、<code>streamPurged</code>（502）、<code>storeUnavailable</code>（503）、<code>storeCorrupted</code>（504）</td><td>1.4.0</td></tr>
+          <tr><td><code>EventStoreClientError</code></td><td><code>tombstoneUnsupported</code></td><td>1.4.0</td></tr>
           <tr><td><code>EventStoreClientError</code></td><td><code>subscriptionGroupNotFound(stream:group:)</code></td><td>1.4.0-beta.12</td></tr>
         </tbody>
       </table>
@@ -496,7 +496,7 @@ dependencies:
       <h3><span class="chgid">SB7</span> &nbsp;<span class="tag sig">protocol</span> &nbsp;<code>EventStoreClient</code> 新 requirement（1.4.0-beta.12）</h3>
       <p>自訂的 <code>EventStoreClient</code> conformance（wrapper、decorator、自製 fake）必須實作
          <code>ensurePersistentSubscription(stream:group:settings:)</code> 與 <code>deletePersistentSubscription(stream:group:)</code>，這兩個沒有預設實作。
-         1.5 另外新增的 <code>tombstoneStream(name:)</code> 有預設實作，編得過但執行時會失敗，見 <span class="chgid">BC2</span>。</p>
+         1.4 另外新增的 <code>tombstoneStream(name:)</code> 有預設實作，編得過但執行時會失敗，見 <span class="chgid">BC2</span>。</p>
     </div>
   </section>
 
@@ -591,11 +591,11 @@ dependencies:
     <table>
       <thead><tr><th>ID</th><th>新增</th><th>說明</th><th>來源</th></tr></thead>
       <tbody>
-        <tr><td><span class="chgid">N1</span></td><td><code>RecordedEventLike</code>、<code>EventTypeMapper</code>、<code>CustomMetadata</code> 移到 <code>EventSourcing</code></td><td><code>KurrentSupport</code> 保留同名 typealias，既有的 <code>import KurrentSupport</code> 程式碼不需修改。非 Kurrent 的 store 可以重用生成的 mapper。</td><td>1.5</td></tr>
-        <tr><td><span class="chgid">N2</span></td><td><code>PersistentEventStore</code>（<code>LocalEventStore</code>）</td><td>給 iOS／macOS app 的檔案式 <code>EventStore</code>，每個 stream 一個 JSON 檔、原子寫入。一個目錄只能開一個 instance，repository 與 projector 共用它；在 <code>.defaultIsolation(MainActor.self)</code> 的 target 中，aggregate、projector 與 read model 要宣告為 <code>nonisolated</code>。見 <a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/README.md#local-event-store-ios-and-macos-apps">README 的 Local Event Store 章節</a>。</td><td>1.5</td></tr>
-        <tr><td><span class="chgid">N3</span></td><td><code>DDDCore</code>、<code>EventSourcing</code>、<code>LocalEventStore</code> product</td><td>三者只依賴彼此、Foundation 與 swift-log，可建置於 iOS 18+；app 不必拉進 <code>DDDKit</code> umbrella。</td><td>1.5</td></tr>
-        <tr><td><span class="chgid">BC4</span></td><td><code>InMemoryEventStore</code></td><td>符合 EventStore 契約的 in-memory store，取代 <code>InMemoryStorageCoordinator</code>。</td><td>1.5</td></tr>
-        <tr><td>—</td><td><code>ContextReceiverWebSocket</code> 支援 macOS</td><td>Pulsar WebSocket transport 不再限 Linux。</td><td>1.5（#32）</td></tr>
+        <tr><td><span class="chgid">N1</span></td><td><code>RecordedEventLike</code>、<code>EventTypeMapper</code>、<code>CustomMetadata</code> 移到 <code>EventSourcing</code></td><td><code>KurrentSupport</code> 保留同名 typealias，既有的 <code>import KurrentSupport</code> 程式碼不需修改。非 Kurrent 的 store 可以重用生成的 mapper。</td><td>1.4.0</td></tr>
+        <tr><td><span class="chgid">N2</span></td><td><code>PersistentEventStore</code>（<code>LocalEventStore</code>）</td><td>給 iOS／macOS app 的檔案式 <code>EventStore</code>，每個 stream 一個 JSON 檔、原子寫入。一個目錄只能開一個 instance，repository 與 projector 共用它；在 <code>.defaultIsolation(MainActor.self)</code> 的 target 中，aggregate、projector 與 read model 要宣告為 <code>nonisolated</code>。見 <a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/README.md#local-event-store-ios-and-macos-apps">README 的 Local Event Store 章節</a>。</td><td>1.4.0</td></tr>
+        <tr><td><span class="chgid">N3</span></td><td><code>DDDCore</code>、<code>EventSourcing</code>、<code>LocalEventStore</code> product</td><td>三者只依賴彼此、Foundation 與 swift-log，可建置於 iOS 18+；app 不必拉進 <code>DDDKit</code> umbrella。</td><td>1.4.0</td></tr>
+        <tr><td><span class="chgid">BC4</span></td><td><code>InMemoryEventStore</code></td><td>符合 EventStore 契約的 in-memory store，取代 <code>InMemoryStorageCoordinator</code>。</td><td>1.4.0</td></tr>
+        <tr><td>—</td><td><code>ContextReceiverWebSocket</code> 支援 macOS</td><td>Pulsar WebSocket transport 不再限 Linux。</td><td>1.4.0（#32）</td></tr>
         <tr><td><span class="chgid">N4</span></td><td>Template variables：<code>TemplateVariables</code>、<code>TemplateVariablesDefinition</code>、<code>VariablesGeneratorPlugin</code></td><td><code>variables.yaml</code> 生成型別化的 protocol；<code>PlaceholderSubstitution</code> 以單一遍歷填入 <code>%Placeholder%</code>。</td><td>1.4.0-beta.9</td></tr>
         <tr><td><span class="chgid">N4</span></td><td><code>ForwardedRecord.metadata</code>、<code>decodeMetadata(_:)</code></td><td>forwarder rule 可讀 KurrentDB 的 custom metadata，自選解碼型別。</td><td>1.4.0-beta.10</td></tr>
         <tr><td><span class="chgid">N4</span></td><td><code>SnapshotWriteMode</code>、<code>ReadModelSnapshotPurging</code>、<code>ReadModel.readModelTypeName</code>、<code>KurrentProjection.rebuild</code>、<code>KurrentProjection.SubscriptionSetup</code></td><td>Postgres read model 上線強化（行為面見 <span class="chgid">BC6</span>、<span class="chgid">BC7</span>）。</td><td>1.4.0-beta.12</td></tr>
@@ -618,11 +618,11 @@ dependencies:
         <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.12">1.4.0-beta.12</a></td><td>Postgres read model 上線強化（<span class="chgid">BC6</span>、<span class="chgid">BC7</span>、<span class="chgid">SB7</span>）；Swift 6.1 下限（<span class="chgid">SB6</span>）；各版本的 DocC 文件站。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/26">#26</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/27">#27</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/28">#28</a></td></tr>
         <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.13">1.4.0-beta.13</a></td><td><code>PublishedLanguageEvent.actorId</code>。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/29">#29</a></td></tr>
         <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.14">1.4.0-beta.14</a></td><td>兩個 runner 的 <code>onCommitted(_:)</code> after-commit hook。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/30">#30</a></td></tr>
-        <tr><td>未發行（1.5.0）</td><td>EventStore 契約（<span class="chgid">SB1</span>–<span class="chgid">SB3</span>、<span class="chgid">BC1</span>–<span class="chgid">BC4</span>、<span class="chgid">N1</span>）；<code>ContextReceiverWebSocket</code> 支援 macOS；<code>PersistentEventStore</code>（<span class="chgid">N2</span>）。1.5 的 product、iOS 18 與 <code>Int64.max</code> 防護（<span class="chgid">SB5</span>、<span class="chgid">N3</span>、<span class="chgid">BC5</span>）也尚未發行。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/31">#31</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/32">#32</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/33">#33</a></td></tr>
+        <tr><td>未發行（1.4.0）</td><td>EventStore 契約（<span class="chgid">SB1</span>–<span class="chgid">SB3</span>、<span class="chgid">BC1</span>–<span class="chgid">BC4</span>、<span class="chgid">N1</span>）；<code>ContextReceiverWebSocket</code> 支援 macOS；<code>PersistentEventStore</code>（<span class="chgid">N2</span>）。product、iOS 18 與 <code>Int64.max</code> 防護（<span class="chgid">SB5</span>、<span class="chgid">N3</span>、<span class="chgid">BC5</span>）。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/31">#31</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/32">#32</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/33">#33</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/34">#34</a></td></tr>
       </tbody>
     </table>
     <div class="callout"><b>1.4.0-beta.0 到 beta.8</b>
-      這些預覽版屬於已停用的版本線。只在那條線上出現的模組，例如 <code>NotificationDefinition</code>，不在 1.5 內。</div>
+      這些預覽版屬於已停用的版本線。只在那條線上出現的模組，例如 <code>NotificationDefinition</code>，不在 1.4.0 內。</div>
   </section>
 
   <!-- ================= CHECKLIST ================= -->
@@ -631,7 +631,7 @@ dependencies:
     <p>先處理會讓編譯失敗的項目，再逐條檢查行為變更。</p>
     <ol class="steps">
       <li><b>工具鏈</b> — 使用 Swift 6.1 以上（<span class="chgid">SB6</span>）。</li>
-      <li><b>Bump 依賴</b> — <code>swift-ddd-kit</code> 改成 <code>from: "1.5.0"</code>；若直接依賴 swift-kurrentdb，下限改成 <code>2.6.0</code>（<span class="chgid">SB1</span>）。</li>
+      <li><b>Bump 依賴</b> — <code>swift-ddd-kit</code> 改成 <code>from: "1.4.0"</code>；若直接依賴 swift-kurrentdb，下限改成 <code>2.6.0</code>（<span class="chgid">SB1</span>）。</li>
       <li><b>iOS 目標</b> — iOS／Mac Catalyst 的 deployment target 提高到 18（<span class="chgid">SB5</span>）。</li>
       <li><b>重新生成</b> — 重建讓 plugin 重新產生程式碼；<code>event.yaml</code> 若以 <code>KurrentSupport</code> 限定型別，改型別或在 config 補 <code>dependencies</code>（<span class="chgid">SB3</span>）。</li>
       <li><b>Forwarder rule</b> — <code>ForwardingRule</code> 的 closure 改回傳陣列（<span class="chgid">SB4</span>）。</li>
@@ -655,13 +655,14 @@ dependencies:
   </section>
 
   <footer>
-    <p>swift-ddd-kit 1.3 → 1.5 Migration Guide ·
+    <p>swift-ddd-kit 1.3 → 1.4 Migration Guide ·
        對應 PR <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/31">#31</a>、
        <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/32">#32</a>、
-       <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/33">#33</a>，以及 1.4 預覽版的 #24–#30。</p>
+       <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/33">#33</a>、
+       <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/34">#34</a>，以及 1.4 預覽版的 #24–#30。</p>
     <p>設計文件：<code>docs/superpowers/specs/2026-10-23-eventstore-contract-design.md</code>、
        <code>2026-10-23-persistent-event-store-design.md</code>、<code>2026-10-23-eventstore-ci-platform-design.md</code> ·
-       逐步遷移文字版：<code>MIGRATION.md</code> 的 1.4.0 與 1.5.0 章節。</p>
+       逐步遷移文字版：<code>MIGRATION.md</code> 的 1.4.0 章節。</p>
     <p>本文件同時供人類與 AI agent 閱讀 —— AI 工具請優先消化
        <a href="#ai-manifest">AI Migration Manifest</a> 的 JSON 區塊。</p>
   </footer>

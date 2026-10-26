@@ -79,5 +79,5 @@ public enum InMemoryStorageCoordinatorError: Error {
     case versionConflict(expected: UInt64, actual: UInt64)
 }
 
-@available(*, deprecated, renamed: "InMemoryEventStore", message: "Renamed in 1.5 and now follows the EventStore contract: revisions start at 0, `version: nil` requires a new stream, conflicts throw DDDError.commitConflict. Removed in 1.6 at the earliest.")
+@available(*, deprecated, renamed: "InMemoryEventStore", message: "Renamed in 1.4 and now follows the EventStore contract: revisions start at 0, `version: nil` requires a new stream, conflicts throw DDDError.commitConflict. Removed in 1.5 at the earliest.")
 public typealias InMemoryStorageCoordinator<Metadata: EventMetadata> = InMemoryEventStore<Metadata>

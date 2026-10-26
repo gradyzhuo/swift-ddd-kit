@@ -15,7 +15,7 @@ import EventSourcing
 import Foundation
 import KurrentDB
 
-/// Moved to EventSourcing in 1.5; kept here so existing `KurrentSupport` imports compile.
+/// Moved to EventSourcing in 1.4; kept here so existing `KurrentSupport` imports compile.
 public typealias RecordedEventLike = EventSourcing.RecordedEventLike
 
 /// An event pushed by a persistent-subscription session, with its redelivery count.
@@ -89,7 +89,7 @@ public protocol EventStoreClient: Sendable {
 }
 
 extension EventStoreClient {
-    /// Conformers written before 1.5 keep compiling, but `KurrentStorageCoordinator.purge`
+    /// Conformers written before 1.4 keep compiling, but `KurrentStorageCoordinator.purge`
     /// through them fails at run time until they implement or forward this. Deprecated so
     /// the compiler warns at every conformance that silently relies on it.
     @available(*, deprecated, message: "Implement or forward tombstoneStream(name:); KurrentStorageCoordinator.purge calls it.")
