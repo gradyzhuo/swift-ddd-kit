@@ -1111,7 +1111,7 @@ docker run --rm --network host -v "$PWD":/src -w /src \
   bash -c 'swift test --filter ContextReceiverIntegrationTests'
 ```
 
-This suite needs a live broker, so it deliberately stays out of CI — `.github/workflows/swift-build-testing.yml` only runs the offline suites.
+This suite needs a live broker, so it deliberately stays out of CI. `.github/workflows/swift-build-testing.yml` runs the offline suites, builds the `DDDCore`, `EventSourcing` and `LocalEventStore` products for iOS (`build-ios`), and runs `KurrentLiveContractTests` against `kurrentplatform/kurrentdb:26.1.3` (`kurrent-live-contract`); the Pulsar broker is not part of it.
 
 ## Modules
 
