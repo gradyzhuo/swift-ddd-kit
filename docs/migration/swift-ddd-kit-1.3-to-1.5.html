@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>swift-ddd-kit 1.3 → 1.5 Migration Guide</title>
+<meta name="description" content="Migration guide for projects depending on swift-ddd-kit, upgrading from 1.3 to 1.5 — the EventStore contract, permanent purge, PersistentEventStore, iOS 18 products, and everything shipped in the 1.4 betas.">
+<meta name="x-migration-target" content="swift-ddd-kit">
+<meta name="x-migration-from" content="1.3">
+<meta name="x-migration-to" content="1.5">
+<meta name="x-document-kind" content="migration-guide">
+<meta name="x-audience" content="human,ai-agent">
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --ink:#e6e8ee; --muted:#9aa3b2;
+    --line:#2a2f3a; --accent:#5aa9ff; --accent2:#7c5cff;
+    --add:#3fb950; --addbg:#10331c; --del:#f85149; --delbg:#3a1416;
+    --warn:#e3b341; --warnbg:#3a2f12; --ok:#3fb950;
+    --code:#11141a; --kw:#ff7b9c; --str:#9ece6a; --typ:#7dcfff; --com:#5c6370;
+    --chip:#262b36;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 22px 120px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre,.mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.01em}
+  h2{font-size:22px;margin:48px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:17px;margin:26px 0 10px}
+  p{margin:10px 0}
+  .sub{color:var(--muted);font-size:15px;margin:0 0 18px}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 8px}
+  .badge{background:var(--chip);border:1px solid var(--line);border-radius:999px;
+    padding:3px 11px;font-size:12px;color:var(--muted)}
+  .badge.v{color:var(--accent);border-color:#2b4a6e}
+  .badge.brk{color:var(--del);border-color:#5a2222}
+  .hero{background:linear-gradient(135deg,#171a21,#1b1830);
+    border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0 8px}
+  .hero .ver{font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+  .arrowline{display:flex;align-items:center;gap:14px;margin:8px 0 4px;flex-wrap:wrap}
+  .vchip{font:600 20px/1 "SF Mono",monospace;padding:8px 14px;border-radius:9px}
+  .vchip.old{background:var(--delbg);color:#ff9b95;border:1px solid #5a2222}
+  .vchip.new{background:var(--addbg);color:#79e08a;border:1px solid #1d5a2e}
+  .vchip .t{font-size:11px;display:block;color:var(--muted);font-weight:400;margin-bottom:2px}
+  .arrow{font-size:24px;color:var(--accent2)}
+
+  nav.toc{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px 18px;margin:22px 0}
+  nav.toc b{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  nav.toc ol{margin:8px 0 0;padding-left:20px;columns:2;column-gap:28px}
+  nav.toc li{margin:3px 0}
+
+  section{margin-top:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;margin:14px 0}
+  .card.tight{padding:12px 16px}
+
+  .tag{display:inline-block;font:600 11px/1 "SF Mono",monospace;padding:4px 8px;
+    border-radius:6px;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle}
+  .tag.rename{background:#1b2c44;color:#7db8ff}
+  .tag.sig{background:#3a2f12;color:var(--warn)}
+  .tag.removed{background:var(--delbg);color:#ff9b95}
+  .tag.new{background:var(--addbg);color:#79e08a}
+  .tag.same{background:#23262e;color:var(--muted)}
+  .tag.auto{background:#16302a;color:#5fd6a8}
+  .tag.manual{background:#3a2412;color:#e0a060}
+
+  .chgid{font:600 12px/1 "SF Mono",monospace;color:var(--accent2);
+    background:#211d33;border:1px solid #352c52;border-radius:6px;padding:4px 8px}
+
+  pre{background:var(--code);border:1px solid var(--line);border-radius:9px;
+    padding:13px 15px;overflow-x:auto;font-size:13px;line-height:1.55;margin:8px 0}
+  pre.diff .a{display:block;background:var(--delbg);color:#ffb3ae;margin:0 -15px;padding:0 15px}
+  pre.diff .d{display:block;background:var(--addbg);color:#9ff0a8;margin:0 -15px;padding:0 15px}
+  pre.diff .x{display:block;color:var(--muted)}
+  .cmt{color:var(--com)}
+  .kw{color:var(--kw)} .ty{color:var(--typ)} .st{color:var(--str)}
+
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}
+  @media(max-width:720px){.ba{grid-template-columns:1fr}}
+  .ba .col h4{margin:0 0 5px;font:600 12px/1 "SF Mono",monospace;letter-spacing:.04em}
+  .ba .before h4{color:#ff9b95} .ba .after h4{color:#79e08a}
+  .ba pre{margin:0;height:100%}
+
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);font-size:12px;letter-spacing:.03em;color:var(--muted);
+    text-transform:uppercase}
+  td code{background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12.5px}
+  tr:nth-child(even) td{background:#14171e}
+
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);
+    border-radius:0 9px 9px 0;padding:11px 15px;margin:12px 0}
+  .callout.warn{border-color:var(--warn);background:var(--warnbg)}
+  .callout.danger{border-color:var(--del);background:#2a1416}
+  .callout.ok{border-color:var(--ok);background:#10261a}
+  .callout b{display:block;margin-bottom:3px}
+
+
+  .steps{counter-reset:s;list-style:none;padding:0;margin:14px 0}
+  .steps li{position:relative;padding:12px 14px 12px 50px;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;margin:9px 0}
+  .steps li::before{counter-increment:s;content:counter(s);position:absolute;
+    left:12px;top:12px;width:26px;height:26px;border-radius:50%;
+    background:var(--accent2);color:#fff;font:700 13px/26px monospace;text-align:center}
+  .steps li b{color:var(--ink)}
+  .steps code{background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+
+  .ai{background:linear-gradient(135deg,#141826,#1a1530);
+    border:1px solid #352c52;border-radius:14px;padding:18px 20px;margin:16px 0}
+  .ai h2{border:0;margin:0 0 4px;color:#b8a8ff}
+  .ai .lead{color:var(--muted);font-size:13.5px;margin:0 0 12px}
+  .ai pre{background:#0c0e15;border-color:#2a2440;max-height:none}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0;font-size:12.5px;color:var(--muted)}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:12.5px}
+  .kicker{font:600 12px/1 "SF Mono",monospace;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--accent2);margin:0 0 4px}
+  details{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:10px 14px;margin:10px 0}
+  summary{cursor:pointer;font-weight:600}
+  .hl{color:var(--warn)}
+  ul.tite{margin:8px 0;padding-left:20px}
+  ul.tite li{margin:4px 0}
+
+  .sitenav{position:sticky;top:0;z-index:50;background:rgba(15,17,21,.92);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .sn-inner{max-width:1080px;margin:0 auto;padding:10px 22px;display:flex;
+    align-items:center;gap:18px;flex-wrap:wrap}
+  .sn-brand{font:700 15px/1 "SF Mono",monospace;color:var(--ink)}
+  .sn-links{display:flex;gap:16px;flex-wrap:wrap;font-size:13.5px;margin-left:auto}
+  .sn-links a{color:var(--muted)}
+  .sn-links a:hover,.sn-links a.active{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+
+<nav class="sitenav"><div class="sn-inner">
+  <a class="sn-brand" href="../index.html">swift-ddd-kit</a>
+  <div class="sn-links">
+    <a href="../index.html">Home</a>
+    <a href="../index.html#whats-new">What's new</a>
+    <a href="./swift-ddd-kit-0.x-to-1.0.html">Migration 0.x→1.0</a>
+    <a href="./swift-ddd-kit-1.3-to-1.5.html" class="active">Migration 1.3→1.5</a>
+    <a href="https://github.com/gradyzhuo/swift-ddd-kit">GitHub ↗</a>
+  </div>
+</div></nav>
+
+<div class="wrap">
+
+  <p class="kicker">Framework Migration Guide</p>
+  <h1>swift-ddd-kit &nbsp;1.3 → 1.5</h1>
+  <p class="sub">EventStore 契約、本機事件儲存與 iOS — 給「依賴 swift-ddd-kit 的下游專案」的升級指南，一併涵蓋 1.4 預覽版期間的變更</p>
+
+  <div class="badges">
+    <span class="badge v">target: swift-ddd-kit</span>
+    <span class="badge">Swift 6.1+ / Ubuntu / macOS 15+ / iOS 18+</span>
+    <span class="badge brk">⚠ source-breaking + behaviour change</span>
+    <span class="badge">audience: human + AI agent</span>
+  </div>
+
+  <div class="hero">
+    <div class="ver">version transition</div>
+    <div class="arrowline">
+      <div class="vchip old"><span class="t">FROM</span>1.3</div>
+      <div class="arrow">→</div>
+      <div class="vchip new"><span class="t">TO</span>1.5</div>
+      <div style="flex:1"></div>
+    </div>
+    <p style="margin:10px 0 0;color:var(--muted);font-size:13.5px">
+      1.4.0 沒有正式發行，1.3.0 之後的下一個穩定版就是 1.5.0。1.5 把每個 <code>EventStore</code> 該怎麼做寫成一份契約
+      （revision 從 0 起算、版本不符一律丟 <code>DDDError.commitConflict</code>、<code>purge</code> 改為<b>永久</b>的 tombstone），
+      新增檔案式的 <code>PersistentEventStore</code>，並讓 <code>DDDCore</code>、<code>EventSourcing</code>、<code>LocalEventStore</code>
+      以 product 發佈、可建置於 iOS 18+。1.4 預覽版帶來的 Postgres read model 強化、template variables 與 forwarder 變更也在本指南內。
+      <code>AggregateRoot</code> / <code>DomainEvent</code> / <code>Usecase</code> 的介面<b>不變</b>。
+    </p>
+  </div>
+
+  <nav class="toc">
+    <b>目錄</b>
+    <ol>
+      <li><a href="#who">誰受影響</a></li>
+      <li><a href="#ai-manifest">AI Migration Manifest（機器可讀）</a></li>
+      <li><a href="#breaking">Source-breaking 變更</a></li>
+      <li><a href="#behaviour">行為變更</a></li>
+      <li><a href="#additions">新增功能</a></li>
+      <li><a href="#betas">1.4 預覽版與未發行的變更</a></li>
+      <li><a href="#checklist">升級步驟清單</a></li>
+      <li><a href="#reference">參考 KurrentDB 版本</a></li>
+    </ol>
+  </nav>
+
+  <!-- ================= WHO ================= -->
+  <section id="who">
+    <h2>誰受影響</h2>
+    <div class="card">
+      <table>
+        <thead><tr><th style="width:42%">如果你的專案…</th><th>要看的項目</th></tr></thead>
+        <tbody>
+          <tr><td>依賴 swift-ddd-kit 的任何 product</td><td><span class="chgid">SB1</span> swift-kurrentdb ≥ 2.6.0、<span class="chgid">SB6</span> Swift 6.1+</td></tr>
+          <tr><td>以 iOS 或 Mac Catalyst 為建置目標</td><td><span class="chgid">SB5</span> 最低版本 18</td></tr>
+          <tr><td>對 <code>DDDError.Code</code> 或 <code>EventStoreClientError</code> 寫了沒有 <code>default</code> 的 <code>switch</code></td><td><span class="chgid">SB2</span></td></tr>
+          <tr><td>用 <code>DomainEventGeneratorPlugin</code>／<code>generate event</code> 產生事件</td><td><span class="chgid">SB3</span> 產出檔的 import</td></tr>
+          <tr><td>使用 <code>ContextForwarder</code> 的 <code>ForwardingRule</code></td><td><span class="chgid">SB4</span>、<span class="chgid">BC8</span></td></tr>
+          <tr><td>自己實作或包裝 <code>EventStoreClient</code></td><td><span class="chgid">SB7</span>、<span class="chgid">BC2</span></td></tr>
+          <tr><td>呼叫 <code>purge</code>，或 catch 版本衝突錯誤</td><td><span class="chgid">BC1</span>、<span class="chgid">BC3</span>、<span class="chgid">BC5</span></td></tr>
+          <tr><td>在測試裡用 <code>InMemoryStorageCoordinator</code> 或 <code>InMemoryEventStoreClient</code></td><td><span class="chgid">BC4</span></td></tr>
+          <tr><td>使用 Postgres read model 或 Kurrent 的 subscription runner</td><td><span class="chgid">BC6</span>、<span class="chgid">BC7</span></td></tr>
+          <tr><td>只用 <code>AggregateRoot</code> / <code>DomainEvent</code> / <code>Usecase</code> 與內建 store</td><td>bump 版本、重新生成、跑測試；再讀一次 <span class="chgid">BC1</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= AI MANIFEST ================= -->
+  <section id="ai-manifest" class="ai">
+    <h2>🤖 AI Migration Manifest（機器可讀）</h2>
+    <p class="lead">
+      若你是 AI agent，正在把一個依賴 <code>swift-ddd-kit</code> 的專案從 1.3 升到 1.5 —
+      直接消化下方 JSON。每條規則含 <code>kind</code>（變更類型）、<code>mechanical</code>
+      （能否純文字取代）、<code>before</code>/<code>after</code>、<code>action</code>（對下游要做什麼）。
+      套用順序：先處理 <code>source-breaking</code> 讓專案編得過，再逐條檢查 <code>behaviour-change</code>
+      （編譯器不會指出這些）。<code>scope</code> 標示要掃描的程式碼位置。
+    </p>
+<pre id="migration-rules" data-format="swift-ddd-kit-migration/v1">{
+  "schema": "swift-ddd-kit-migration/v1",
+  "package": "swift-ddd-kit",
+  "from": "1.3",
+  "to": "1.5",
+  "domainLayerImpact": "none",
+  "applyOrder": ["source-breaking", "behaviour-change", "new"],
+  "rules": [
+    {
+      "id": "SB1",
+      "kind": "source-breaking",
+      "mechanical": true,
+      "scope": "Package.swift of the downstream project, only if it depends on swift-kurrentdb directly",
+      "before": ".package(url: \"https://github.com/gradyzhuo/swift-kurrentdb.git\", from: \"2.3.0\")",
+      "after": ".package(url: \"https://github.com/gradyzhuo/swift-kurrentdb.git\", from: \"2.6.0\")",
+      "action": "swift-ddd-kit 1.5 requires swift-kurrentdb 2.6.0 or later (its reads report tombstoned streams as KurrentError.resourceDeleted). Raise any direct requirement below 2.6.0."
+    },
+    {
+      "id": "SB2",
+      "kind": "source-breaking",
+      "mechanical": false,
+      "scope": "exhaustive switch statements over DDDError.Code or EventStoreClientError without a default",
+      "before": "switch error.code { case .aggregateNotFound: ... }",
+      "after": "add cases .commitConflict (501), .streamPurged (502), .storeUnavailable (503), .storeCorrupted (504); for EventStoreClientError add .subscriptionGroupNotFound(stream:group:) and .tombstoneUnsupported",
+      "action": "Handle the new enum cases or add a default."
+    },
+    {
+      "id": "SB3",
+      "kind": "source-breaking",
+      "mechanical": false,
+      "scope": "event.yaml and event-generator-config.yaml of targets using DomainEventGeneratorPlugin",
+      "before": "generated files import KurrentSupport and KurrentDB; event.yaml may name KurrentSupport.CustomMetadata",
+      "after": "generated files import Foundation, DDDCore and EventSourcing only",
+      "action": "If event.yaml qualifies a type with KurrentSupport (e.g. KurrentSupport.CustomMetadata) or uses an unqualified type only KurrentSupport/KurrentDB provide, either change it to EventSourcing.CustomMetadata / unqualified CustomMetadata, or add `dependencies: [KurrentSupport]` to event-generator-config.yaml. Then regenerate."
+    },
+    {
+      "id": "SB4",
+      "kind": "source-breaking",
+      "mechanical": false,
+      "scope": "ForwardingRule translate closures (ContextForwarder)",
+      "before": "ForwardingRule(eventTypes: [\"X\"]) { record in try makeEvent(record) }   // PublishedLanguageEvent?",
+      "after": "ForwardingRule(eventTypes: [\"X\"]) { record in [try makeEvent(record)] } // [PublishedLanguageEvent]",
+      "action": "Return an array; return [] where the closure returned nil. When one record yields several events, give each a stable, distinct eventId."
+    },
+    {
+      "id": "SB5",
+      "kind": "source-breaking",
+      "mechanical": false,
+      "scope": "iOS and Mac Catalyst deployment targets of any project building any swift-ddd-kit product",
+      "before": "iOS / Mac Catalyst deployment target below 18",
+      "after": "iOS / Mac Catalyst deployment target 18 or later",
+      "action": "Package.swift now declares .iOS(.v18); it applies to every product. Raise the deployment target to 18. macOS (15+) and Linux projects are unaffected."
+    },
+    {
+      "id": "SB6",
+      "kind": "source-breaking",
+      "mechanical": false,
+      "scope": "toolchain used to build the downstream project",
+      "before": "Swift 6.0 toolchain",
+      "after": "Swift 6.1 or later (swift-tools-version: 6.1)",
+      "action": "Build with Swift 6.1 or later."
+    },
+    {
+      "id": "SB7",
+      "kind": "source-breaking",
+      "mechanical": false,
+      "scope": "types conforming to EventStoreClient (wrappers, decorators, custom fakes)",
+      "before": "conformance implements append, readStream, deleteStream, subscribePersistent",
+      "after": "conformance also implements ensurePersistentSubscription(stream:group:settings:), deletePersistentSubscription(stream:group:) and tombstoneStream(name:)",
+      "action": "Implement or forward the two persistent-subscription requirements (no default; compile error otherwise). Also forward tombstoneStream(name:) — see BC2."
+    },
+    {
+      "id": "BC1",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "every call of purge(byId:) on a repository or store",
+      "before": "KurrentStorageCoordinator.purge soft-deletes; the id could be written again; EventSourcingRepository.purge threw aggregateNotFound for an unknown id",
+      "after": "purge tombstones the stream permanently; a later non-empty append throws DDDError.streamPurged (502); purge of a never-written id succeeds and reserves the id forever; EventSourcingRepository.purge no longer calls find first",
+      "action": "Do not purge ids that will be reused. Remove code relying on purge-then-recreate or on aggregateNotFound from purge."
+    },
+    {
+      "id": "BC2",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "types conforming to EventStoreClient, including wrappers around LiveEventStoreClient",
+      "before": "no tombstoneStream requirement",
+      "after": "func tombstoneStream(name: String) async throws { try await base.tombstoneStream(name: name) }",
+      "action": "Without it the conformance still compiles (deprecated default, warning), but KurrentStorageCoordinator.purge throws EventStoreClientError.tombstoneUnsupported at run time and nothing is purged. Implement or forward it."
+    },
+    {
+      "id": "BC3",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "catch clauses around append/save",
+      "before": "catch KurrentError.wrongExpectedVersion / EventStoreClientError.wrongExpectedRevision / InMemoryStorageCoordinatorError.versionConflict",
+      "after": "catch let error as DDDError where error.code == .commitConflict { let conflict = error.commitConflict }",
+      "action": "Version conflicts from KurrentStorageCoordinator and InMemoryEventStore are always DDDError.commitConflict (501), carrying CommitConflict { id, expected, actual }."
+    },
+    {
+      "id": "BC4",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "tests and code using InMemoryStorageCoordinator, InMemoryEventStoreClient, or relying on store edge cases",
+      "before": "InMemoryStorageCoordinator: 1-based revisions, version nil unchecked; fetchEvents sorted by occurred",
+      "after": "InMemoryEventStore<M>: 0-based revisions, version nil requires a new stream; fetchEvents in stream order; empty append returns nil without writing; save with no new events does not call the store; InMemoryEventStoreClient models tombstones and event-id idempotency",
+      "action": "Rename InMemoryStorageCoordinator to InMemoryEventStore (the old name is a deprecated typealias) and update tests that assert revisions or conflicts."
+    },
+    {
+      "id": "BC5",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "callers passing very large expected versions to KurrentStorageCoordinator.append",
+      "before": "version > Int64.max was sent to KurrentDB, which returned an internal gRPC error",
+      "after": "version > UInt64(Int64.max) is not sent; throws DDDError.commitConflict with actual = the stream's last revision (nil if absent), or streamPurged if the stream is tombstoned",
+      "action": "Nothing to change unless code matched on the old gRPC error."
+    },
+    {
+      "id": "BC6",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "Postgres read model stores, PostgresReadModelMigration, PostgresReadModelSnapshots",
+      "before": "unconditional upsert into read_model_snapshots",
+      "after": "default SnapshotWriteMode.monotonic writes read_model_snapshots_monotonic and only accepts a strictly newer revision",
+      "action": "Existing users of the default table either rebuild (KurrentProjection.rebuild) or pass writeMode: .overwrite. Pass the same tableName/writeMode to the migration, the stores and PostgresReadModelSnapshots."
+    },
+    {
+      "id": "BC7",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "KurrentProjection.PersistentSubscriptionRunner and TransactionalSubscriptionRunner",
+      "before": "runners subscribed to an existing group only; transactional runner dispatched projectors concurrently; generated apply() used default: return",
+      "after": "subscriptionSetup defaults to .ensure(...): the runner creates the group, recreates it if it disappears and rethrows subscriptionGroupNotFound; projectors dispatch sequentially in registration order; generated apply() uses default: continue",
+      "action": "Credentials need permission to create persistent subscriptions, or pass subscriptionSetup: .manual. Restart run() after subscriptionGroupNotFound (restart loop with backoff). Regenerate projector code."
+    },
+    {
+      "id": "BC8",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "ContextForwarder hosts",
+      "before": "a missing subscription group made the forwarder retry forever",
+      "after": "the forwarder recreates the group from subscriptionSettings.startFrom (default .end) and rethrows; events written while the group was missing are not forwarded",
+      "action": "No code change; be aware of the gap when a group is recreated from .end."
+    },
+    {
+      "id": "N1",
+      "kind": "new",
+      "mechanical": false,
+      "scope": "imports of RecordedEventLike, EventTypeMapper, CustomMetadata",
+      "after": "defined in EventSourcing; KurrentSupport keeps public typealiases",
+      "action": "Nothing required; `import KurrentSupport` code keeps compiling."
+    },
+    {
+      "id": "N2",
+      "kind": "new",
+      "mechanical": false,
+      "scope": "iOS/macOS apps that want a local event store",
+      "after": "PersistentEventStore<StreamNaming, Metadata>.open(directory:eventMapper:) in the LocalEventStore product",
+      "action": "Optional. See the README section 'Local Event Store (iOS and macOS apps)'."
+    },
+    {
+      "id": "N3",
+      "kind": "new",
+      "mechanical": false,
+      "scope": "Package.swift product dependencies",
+      "after": ".product(name: \"DDDCore\" | \"EventSourcing\" | \"LocalEventStore\", package: \"swift-ddd-kit\")",
+      "action": "Optional. Apps can depend on these three products without pulling in the DDDKit umbrella."
+    },
+    {
+      "id": "N4",
+      "kind": "new",
+      "mechanical": false,
+      "scope": "1.4 additions",
+      "after": "TemplateVariables, TemplateVariablesDefinition, VariablesGeneratorPlugin; ForwardedRecord.metadata and decodeMetadata(_:); SnapshotWriteMode, ReadModelSnapshotPurging, ReadModel.readModelTypeName, KurrentProjection.rebuild, KurrentProjection.SubscriptionSetup; PublishedLanguageEvent.actorId; onCommitted(_:) and CommittedProjection on both runners",
+      "action": "Optional."
+    }
+  ],
+  "downstreamProcedure": [
+    "Use a Swift 6.1+ toolchain (SB6).",
+    "Bump swift-ddd-kit to from: \"1.5.0\"; raise any direct swift-kurrentdb requirement to 2.6.0 (SB1).",
+    "Raise iOS / Mac Catalyst deployment targets to 18 (SB5).",
+    "Rebuild and regenerate generated code; fix event.yaml types or add the KurrentSupport dependency (SB3).",
+    "Fix ForwardingRule closures to return arrays (SB4).",
+    "Handle the new DDDError.Code and EventStoreClientError cases (SB2).",
+    "In custom EventStoreClient conformances, implement or forward ensurePersistentSubscription, deletePersistentSubscription and tombstoneStream (SB7, BC2).",
+    "Replace catches of the old conflict errors with DDDError.commitConflict (BC3).",
+    "Rename InMemoryStorageCoordinator to InMemoryEventStore and fix tests that assert revisions (BC4).",
+    "Review every purge call: purged ids can never be written again (BC1).",
+    "Postgres read models: choose writeMode .monotonic (rebuild) or .overwrite (keep the existing table) (BC6).",
+    "Subscription runners: grant permission to create groups or use .manual; restart run() on subscriptionGroupNotFound (BC7).",
+    "Build; run the test suite."
+  ]
+}</pre>
+  </section>
+
+  <!-- ================= BREAKING ================= -->
+  <section id="breaking">
+    <h2>Source-breaking 變更</h2>
+    <p>這些變更會讓既有程式碼編不過，編譯器會指出位置。</p>
+
+    <div class="card">
+      <h3><span class="chgid">SB1</span> &nbsp;<span class="tag sig">dependency</span> &nbsp;swift-kurrentdb ≥ 2.6.0</h3>
+      <p>2.6.0 讓讀取已 tombstone 的 stream 回報 <code>KurrentError.resourceDeleted</code>，1.5 的 <code>purge</code> 語意依賴它。
+         swift-ddd-kit 1.3 要求 <code>2.3.0</code>；若你的 <code>Package.swift</code> 直接依賴 swift-kurrentdb，下限要一起提高。</p>
+      <pre class="diff"><span class="a">- .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.3.0")</span>
+<span class="d">+ .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0")</span></pre>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">SB2</span> &nbsp;<span class="tag new">enum case</span> &nbsp;<code>DDDError.Code</code> 501–504 與 <code>EventStoreClientError</code> 新 case</h3>
+      <table>
+        <thead><tr><th>型別</th><th>新增 case</th><th>來源</th></tr></thead>
+        <tbody>
+          <tr><td><code>DDDError.Code</code></td><td><code>commitConflict</code>（501）、<code>streamPurged</code>（502）、<code>storeUnavailable</code>（503）、<code>storeCorrupted</code>（504）</td><td>1.5</td></tr>
+          <tr><td><code>EventStoreClientError</code></td><td><code>tombstoneUnsupported</code></td><td>1.5</td></tr>
+          <tr><td><code>EventStoreClientError</code></td><td><code>subscriptionGroupNotFound(stream:group:)</code></td><td>1.4.0-beta.12</td></tr>
+        </tbody>
+      </table>
+      <p>沒有 <code>default</code> 的 exhaustive <code>switch</code> 需要補上這些 case。<code>storeUnavailable</code> 的原因以
+         <code>error.storeUnavailableReason</code>（<code>DDDError.StoreUnavailableReason</code>：<code>invalidLocation</code>、
+         <code>streamNameTooLong</code>、<code>io</code>、<code>occupied</code>、<code>closed</code>）讀取；目前只有 <code>PersistentEventStore</code> 丟 503／504。</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">SB3</span> &nbsp;<span class="tag sig">codegen</span> &nbsp;Generator 產出檔的 import</h3>
+      <p>產出檔現在 import <code>Foundation</code>、<code>DDDCore</code>、<code>EventSourcing</code>，不再 import <code>KurrentSupport</code>／<code>KurrentDB</code>。
+         若 <code>event.yaml</code> 以 <code>KurrentSupport</code> 限定型別（例如 <code>KurrentSupport.CustomMetadata</code>），或使用只有
+         KurrentSupport／KurrentDB 提供的非限定型別，重新生成後會編譯失敗；KurrentSupport 的 typealias 無法補救，因為該模組沒被 import。二選一：</p>
+      <div class="ba">
+        <div class="col after"><h4>做法一：改型別名稱（event.yaml）</h4>
+<pre class="diff"><span class="a">- actorMetadata: KurrentSupport.CustomMetadata</span>
+<span class="d">+ actorMetadata: EventSourcing.CustomMetadata</span>
+<span class="x">  # 或非限定的 CustomMetadata</span></pre>
+        </div>
+        <div class="col after"><h4>做法二：補依賴（event-generator-config.yaml）</h4>
+<pre>accessModifier: public
+dependencies:
+  - KurrentSupport</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">SB4</span> &nbsp;<span class="tag sig">signature</span> &nbsp;<code>ForwardingRule.translate</code> 回傳陣列（1.4.0-beta.9）</h3>
+      <pre class="diff"><span class="a">- ForwardingRule(eventTypes: ["X"]) { record in try makeEvent(record) }      // PublishedLanguageEvent?</span>
+<span class="d">+ ForwardingRule(eventTypes: ["X"]) { record in [try makeEvent(record)] }    // [PublishedLanguageEvent]</span></pre>
+      <p>原本回 <code>nil</code> 的地方改回 <code>[]</code>。一筆紀錄產生多個事件時，每個事件要有穩定且不重複的 <code>eventId</code>（見 <code>ForwardingRule</code> 的 doc comment）。</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">SB5</span> &nbsp;<span class="tag sig">platform</span> &nbsp;iOS／Mac Catalyst 最低版本 18</h3>
+      <p><code>Package.swift</code> 的 <code>platforms</code> 加上 <code>.iOS(.v18)</code>，這個值套用到本 package 的<b>每一個</b> product，
+         不只新的三個。以 iOS 或 Mac Catalyst 18 以下為目標建置任一 product 的專案會建置失敗，需把 deployment target 提高到 18。
+         只建置 macOS（仍是 15+）或 Linux 的專案不受影響。</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">SB6</span> &nbsp;<span class="tag sig">toolchain</span> &nbsp;Swift 6.1+（1.4.0-beta.12）</h3>
+      <p><code>swift-tools-version</code> 從 6.0 提高到 6.1，Swift 6.0 工具鏈無法再建置本 package。</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">SB7</span> &nbsp;<span class="tag sig">protocol</span> &nbsp;<code>EventStoreClient</code> 新 requirement（1.4.0-beta.12）</h3>
+      <p>自訂的 <code>EventStoreClient</code> conformance（wrapper、decorator、自製 fake）必須實作
+         <code>ensurePersistentSubscription(stream:group:settings:)</code> 與 <code>deletePersistentSubscription(stream:group:)</code>，這兩個沒有預設實作。
+         1.5 另外新增的 <code>tombstoneStream(name:)</code> 有預設實作，編得過但執行時會失敗，見 <span class="chgid">BC2</span>。</p>
+    </div>
+  </section>
+
+  <!-- ================= BEHAVIOUR ================= -->
+  <section id="behaviour">
+    <h2>行為變更</h2>
+    <div class="callout warn"><b>編譯器不會指出這些</b>
+      以下變更不影響編譯，但改變執行結果。升級後請逐條對照自己的程式碼與測試。</div>
+
+    <div class="card">
+      <h3><span class="chgid">BC1</span> &nbsp;<span class="tag removed">permanent</span> &nbsp;<code>purge</code> 改為 tombstone</h3>
+      <ul class="tite">
+        <li><code>KurrentStorageCoordinator.purge</code> 呼叫 KurrentDB 的 <code>tombstone(.any)</code>：stream 永遠無法再寫入，之後對同一 id 的 <code>append</code> 丟 <code>DDDError.streamPurged</code>（502）。先 purge 再用同一個 id 重建 aggregate 的做法不再可行。</li>
+        <li>對從未寫過的 id 呼叫 <code>purge</code> 也會成功，並讓該 id 永久保留。不要 purge 之後還會使用的 id。</li>
+        <li><code>EventSourcingRepository.purge</code> 不再先 <code>find</code>：未知的 id 不再丟 <code>aggregateNotFound</code>，已 soft-delete 的 aggregate 也可以被 purge。</li>
+        <li>資料不會被物理抹除：KurrentDB 保留到 scavenge；<code>PersistentEventStore</code> 則從 stream 檔中移除 payload。</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC2</span> &nbsp;<span class="tag manual">runtime</span> &nbsp;wrapper 必須轉呼叫 <code>tombstoneStream(name:)</code></h3>
+      <p><code>EventStoreClient</code> 新增 <code>tombstoneStream(name:)</code>。協定擴充提供標為 deprecated 的預設實作，所以舊的 conformance
+         <b>編得過，只有一個 deprecation 警告</b>；但 <code>purge</code> 在執行時丟 <code>EventStoreClientError.tombstoneUnsupported</code>，stream 也不會被 purge。</p>
+<pre><span class="kw">struct</span> <span class="ty">LoggingClient</span>: <span class="ty">EventStoreClient</span> {
+    <span class="kw">let</span> base: <span class="kw">any</span> <span class="ty">EventStoreClient</span>
+    <span class="cmt">// ...其他 requirement...</span>
+    <span class="kw">func</span> tombstoneStream(name: <span class="ty">String</span>) <span class="kw">async throws</span> {
+        <span class="kw">try await</span> base.tombstoneStream(name: name)
+    }
+}</pre>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC3</span> &nbsp;<span class="tag sig">error</span> &nbsp;版本衝突統一丟 <code>DDDError.commitConflict</code></h3>
+      <p><code>KurrentStorageCoordinator</code> 與 <code>InMemoryEventStore</code> 在衝突時都丟 <code>DDDError.commitConflict</code>（501），取代
+         <code>EventStoreClientError.wrongExpectedRevision</code>、<code>KurrentError.wrongExpectedVersion</code>、<code>InMemoryStorageCoordinatorError.versionConflict</code>。</p>
+      <pre class="diff"><span class="a">- } catch KurrentError.wrongExpectedVersion { ... }</span>
+<span class="d">+ } catch let error as DDDError where error.code == .commitConflict {</span>
+<span class="d">+     let conflict = error.commitConflict   // CommitConflict { id, expected, actual }</span>
+<span class="d">+     ...</span>
+<span class="d">+ }</span></pre>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC4</span> &nbsp;<span class="tag sig">contract</span> &nbsp;其他 store 行為</h3>
+      <ul class="tite">
+        <li>空陣列的 <code>append</code> 直接回傳 <code>nil</code>，不寫入也不呼叫 client。</li>
+        <li>對已存在的 stream 傳 <code>version: nil</code> 會衝突（<code>nil</code> 代表要求 stream 尚不存在）。</li>
+        <li><code>fetchEvents</code> 依 stream 回傳的順序，不再依 <code>occurred</code> 排序。</li>
+        <li><code>EventSourcingRepository.save</code> 在沒有新事件時不呼叫 store。</li>
+        <li><code>InMemoryStorageCoordinator</code> 更名為 <code>InMemoryEventStore</code>（舊名保留為 deprecated typealias，最早 1.6 移除），revision 從 0 起算。斷言 revision 或衝突的測試要更新。</li>
+        <li><code>InMemoryEventStoreClient</code> 現在模擬 tombstone 與事件 id 冪等重送，與真 server 一致。</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC5</span> &nbsp;<span class="tag sig">error</span> &nbsp;超過 <code>Int64.max</code> 的預期 revision</h3>
+      <p>KurrentDB 無法接受大於 <code>Int64.max</code> 的預期 revision，以前會得到 server 回的 gRPC 內部錯誤。現在
+         <code>KurrentStorageCoordinator.append</code> 在 <code>version</code> 大於 <code>UInt64(Int64.max)</code> 時不送出 append，改丟
+         <code>DDDError.commitConflict</code>，<code>actual</code> 為讀 stream 得到的尾端 revision（stream 不存在時為 <code>nil</code>）；
+         該 stream 已被 tombstone 時丟 <code>streamPurged</code>。<code>Int64.max</code> 本身照常送出。</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC6</span> &nbsp;<span class="tag sig">default</span> &nbsp;Postgres snapshot 預設改為 monotonic（1.4.0-beta.12）</h3>
+      <p>Postgres stores 與 <code>PostgresReadModelMigration</code> 預設 <code>SnapshotWriteMode.monotonic</code>：只接受嚴格較新的 revision，
+         寫入 <code>read_model_snapshots_monotonic</code> 表。原本使用預設表 <code>read_model_snapshots</code> 的專案二選一：以
+         <code>KurrentProjection.rebuild</code> 重建，或傳 <code>writeMode: .overwrite</code> 沿用舊表與舊行為。
+         migration、stores 與 <code>PostgresReadModelSnapshots</code> 要傳相同的 <code>tableName</code>／<code>writeMode</code>。</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC7</span> &nbsp;<span class="tag sig">runner</span> &nbsp;Subscription runner 自行管理 group（1.4.0-beta.12）</h3>
+      <ul class="tite">
+        <li>兩個 runner 的 <code>subscriptionSetup:</code> 預設 <code>.ensure(...)</code>：訂閱前建立 group；group 消失時重建並丟 <code>subscriptionGroupNotFound</code>，呼叫端要再呼叫 <code>run()</code>（例如帶 backoff 的重啟迴圈）。需要建立 persistent subscription 的權限；沒有權限時傳 <code>.manual</code> 維持舊行為。</li>
+        <li><code>TransactionalSubscriptionRunner</code> 依註冊順序逐一 dispatch projector，不再併發。</li>
+        <li>生成的 projector <code>apply()</code> 改用 <code>default: continue</code>，遇到未列出的事件不再中斷整個 fold。重新生成即可。</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC8</span> &nbsp;<span class="tag sig">forwarder</span> &nbsp;<code>ContextForwarder</code> 重建遺失的 group（1.4.0-beta.11）</h3>
+      <p>訂閱 group 在執行期間消失時，forwarder 以原本的設定重建 group 並丟出錯誤，讓外層在 backoff 後重新訂閱。新 group 從
+         <code>subscriptionSettings.startFrom</code>（預設 <code>.end</code>）開始讀，group 消失期間寫入的事件不會補送。</p>
+    </div>
+  </section>
+
+  <!-- ================= ADDITIONS ================= -->
+  <section id="additions">
+    <h2>新增功能</h2>
+    <p>以下都不需要修改既有程式碼。</p>
+    <table>
+      <thead><tr><th>ID</th><th>新增</th><th>說明</th><th>來源</th></tr></thead>
+      <tbody>
+        <tr><td><span class="chgid">N1</span></td><td><code>RecordedEventLike</code>、<code>EventTypeMapper</code>、<code>CustomMetadata</code> 移到 <code>EventSourcing</code></td><td><code>KurrentSupport</code> 保留同名 typealias，既有的 <code>import KurrentSupport</code> 程式碼不需修改。非 Kurrent 的 store 可以重用生成的 mapper。</td><td>1.5</td></tr>
+        <tr><td><span class="chgid">N2</span></td><td><code>PersistentEventStore</code>（<code>LocalEventStore</code>）</td><td>給 iOS／macOS app 的檔案式 <code>EventStore</code>，每個 stream 一個 JSON 檔、原子寫入。一個目錄只能開一個 instance，repository 與 projector 共用它；在 <code>.defaultIsolation(MainActor.self)</code> 的 target 中，aggregate、projector 與 read model 要宣告為 <code>nonisolated</code>。見 <a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/README.md#local-event-store-ios-and-macos-apps">README 的 Local Event Store 章節</a>。</td><td>1.5</td></tr>
+        <tr><td><span class="chgid">N3</span></td><td><code>DDDCore</code>、<code>EventSourcing</code>、<code>LocalEventStore</code> product</td><td>三者只依賴彼此、Foundation 與 swift-log，可建置於 iOS 18+；app 不必拉進 <code>DDDKit</code> umbrella。</td><td>1.5</td></tr>
+        <tr><td><span class="chgid">BC4</span></td><td><code>InMemoryEventStore</code></td><td>符合 EventStore 契約的 in-memory store，取代 <code>InMemoryStorageCoordinator</code>。</td><td>1.5</td></tr>
+        <tr><td>—</td><td><code>ContextReceiverWebSocket</code> 支援 macOS</td><td>Pulsar WebSocket transport 不再限 Linux。</td><td>1.5（#32）</td></tr>
+        <tr><td><span class="chgid">N4</span></td><td>Template variables：<code>TemplateVariables</code>、<code>TemplateVariablesDefinition</code>、<code>VariablesGeneratorPlugin</code></td><td><code>variables.yaml</code> 生成型別化的 protocol；<code>PlaceholderSubstitution</code> 以單一遍歷填入 <code>%Placeholder%</code>。</td><td>1.4.0-beta.9</td></tr>
+        <tr><td><span class="chgid">N4</span></td><td><code>ForwardedRecord.metadata</code>、<code>decodeMetadata(_:)</code></td><td>forwarder rule 可讀 KurrentDB 的 custom metadata，自選解碼型別。</td><td>1.4.0-beta.10</td></tr>
+        <tr><td><span class="chgid">N4</span></td><td><code>SnapshotWriteMode</code>、<code>ReadModelSnapshotPurging</code>、<code>ReadModel.readModelTypeName</code>、<code>KurrentProjection.rebuild</code>、<code>KurrentProjection.SubscriptionSetup</code></td><td>Postgres read model 上線強化（行為面見 <span class="chgid">BC6</span>、<span class="chgid">BC7</span>）。</td><td>1.4.0-beta.12</td></tr>
+        <tr><td><span class="chgid">N4</span></td><td><code>PublishedLanguageEvent.actorId</code></td><td>選填；為 <code>nil</code> 時不出現在 wire 上，既有 consumer 收到的訊息不變。</td><td>1.4.0-beta.13</td></tr>
+        <tr><td><span class="chgid">N4</span></td><td><code>onCommitted(_:)</code>、<code>KurrentProjection.CommittedProjection</code></td><td>兩個 runner 的 opt-in after-commit hook，在背景依序執行，不延遲下一筆 delivery。</td><td>1.4.0-beta.14</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ================= BETAS ================= -->
+  <section id="betas">
+    <h2>1.4 預覽版與未發行的變更</h2>
+    <p>每個 main-line tag 一列，依 <code>git log --first-parent</code> 整理。</p>
+    <table>
+      <thead><tr><th style="width:18%">Tag</th><th>使用者看得到的變更</th><th style="width:16%">PR</th></tr></thead>
+      <tbody>
+        <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.9">1.4.0-beta.9</a></td><td>Template variables 框架；<code>ForwardingRule.translate</code> 回傳陣列（<span class="chgid">SB4</span>）。</td><td>—</td></tr>
+        <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.10">1.4.0-beta.10</a></td><td><code>ForwardedRecord</code> 帶 custom metadata，rule 自選解碼型別。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/24">#24</a></td></tr>
+        <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.11">1.4.0-beta.11</a></td><td><code>ContextForwarder</code> 重建遺失的 subscription group（<span class="chgid">BC8</span>）。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/25">#25</a></td></tr>
+        <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.12">1.4.0-beta.12</a></td><td>Postgres read model 上線強化（<span class="chgid">BC6</span>、<span class="chgid">BC7</span>、<span class="chgid">SB7</span>）；Swift 6.1 下限（<span class="chgid">SB6</span>）；各版本的 DocC 文件站。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/26">#26</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/27">#27</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/28">#28</a></td></tr>
+        <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.13">1.4.0-beta.13</a></td><td><code>PublishedLanguageEvent.actorId</code>。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/29">#29</a></td></tr>
+        <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.14">1.4.0-beta.14</a></td><td>兩個 runner 的 <code>onCommitted(_:)</code> after-commit hook。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/30">#30</a></td></tr>
+        <tr><td>未發行（1.5.0）</td><td>EventStore 契約（<span class="chgid">SB1</span>–<span class="chgid">SB3</span>、<span class="chgid">BC1</span>–<span class="chgid">BC4</span>、<span class="chgid">N1</span>）；<code>ContextReceiverWebSocket</code> 支援 macOS；<code>PersistentEventStore</code>（<span class="chgid">N2</span>）。1.5 的 product、iOS 18 與 <code>Int64.max</code> 防護（<span class="chgid">SB5</span>、<span class="chgid">N3</span>、<span class="chgid">BC5</span>）也尚未發行。</td><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/31">#31</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/32">#32</a> <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/33">#33</a></td></tr>
+      </tbody>
+    </table>
+    <div class="callout"><b>1.4.0-beta.0 到 beta.8</b>
+      這些預覽版屬於已停用的版本線。只在那條線上出現的模組，例如 <code>NotificationDefinition</code>，不在 1.5 內。</div>
+  </section>
+
+  <!-- ================= CHECKLIST ================= -->
+  <section id="checklist">
+    <h2>升級步驟清單</h2>
+    <p>先處理會讓編譯失敗的項目，再逐條檢查行為變更。</p>
+    <ol class="steps">
+      <li><b>工具鏈</b> — 使用 Swift 6.1 以上（<span class="chgid">SB6</span>）。</li>
+      <li><b>Bump 依賴</b> — <code>swift-ddd-kit</code> 改成 <code>from: "1.5.0"</code>；若直接依賴 swift-kurrentdb，下限改成 <code>2.6.0</code>（<span class="chgid">SB1</span>）。</li>
+      <li><b>iOS 目標</b> — iOS／Mac Catalyst 的 deployment target 提高到 18（<span class="chgid">SB5</span>）。</li>
+      <li><b>重新生成</b> — 重建讓 plugin 重新產生程式碼；<code>event.yaml</code> 若以 <code>KurrentSupport</code> 限定型別，改型別或在 config 補 <code>dependencies</code>（<span class="chgid">SB3</span>）。</li>
+      <li><b>Forwarder rule</b> — <code>ForwardingRule</code> 的 closure 改回傳陣列（<span class="chgid">SB4</span>）。</li>
+      <li><b>Exhaustive switch</b> — 補上 <code>DDDError.Code</code> 501–504 與 <code>EventStoreClientError</code> 的新 case（<span class="chgid">SB2</span>）。</li>
+      <li><b>自訂 <code>EventStoreClient</code></b> — 實作或轉呼叫 <code>ensurePersistentSubscription</code>、<code>deletePersistentSubscription</code> 與 <code>tombstoneStream</code>；確認沒有 <code>tombstoneStream</code> 的 deprecation 警告（<span class="chgid">SB7</span>、<span class="chgid">BC2</span>）。</li>
+      <li><b>衝突處理</b> — catch 舊衝突錯誤的地方改成 <code>DDDError.commitConflict</code>（<span class="chgid">BC3</span>）。</li>
+      <li><b>In-memory store</b> — <code>InMemoryStorageCoordinator</code> 改成 <code>InMemoryEventStore</code>，更新斷言 revision 的測試（<span class="chgid">BC4</span>）。</li>
+      <li><b>Purge</b> — 逐一檢查 <code>purge</code> 的呼叫：被 purge 的 id 永遠無法再寫入（<span class="chgid">BC1</span>）。</li>
+      <li><b>Postgres read model</b> — 選定 <code>writeMode</code>：<code>.monotonic</code> 搭配 rebuild，或 <code>.overwrite</code> 沿用既有表（<span class="chgid">BC6</span>）。</li>
+      <li><b>Runner</b> — 確認帳號能建立 persistent subscription，否則傳 <code>subscriptionSetup: .manual</code>；<code>run()</code> 丟 <code>subscriptionGroupNotFound</code> 後要重新啟動（<span class="chgid">BC7</span>）。</li>
+      <li><b>編譯 + 測試</b> — <code>swift build</code> 解掉剩餘錯誤，跑測試套件確認行為。</li>
+    </ol>
+  </section>
+
+  <!-- ================= REFERENCE ================= -->
+  <section id="reference">
+    <h2>參考 KurrentDB 版本</h2>
+    <div class="callout ok"><b>kurrentplatform/kurrentdb:26.1.3</b>
+      CI 的 <code>kurrent-live-contract</code> job 以這個 image 對真實 KurrentDB 執行 <code>KurrentLiveContractTests</code>，
+      它是 EventStore 契約中「KurrentDB 現行行為」的參考 server。升級 KurrentDB 時，請重新跑一次這組測試。</div>
+  </section>
+
+  <footer>
+    <p>swift-ddd-kit 1.3 → 1.5 Migration Guide ·
+       對應 PR <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/31">#31</a>、
+       <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/32">#32</a>、
+       <a href="https://github.com/gradyzhuo/swift-ddd-kit/pull/33">#33</a>，以及 1.4 預覽版的 #24–#30。</p>
+    <p>設計文件：<code>docs/superpowers/specs/2026-10-23-eventstore-contract-design.md</code>、
+       <code>2026-10-23-persistent-event-store-design.md</code>、<code>2026-10-23-eventstore-ci-platform-design.md</code> ·
+       逐步遷移文字版：<code>MIGRATION.md</code> 的 1.4.0 與 1.5.0 章節。</p>
+    <p>本文件同時供人類與 AI agent 閱讀 —— AI 工具請優先消化
+       <a href="#ai-manifest">AI Migration Manifest</a> 的 JSON 區塊。</p>
+  </footer>
+
+</div>
+</body>
+</html>

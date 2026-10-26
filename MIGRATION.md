@@ -412,3 +412,23 @@ dependencies:
 ### 8. 型別移到 EventSourcing
 
 `RecordedEventLike`、`EventTypeMapper`、`CustomMetadata` 移到 `EventSourcing` 模組；`KurrentSupport` 保留同名 typealias，既有的 `import KurrentSupport` 程式碼不需修改。
+
+### 9. 新增 `PersistentEventStore`（`LocalEventStore`）
+
+新的 `LocalEventStore` 模組提供 `PersistentEventStore`：給 iOS／macOS app 用的檔案式 `EventStore`，每個 stream 一個 JSON 檔、每次寫入整檔原子取代，不需要 server。這是新增功能，既有程式碼不需要修改。用法與限制（一個目錄只能開一個 instance、repository 與 projector 共用同一個 instance、目錄位置、沒有 fsync、`.defaultIsolation(MainActor.self)` 下要把 aggregate、projector 與 read model 宣告為 `nonisolated`）見 README 的〈Local Event Store (iOS and macOS apps)〉。
+
+### 10. `DDDError.StoreUnavailableReason`
+
+`storeUnavailable`（503）帶一個 `DDDError.StoreUnavailableReason`，以 `error.storeUnavailableReason` 讀取：`invalidLocation`、`streamNameTooLong`、`io`、`occupied`、`closed`。`storeCorrupted`（504）以 `error.corruptedStream` 讀出無法讀取的 stream。目前只有 `PersistentEventStore` 丟這兩個 code。對 `StoreUnavailableReason` 寫沒有 `default` 的 `switch`，日後新增 case 時會編不過。
+
+### 11. iOS／Mac Catalyst 最低版本 18（source-breaking）
+
+`Package.swift` 的 `platforms` 加上 `.iOS(.v18)`，這個值套用到本 package 的**每一個** product。以 iOS 或 Mac Catalyst 18 以下為目標建置任一 product 的專案會建置失敗（SwiftPM 回報該 product 要求 iOS 18.0），需把 deployment target 提高到 18。只建置 macOS 或 Linux 的專案不受影響（macOS 仍是 15+）。
+
+### 12. 新增三個 product（source-compatible）
+
+`DDDCore`、`EventSourcing`、`LocalEventStore` 成為 library product，三者只依賴彼此、Foundation 與 swift-log，可建置於 iOS 18+。app 可以只依賴這三個，不必拉進 `DDDKit` umbrella 與 KurrentDB／Postgres 相依。既有的 `DDDKit` 等 product 不變。
+
+### 13. 超過 `Int64.max` 的預期 revision 改丟 `commitConflict`（behaviour change）
+
+KurrentDB 無法接受大於 `Int64.max` 的預期 revision，以前 `KurrentStorageCoordinator.append` 會把它送出去，得到 server 回的 gRPC 內部錯誤。現在 `version` 大於 `UInt64(Int64.max)` 時不送出 append，改丟 `DDDError.commitConflict`，`actual` 為讀 stream 得到的尾端 revision（stream 不存在時為 `nil`）；若該 stream 已被 tombstone，則丟 `streamPurged`。`Int64.max` 本身照常送出。
