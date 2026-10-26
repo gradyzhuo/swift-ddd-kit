@@ -325,7 +325,9 @@ it via structured concurrency.
   (populated from `DomainEvent.eventType` at write time). The metadata payload
   carries no type discriminator — generated mappers switch on `eventData.eventType`.
 
-## 1.4.0 — `ForwardingRule.translate` returns an array
+## 1.4.0
+
+### `ForwardingRule.translate` returns an array
 
 ```diff
 - ForwardingRule(eventTypes: ["X"]) { record in try makeEvent(record) }      // PublishedLanguageEvent?
@@ -334,6 +336,55 @@ it via structured concurrency.
 
 Return `[]` where you returned `nil`. When one record yields several events, give each a
 stable, distinct `eventId` (see `ForwardingRule`'s doc comment).
+
+### Swift 6.1 minimum (1.4.0-beta.12)
+
+`swift-tools-version` went from 6.0 to 6.1; a Swift 6.0 toolchain can no longer build the
+package. Build with Swift 6.1 or later.
+
+### New `EventStoreClient` requirements (1.4.0-beta.12)
+
+Custom `EventStoreClient` conformances (wrappers, decorators, hand-written fakes) must implement
+`ensurePersistentSubscription(stream:group:settings:)` and `deletePersistentSubscription(stream:group:)`.
+Neither has a default, so a conformance without them no longer compiles. Forward them to the
+wrapped client:
+
+```swift
+struct LoggingClient: EventStoreClient {
+    let base: any EventStoreClient
+    // ...other requirements...
++   func ensurePersistentSubscription(stream: String, group: String, settings: PersistentSubscriptionSettings) async throws {
++       try await base.ensurePersistentSubscription(stream: stream, group: group, settings: settings)
++   }
++   func deletePersistentSubscription(stream: String, group: String) async throws {
++       try await base.deletePersistentSubscription(stream: stream, group: group)
++   }
+}
+```
+
+`tombstoneStream(name:)`, added in 1.5, does have a default but fails at run time; see 1.5.0 §2.
+
+### Behaviour changes (the compiler will not point these out)
+
+- **Postgres snapshots default to `.monotonic` (1.4.0-beta.12).** The Postgres stores and
+  `PostgresReadModelMigration` default to `SnapshotWriteMode.monotonic`: only a strictly newer
+  revision is accepted, and rows go to `read_model_snapshots_monotonic`. Snapshots already in the
+  old default table `read_model_snapshots` are not read, so they look missing. Either rebuild
+  (`KurrentProjection.rebuild`) or pass `writeMode: .overwrite` to keep the old table and the old
+  last-write-wins behaviour. Pass the same `tableName`/`writeMode` to the migration, the stores
+  and `PostgresReadModelSnapshots`.
+- **Subscription runners manage their own group (1.4.0-beta.12).** Both runners'
+  `subscriptionSetup:` defaults to `.ensure(...)`: the group is created before subscribing; if it
+  disappears it is recreated and `run()` throws `subscriptionGroupNotFound`, so call `run()` again
+  (e.g. a restart loop with backoff). The credentials need permission to create persistent
+  subscriptions; without it pass `.manual` to keep the old behaviour.
+  `TransactionalSubscriptionRunner` now dispatches projectors one after another in registration
+  order instead of concurrently. Generated projector `apply()` uses `default: continue`, so an
+  unlisted event no longer stops the whole fold; regenerate.
+- **`ContextForwarder` recreates a missing group (1.4.0-beta.11).** If the subscription group
+  disappears while running, the forwarder recreates it with its original settings and throws, so
+  the host resubscribes after a backoff. The new group starts from `subscriptionSettings.startFrom`
+  (default `.end`); events written while the group was missing are not forwarded. No code change.
 
 ## 1.5.0 — EventStore contract
 
