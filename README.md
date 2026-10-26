@@ -133,6 +133,8 @@ Feedback and contributions are welcome. See open [issues](https://github.com/gra
 - Ubuntu (Linux) / macOS 15+
 - [KurrentDB](https://github.com/gradyzhuo/swift-kurrentdb) (for event persistence)
 
+iOS 18+ is supported for `DDDCore`, `EventSourcing` and `LocalEventStore`; `DDDKit` and every KurrentDB, Postgres or Pulsar module are server-side.
+
 ## Installation
 
 Add the package to your `Package.swift`:
@@ -221,11 +223,11 @@ final class Order: AggregateRoot {
 
 ### 3. Implement an Event Mapper
 
-The mapper deserializes raw KurrentDB records back into typed domain events.
+The mapper deserializes stored records back into typed domain events.
 
 ```swift
 struct OrderEventMapper: EventTypeMapper {
-    func mapping(eventData: RecordedEvent) throws -> (any DomainEvent)? {
+    func mapping(eventData: any RecordedEventLike) throws -> (any DomainEvent)? {
         switch eventData.eventType {
         case "OrderCreated":   return try eventData.decode(to: OrderCreated.self)
         case "OrderCancelled": return try eventData.decode(to: OrderCancelled.self)
@@ -234,6 +236,12 @@ struct OrderEventMapper: EventTypeMapper {
     }
 }
 ```
+
+Records the mapper returns `nil` for are skipped. In every store that serializes events
+(`KurrentStorageCoordinator`, `PersistentEventStore`), when events the mapper does not know sit at
+a stream's tail, `find` returns a lower version than the stream's real tail, so `save` keeps
+throwing `commitConflict` and finding again does not help. This stops old code from writing after
+events it cannot read. Keep the mapping when you retire an event type.
 
 ### 4. Implement a Repository
 
@@ -268,9 +276,13 @@ let found = try await repository.find(byId: "order-001")
 // Soft delete (marks as deleted, still retrievable with hiddingDeleted: false)
 try await repository.delete(byId: "order-001")
 
-// Hard delete (irreversible — removes the stream)
+// Hard delete (irreversible — the id can never be written again)
 try await repository.purge(byId: "order-001")
 ```
+
+`purge` makes the id permanently unwritable: a later `append` throws `streamPurged` (502), so never
+purge an id that will be reused. KurrentDB keeps the data until a scavenge; `PersistentEventStore`
+removes the payload from the stream file.
 
 ### Event Metadata Pattern (Ambient Context)
 
@@ -533,6 +545,160 @@ let runner = KurrentProjection.TransactionalSubscriptionRunner(
 - [Getting Started: Postgres read models](https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/readmodelpersistencepostgres/gettingstarted)
 - [Snapshot write modes](https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/readmodelpersistencepostgres/snapshotwritemodes)
 - [Schema evolution and rebuilding](https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/readmodelpersistence/schemaevolutionandrebuilding)
+
+## Local Event Store (iOS and macOS apps)
+
+`LocalEventStore` ships `PersistentEventStore`, an `EventStore` for apps: one JSON file per stream in
+a directory you choose, each file replaced atomically on every write. It needs no server. Depend on
+the `DDDCore`, `EventSourcing` and `LocalEventStore` products, which build for iOS 18+ and macOS 15+.
+
+`open` the store once, then hand that instance to the repository and to every projector. The
+projector names the store type itself:
+
+```swift
+import DDDCore
+import EventSourcing
+import Foundation
+import LocalEventStore
+
+final class Order: AggregateRoot {
+    typealias DeletedEventType = OrderCancelled
+    static var categoryRule: StreamCategoryRule { .custom("orders") }
+
+    let id: String
+    private(set) var customerId: String = ""
+    var metadata: AggregateRootMetadata = .init()
+
+    init(id: String, customerId: String) throws {
+        self.id = id
+        try apply(event: OrderCreated(aggregateRootId: id, customerId: customerId))
+    }
+
+    required init?(events: [any DomainEvent]) throws {
+        guard let first = events.first as? OrderCreated else { return nil }
+        self.id = first.aggregateRootId
+        try apply(events: events)
+    }
+
+    func when(happened event: some DomainEvent) throws {
+        switch event {
+        case let e as OrderCreated:
+            customerId = e.customerId
+        default:
+            break
+        }
+    }
+}
+
+struct OrderProjectorInput: CQRSProjectorInput {
+    let id: String
+}
+
+final class OrderRepository: EventSourcingRepository {
+    typealias AggregateRootType = Order
+    typealias Store = PersistentEventStore<Order, CustomMetadata>
+
+    let store: Store
+
+    init(store: Store) {
+        self.store = store
+    }
+}
+
+final class OrderProjector: EventSourcingProjector {
+    typealias ReadModelType = OrderSummary
+    typealias Input = OrderProjectorInput
+    typealias Store = PersistentEventStore<Order, CustomMetadata>
+
+    let store: Store
+
+    init(store: Store) {
+        self.store = store
+    }
+
+    // buildReadModel(input:) and apply(readModel:events:) as in the CQRS section
+}
+
+let directory = URL.applicationSupportDirectory
+    .appending(path: "EventStore/Order", directoryHint: .isDirectory)
+let store = try PersistentEventStore<Order, CustomMetadata>.open(
+    directory: directory,
+    eventMapper: OrderEventMapper()
+)
+let repository = OrderRepository(store: store)
+let projector = OrderProjector(store: store)
+
+try await repository.save(aggregateRoot: try Order(id: "order-001", customerId: "customer-42"))
+let summary = try await projector.execute(input: OrderProjectorInput(id: "order-001"))
+
+await store.close()
+```
+
+- **One open instance per directory.** Give each aggregate type (each `StreamNaming`/`Metadata`
+  pair) its own directory. A second `open` of a directory that is already open throws
+  `storeUnavailable(.occupied)`, even with other generic arguments.
+- **Share the instance** between the repository and the projectors, as above. On the Kurrent path,
+  by contrast, each projector builds its own coordinator.
+- **Location.** Put the directory under the app's own Application Support. Do not put it in:
+  - an App Group or other shared container: iOS terminates a suspended app that holds a lock there
+  - a cloud-synced folder
+  - a network file system
+- **No fsync.** After an OS crash or power loss the latest writes can be lost, and a stream file can
+  come back empty or damaged. That stream alone throws `storeCorrupted` (504). `purge` clears it,
+  but it discards that stream's events and leaves the id unwritable; it does not repair anything.
+- **Stream name length.** The whole stream name (`<category>-<id>`) is at most 120 UTF-8 bytes, so
+  ids get less than that. A longer name throws `storeUnavailable(.streamNameTooLong)`.
+- **Deleting the store.** Call `close()` before deleting the directory.
+- **Unmapped events at a stream's tail** make `save` keep conflicting; see
+  [Implement an Event Mapper](#3-implement-an-event-mapper).
+- **File format.** Files carry `formatVersion` 1. An app downgraded after a future format bump reads
+  those streams as `storeCorrupted`.
+- **Default `MainActor` isolation.** In a target built with `.defaultIsolation(MainActor.self)`,
+  mark the aggregate type `nonisolated`, and the projector and its read model too. Otherwise their
+  conformances are main actor-isolated and the code does not compile: `PersistentEventStore.open`
+  fails with "main actor-isolated conformance of 'Order' to 'EventStreamNaming' cannot be used in
+  actor-isolated context" when the aggregate overrides `categoryRule` or `category`, and the
+  repository fails with "main actor-isolated conformance of 'Order' to 'AggregateRoot' cannot
+  satisfy conformance requirement for a 'Sendable' type parameter" even when it inherits them.
+  Marking only the overrides `nonisolated` (`nonisolated static var categoryRule:
+  StreamCategoryRule { .custom("orders") }`) is enough for `open`, not for a repository. Events, the
+  mapper and the projector input conform to `Sendable` protocols and need nothing.
+  `final class Order: nonisolated AggregateRoot` does **not** compile. Checked with Swift 6.4:
+
+  ```swift
+  nonisolated final class Order: AggregateRoot {
+      typealias DeletedEventType = OrderCancelled
+      static var categoryRule: StreamCategoryRule { .custom("orders") }
+
+      let id: String
+      private(set) var customerId: String = ""
+      var metadata: AggregateRootMetadata = .init()
+
+      init(id: String, customerId: String) throws {
+          self.id = id
+          try apply(event: OrderCreated(aggregateRootId: id, customerId: customerId))
+      }
+
+      required init?(events: [any DomainEvent]) throws {
+          guard let first = events.first as? OrderCreated else { return nil }
+          self.id = first.aggregateRootId
+          try apply(events: events)
+      }
+
+      func when(happened event: some DomainEvent) throws {
+          switch event {
+          case let e as OrderCreated:
+              customerId = e.customerId
+          default:
+              break
+          }
+      }
+  }
+
+  nonisolated struct OrderSummary: ReadModel { /* … */ }
+
+  nonisolated final class OrderProjector: EventSourcingProjector { /* … as above */ }
+  ```
 
 ## Event Migration
 
@@ -953,8 +1119,9 @@ This suite needs a live broker, so it deliberately stays out of CI — `.github/
 |--------|---------|
 | `DDDKit` | Umbrella import |
 | `DDDCore` | Core protocols: `Entity`, `AggregateRoot`, `DomainEvent`, `DomainEventBus` |
-| `EventSourcing` | Abstract patterns: `EventStore`, `EventSourcingRepository`, `EventSourcingProjector` |
-| `KurrentSupport` | KurrentDB adapter: `KurrentStorageCoordinator`, `EventTypeMapper` |
+| `EventSourcing` | Abstract patterns: `EventStore`, `EventSourcingRepository`, `EventSourcingProjector`, `InMemoryEventStore`, `RecordedEventLike`, `EventTypeMapper`, `CustomMetadata` |
+| `LocalEventStore` | `PersistentEventStore`: a file-backed `EventStore` for apps, one JSON file per stream |
+| `KurrentSupport` | KurrentDB adapter: `KurrentStorageCoordinator` |
 | `EventBus` | In-memory event bus for local event distribution |
 | `MigrationUtility` | Event schema migration framework |
 | `ReadModelPersistence` | `ReadModelStore` protocol + in-memory store for read model snapshots |
@@ -966,6 +1133,8 @@ This suite needs a live broker, so it deliberately stays out of CI — `.github/
 | `ContextReceiverWebSocket` | `WebSocketMessageSource`, the concrete Pulsar WebSocket consumer transport |
 | `TemplateVariables` | Runtime substitution engine: `PlaceholderSubstitution` |
 | `TemplateVariablesDefinition` | `variables.yaml` model, parser and generator, for building further generators |
+
+iOS 18+ is supported for `DDDCore`, `EventSourcing` and `LocalEventStore`; `DDDKit` and every KurrentDB, Postgres or Pulsar module are server-side.
 
 ## License
 
