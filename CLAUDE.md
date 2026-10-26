@@ -45,7 +45,7 @@ DDDKit is a Domain-Driven Design + Event Sourcing framework for Server-Side Swif
 ```
 DDDKit (umbrella re-export)
 ├── DDDCore          — Core DDD protocols: Entity, DomainEvent, AggregateRoot, DomainEventBus
-├── EventSourcing    — Abstract event sourcing patterns: EventStorageCoordinator, EventSourcingRepository, EventSourcingProjector, ReadModel, CQRSProjectorInput/Output; also `RecordedEventLike`, `EventTypeMapper`, `CustomMetadata` (moved from KurrentSupport in 1.5; KurrentSupport keeps typealiases)
+├── EventSourcing    — Abstract event sourcing patterns: EventStorageCoordinator, EventSourcingRepository, EventSourcingProjector, ReadModel, CQRSProjectorInput/Output; also `RecordedEventLike`, `EventTypeMapper`, `CustomMetadata` (moved from KurrentSupport in 1.4; KurrentSupport keeps typealiases)
 ├── LocalEventStore  — PersistentEventStore: file-backed EventStore (one JSON file per stream, atomic writes, one open instance per directory)
 ├── KurrentSupport   — KurrentDB adapter: KurrentStorageCoordinator, DomainEventBus+KurrentDB (typealias for EventTypeMapper)
 ├── KurrentSupportInMemory — In-memory KurrentDB test double: InMemoryEventStoreClient (no live server needed)
@@ -79,7 +79,7 @@ DDDKit (umbrella re-export)
 
 **`EventTypeMapper`** (EventSourcing; KurrentSupport keeps a typealias) — Converts an `any RecordedEventLike` (decoupled from KurrentDB's concrete `RecordedEvent`) into a typed `DomainEvent`. Implementations switch on `eventData.eventType`.
 
-**`EventStoreClient`** (KurrentSupport) — Narrow seam covering exactly the KurrentDB operations `KurrentStorageCoordinator`/`KurrentProjection` call: append/read/delete on a named stream, and subscribe/ack/nack on a persistent subscription. `RecordedEvent`/`ReadEvent`/`Streams`/`PersistentSubscriptions` (swift-kurrentdb) can't be constructed or conformed to from outside that package (no public initializers, gRPC-hardwired), so the seam is expressed in terms of `EventData` (already public) plus its own `RecordedEventLike`/`SubscriptionDelivery` DTOs. `LiveEventStoreClient` (KurrentSupport) is the production conformance, wrapping a real `KurrentDBClient`; `InMemoryEventStoreClient` (`KurrentSupportInMemory` target) needs no server at all — pass it to `KurrentStorageCoordinator`/`KurrentProjection.PersistentSubscriptionRunner`'s `client:` parameter in unit tests. Both runners and `KurrentStorageCoordinator` also keep a `client: KurrentDBClient` convenience initializer that wraps `LiveEventStoreClient` internally, so existing production call sites are unaffected. `tombstoneStream(name:)` (1.5) has a default that throws `tombstoneUnsupported`; `KurrentStorageCoordinator.purge` uses it, so wrappers must forward it.
+**`EventStoreClient`** (KurrentSupport) — Narrow seam covering exactly the KurrentDB operations `KurrentStorageCoordinator`/`KurrentProjection` call: append/read/delete on a named stream, and subscribe/ack/nack on a persistent subscription. `RecordedEvent`/`ReadEvent`/`Streams`/`PersistentSubscriptions` (swift-kurrentdb) can't be constructed or conformed to from outside that package (no public initializers, gRPC-hardwired), so the seam is expressed in terms of `EventData` (already public) plus its own `RecordedEventLike`/`SubscriptionDelivery` DTOs. `LiveEventStoreClient` (KurrentSupport) is the production conformance, wrapping a real `KurrentDBClient`; `InMemoryEventStoreClient` (`KurrentSupportInMemory` target) needs no server at all — pass it to `KurrentStorageCoordinator`/`KurrentProjection.PersistentSubscriptionRunner`'s `client:` parameter in unit tests. Both runners and `KurrentStorageCoordinator` also keep a `client: KurrentDBClient` convenience initializer that wraps `LiveEventStoreClient` internally, so existing production call sites are unaffected. `tombstoneStream(name:)` (1.4) has a default that throws `tombstoneUnsupported`; `KurrentStorageCoordinator.purge` uses it, so wrappers must forward it.
 
 > **Breaking change (this repo and downstream apps):** `EventTypeMapper.mapping(eventData:)` and `KurrentProjection`'s `register(extractInput:...)` closures now take `any RecordedEventLike` instead of the concrete `RecordedEvent`. Call sites that only `switch eventData.eventType` / call `.decode(to:)` are source-compatible after updating the parameter type; code that read `RecordedEvent.streamIdentifier.name` should use the new `RecordedEventLike.streamName` property instead.
 
@@ -114,7 +114,7 @@ The `generate` executable (`Sources/generate/`) is the shared CLI. `DomainEventG
 
 1. Define events conforming to `DomainEvent` (or generate from `event.yaml`)
 2. Implement `AggregateRoot` with `when(happened:)` handlers
-3. Implement `EventTypeMapper` to deserialize KurrentDB `RecordedEvent` back to typed structs
+3. Implement `EventTypeMapper` to map each stored record (`any RecordedEventLike`) back to a typed event (or generate it from `event.yaml`)
 4. Implement `EventSourcingRepository` backed by `KurrentStorageCoordinator`
 5. `repository.save(aggregateRoot:)` — appends uncommitted events from `metadata` to KurrentDB
 6. `repository.find(byId:)` — replays all events from KurrentDB through `when(happened:)` to reconstruct state
