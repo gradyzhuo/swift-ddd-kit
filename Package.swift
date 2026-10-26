@@ -142,6 +142,7 @@ let package = Package(
             dependencies: [
                 "DDDCore",
                 "EventSourcing",
+                "ReadModelPersistence",
                 .product(name: "KurrentDB", package: "swift-kurrentdb")
             ]),
         .target(
@@ -180,6 +181,15 @@ let package = Package(
                 "KurrentSupportInMemory",
                 "ReadModelPersistence",
                 "LocalEventStore",
+            ]),
+        .testTarget(
+            name: "KurrentLiveContractTests",
+            dependencies: [
+                "EventStoreContract",
+                "EventSourcing",
+                "KurrentSupport",
+                "TestUtility",
+                .product(name: "KurrentDB", package: "swift-kurrentdb"),
             ]),
         .target(
             name: "LocalEventStore",

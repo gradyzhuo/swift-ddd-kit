@@ -33,8 +33,8 @@ struct EventStoreContractTests {
         }
     }
 
-    // Real KurrentDB behaviour for huge revisions is unverified until the live
-    // contract run, so this stays outside `checkAll` for now.
+    // Verified against real KurrentDB in `KurrentLiveContractTests`; still
+    // outside `checkAll` for now.
     @Test("KurrentStorageCoordinator over InMemoryEventStoreClient: huge versions conflict instead of trapping")
     func kurrentOverInMemoryClientHugeVersions() async throws {
         try await EventStoreContract.checkHugeVersionConflicts {

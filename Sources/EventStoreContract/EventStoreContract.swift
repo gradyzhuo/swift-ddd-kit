@@ -159,9 +159,9 @@ public enum EventStoreContract {
     }
 
     /// A `version` far beyond the tail (up to `UInt64.max`) is just a mismatch and
-    /// must throw `commitConflict`, not trap. Not part of `checkAll` yet: how a real
-    /// KurrentDB server answers such revisions is unverified until the live contract
-    /// run, so each backend's tests call it explicitly.
+    /// must throw `commitConflict`, not trap. Verified against real KurrentDB in
+    /// `KurrentLiveContractTests`. Not part of `checkAll` yet, so each backend's
+    /// tests call it explicitly.
     public static func checkHugeVersionConflicts<S: EventStore>(
         _ make: Make<S>
     ) async throws where S.Metadata == ContractMetadata {

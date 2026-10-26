@@ -36,6 +36,19 @@ public final class KurrentStorageCoordinator<
     ) async throws -> UInt64? {
         guard !events.isEmpty else { return nil }
         let streamName = StreamNaming.getStreamName(id: id)
+        // KurrentDB revisions are Int64, so this can never match; the server rejects it with an internal error.
+        // `actual` is the last readable revision: a truncated or soft-deleted stream reports nil.
+        if let version, version > UInt64(Int64.max) {
+            let actual: UInt64?
+            do {
+                actual = try await client.readStream(name: streamName, from: .start, resolveLinks: false).last?.revision
+            } catch EventStoreClientError.streamNotFound {
+                actual = nil
+            } catch KurrentError.resourceDeleted {
+                throw DDDError.streamPurged(id: id)
+            }
+            throw DDDError.commitConflict(id: id, expected: version, actual: actual)
+        }
         let encoder = JSONEncoder()
         let metadataBytes: Data? = try metadata.map { try encoder.encode($0) }
         let eventDataList = try events.map { event in
