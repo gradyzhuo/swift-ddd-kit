@@ -50,3 +50,18 @@ jobs:
             -w /workspace \
             ${{ matrix.image }} \
             bash -c "swift build --build-tests && swift test -v --no-parallel --disable-xctest --enable-swift-testing --filter '(DDDKitUnitTests|EventSourcingTests|ContextForwarderTests|ContextReceiverTests|ContextReceiverWebSocketTests|TemplateVariablesTests|TemplateVariablesDefinitionTests|TemplateVariablesDemoTests|KurrentSupportInMemoryTests|ReadModelPersistenceTests|DomainEventGeneratorTests|ProjectorGeneratorFixtureTests)'"
+
+  build-ios:
+    name: Build for iOS
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - run: xcodebuild -version
+      - run: xcodebuild -resolvePackageDependencies
+      - name: Build products for iOS Simulator
+        run: |
+          for product in DDDCore EventSourcing LocalEventStore; do
+            xcodebuild build -scheme "$product" -destination 'generic/platform=iOS Simulator'
+          done

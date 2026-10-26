@@ -7,12 +7,22 @@ let package = Package(
     name: "swift-ddd-kit",
     platforms: [
         .macOS(.v15),
+        .iOS(.v18),
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
         .library(
             name: "DDDKit",
             targets: ["DDDKit"]),
+        .library(
+            name: "DDDCore",
+            targets: ["DDDCore"]),
+        .library(
+            name: "EventSourcing",
+            targets: ["EventSourcing"]),
+        .library(
+            name: "LocalEventStore",
+            targets: ["LocalEventStore"]),
         .library(
             name: "ContextForwarder",
             targets: ["ContextForwarder"]),
