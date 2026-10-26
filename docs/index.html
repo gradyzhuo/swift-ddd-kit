@@ -92,6 +92,7 @@ targets: [
     <div class="release-picker">
       <label class="visually-hidden" for="release-select"><span lang="en">Choose a release</span><span lang="zh-Hant">選擇版本</span></label>
       <select id="release-select">
+        <option value="v1.5" data-en="1.5 (unreleased)" data-zh="1.5（未發行）">1.5 (unreleased)</option>
         <option value="v1.4" data-en="1.4 (pre-release)" data-zh="1.4（預覽版）">1.4 (pre-release)</option>
         <option value="v1.3" data-en="1.3 (latest stable)" data-zh="1.3（最新穩定版）">1.3 (latest stable)</option>
         <option value="v1.2" data-en="1.2" data-zh="1.2">1.2</option>
@@ -101,9 +102,52 @@ targets: [
     </div>
   </div>
 
+  <!-- ------------------------------------------------------------------ 1.5 -->
+  <article class="release" id="v1.5">
+    <div class="whats-new-tag beta"><span lang="en">Unreleased · 1.5.0</span><span lang="zh-Hant">未發行 · 1.5.0</span></div>
+    <h3 class="release-title"><span lang="en">An <code>EventStore</code> contract, a local event store, and iOS</span><span lang="zh-Hant"><code>EventStore</code> 契約、本機事件儲存與 iOS</span></h3>
+    <p class="lead" lang="en">
+      1.5 writes down what every <code>EventStore</code> must do (revisions from 0, <code>commitConflict</code> on a
+      version mismatch, a permanent <code>purge</code>) and checks the in-memory, KurrentDB and file stores against
+      it. <code>PersistentEventStore</code> is a new file-backed store for apps, one JSON file per stream, and
+      <code>DDDCore</code>, <code>EventSourcing</code> and <code>LocalEventStore</code> now ship as products that also
+      build for iOS 18+.
+    </p>
+    <p class="lead" lang="zh-Hant">
+      1.5 明文規定每個 <code>EventStore</code> 該怎麼做（revision 從 0 起算、版本不符丟 <code>commitConflict</code>、
+      <code>purge</code> 永久生效），並以此檢查記憶體、KurrentDB 與檔案三種儲存。新增的 <code>PersistentEventStore</code>
+      是給 app 用的檔案儲存，每個 stream 一個 JSON 檔；<code>DDDCore</code>、<code>EventSourcing</code> 與
+      <code>LocalEventStore</code> 改以 product 發佈，並可建置於 iOS 18+。
+    </p>
+
+    <div class="table-scroll">
+      <table class="compat">
+        <thead>
+          <tr>
+            <th><span lang="en">Tag</span><span lang="zh-Hant">Tag</span></th>
+            <th><span lang="en">Change</span><span lang="zh-Hant">變更</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><span lang="en">Unreleased</span><span lang="zh-Hant">未發行</span></td><td><span lang="en"><strong><code>EventStore</code> contract</strong>: one set of rules for every store, checked by <code>EventStoreContract</code>. <code>purge</code> tombstones the stream, so the id can never be written again (<code>streamPurged</code>, 502); version mismatches throw <code>commitConflict</code> (501). <code>EventTypeMapper</code>, <code>RecordedEventLike</code> and <code>CustomMetadata</code> move to <code>EventSourcing</code>.</span><span lang="zh-Hant"><strong><code>EventStore</code> 契約</strong>：所有儲存共用一套規則，由 <code>EventStoreContract</code> 檢查。<code>purge</code> 改為 tombstone，該 id 永遠無法再寫入（<code>streamPurged</code>，502）；版本不符丟 <code>commitConflict</code>（501）。<code>EventTypeMapper</code>、<code>RecordedEventLike</code> 與 <code>CustomMetadata</code> 搬到 <code>EventSourcing</code>。</span></td></tr>
+          <tr><td><span lang="en">Unreleased</span><span lang="zh-Hant">未發行</span></td><td><span lang="en"><strong><code>PersistentEventStore</code></strong> (<code>LocalEventStore</code>): a file-backed <code>EventStore</code> for apps, one JSON file per stream, atomic writes, one open instance per directory.</span><span lang="zh-Hant"><strong><code>PersistentEventStore</code></strong>（<code>LocalEventStore</code>）：給 app 用的檔案式 <code>EventStore</code>，每個 stream 一個 JSON 檔、原子寫入、每個目錄只能開一個實例。</span></td></tr>
+          <tr><td><span lang="en">Unreleased</span><span lang="zh-Hant">未發行</span></td><td><span lang="en"><strong>Products and iOS</strong>: <code>DDDCore</code>, <code>EventSourcing</code> and <code>LocalEventStore</code> are products and build for iOS 18+. CI runs the contract against a live KurrentDB.</span><span lang="zh-Hant"><strong>Product 與 iOS</strong>：<code>DDDCore</code>、<code>EventSourcing</code> 與 <code>LocalEventStore</code> 成為 product，並可建置於 iOS 18+。CI 對真實 KurrentDB 執行契約測試。</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" lang="en">The live contract test runs against <code>kurrentplatform/kurrentdb:26.1.3</code>.</p>
+    <p class="note" lang="zh-Hant">真實 KurrentDB 的契約測試以 <code>kurrentplatform/kurrentdb:26.1.3</code> 為準。</p>
+
+    <div class="cta-row">
+      <a class="btn primary" href="./migration/swift-ddd-kit-1.3-to-1.5.html"><span lang="en">1.3 → 1.5 Migration Guide</span><span lang="zh-Hant">1.3 → 1.5 遷移指南</span></a>
+    </div>
+
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/README.md#local-event-store-ios-and-macos-apps" target="_blank" rel="noopener"><span lang="en">Local Event Store in the README →</span><span lang="zh-Hant">README 的 Local Event Store 章節 →</span></a></p>
+  </article>
+
   <!-- ------------------------------------------------------------------ 1.4 -->
   <article class="release" id="v1.4">
-    <div class="whats-new-tag beta"><span lang="en">Pre-release · 1.4.0-beta.9</span><span lang="zh-Hant">預覽版 · 1.4.0-beta.9</span></div>
+    <div class="whats-new-tag beta"><span lang="en">Pre-release · 1.4.0-beta.14</span><span lang="zh-Hant">預覽版 · 1.4.0-beta.14</span></div>
     <h3 class="release-title"><span lang="en">Template variables framework</span><span lang="zh-Hant">Template variables 框架</span></h3>
     <p class="lead" lang="en">
       1.4 adds a small framework for filling templates from typed values. A <code>variables.yaml</code>
@@ -127,7 +171,7 @@ targets: [
         </thead>
         <tbody>
           <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.9">1.4.0-beta.9</a></td><td><span lang="en">Template variables framework: <code>TemplateVariables</code>, <code>TemplateVariablesDefinition</code>, <code>VariablesGeneratorPlugin</code>. <code>ForwardingRule.translate</code> returns an array.</span><span lang="zh-Hant">Template variables 框架：<code>TemplateVariables</code>、<code>TemplateVariablesDefinition</code>、<code>VariablesGeneratorPlugin</code>。<code>ForwardingRule.translate</code> 改為回傳陣列。</span></td></tr>
-          <tr><td><span lang="en">Unreleased</span><span lang="zh-Hant">未發行</span></td><td><span lang="en"><strong>Postgres read models, production-ready</strong>: monotonic snapshots by default, runner-managed subscription groups, <code>KurrentProjection.rebuild</code>, stable <code>readModelTypeName</code>, and the generated <code>apply()</code> no longer aborts a fold.</span><span lang="zh-Hant"><strong>Postgres read model 上線強化</strong>：預設 monotonic snapshot、runner 自行管理 subscription group、<code>KurrentProjection.rebuild</code>、穩定的 <code>readModelTypeName</code>，且生成的 <code>apply()</code> 不再中斷整個 fold。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.12">1.4.0-beta.12</a></td><td><span lang="en"><strong>Postgres read models, production-ready</strong>: monotonic snapshots by default, runner-managed subscription groups, <code>KurrentProjection.rebuild</code>, stable <code>readModelTypeName</code>, and the generated <code>apply()</code> no longer aborts a fold.</span><span lang="zh-Hant"><strong>Postgres read model 上線強化</strong>：預設 monotonic snapshot、runner 自行管理 subscription group、<code>KurrentProjection.rebuild</code>、穩定的 <code>readModelTypeName</code>，且生成的 <code>apply()</code> 不再中斷整個 fold。</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -504,7 +548,9 @@ try await repository.save(aggregateRoot: order)
 let found = try await repository.find(byId: "order-001")   // replayed from the stream
 
 try await repository.delete(byId: "order-001")   // soft delete: appends OrderCancelled
-try await repository.purge(byId: "order-001")    // hard delete: removes the stream</code></pre>
+try await repository.purge(byId: "order-001")    // hard delete: the id can never be written again</code></pre>
+  <p lang="en"><code>purge</code> makes the id permanently unwritable: a later <code>append</code> throws <code>streamPurged</code> (502), so never purge an id that will be reused. KurrentDB keeps the data until a scavenge; <code>PersistentEventStore</code> removes the payload from the stream file.</p>
+  <p lang="zh-Hant"><code>purge</code> 讓該 id 永久無法寫入：之後的 <code>append</code> 會丟 <code>streamPurged</code>（502），所以不要 purge 之後還會重用的 id。KurrentDB 會保留資料直到 scavenge；<code>PersistentEventStore</code> 會把 payload 從 stream 檔中移除。</p>
 
   <h3><span lang="en">5. Metadata without touching the domain</span><span lang="zh-Hant">5. 不碰 domain 的 metadata</span></h3>
   <pre><code class="lang-swift">struct AuditMetadata: EventMetadata {
@@ -538,7 +584,8 @@ try await EventMetadataContext&lt;AuditMetadata&gt;.withValue(meta) {
       </thead>
       <tbody>
         <tr class="group-row"><td colspan="2"><span lang="en">Core</span><span lang="zh-Hant">核心</span></td></tr>
-        <tr><td><code>DDDKit</code></td><td><span lang="en">Umbrella: <code>DDDCore</code> (Entity, AggregateRoot, DomainEvent, DomainEventBus), <code>EventSourcing</code> (EventStore, EventSourcingRepository, EventSourcingProjector, ReadModel), <code>KurrentSupport</code> (KurrentStorageCoordinator, EventTypeMapper, persistent-subscription runners), <code>EventBus</code> and <code>ReadModelPersistence</code>.</span><span lang="zh-Hant">Umbrella：<code>DDDCore</code>（Entity、AggregateRoot、DomainEvent、DomainEventBus）、<code>EventSourcing</code>（EventStore、EventSourcingRepository、EventSourcingProjector、ReadModel）、<code>KurrentSupport</code>（KurrentStorageCoordinator、EventTypeMapper、persistent subscription runner）、<code>EventBus</code> 與 <code>ReadModelPersistence</code>。</span></td></tr>
+        <tr><td><code>DDDKit</code></td><td><span lang="en">Umbrella: <code>DDDCore</code> (Entity, AggregateRoot, DomainEvent, DomainEventBus), <code>EventSourcing</code> (EventStore, EventSourcingRepository, EventSourcingProjector, ReadModel, InMemoryEventStore, RecordedEventLike, EventTypeMapper, CustomMetadata), <code>KurrentSupport</code> (KurrentStorageCoordinator, persistent-subscription runners), <code>EventBus</code> and <code>ReadModelPersistence</code>.</span><span lang="zh-Hant">Umbrella：<code>DDDCore</code>（Entity、AggregateRoot、DomainEvent、DomainEventBus）、<code>EventSourcing</code>（EventStore、EventSourcingRepository、EventSourcingProjector、ReadModel、InMemoryEventStore、RecordedEventLike、EventTypeMapper、CustomMetadata）、<code>KurrentSupport</code>（KurrentStorageCoordinator、persistent subscription runner）、<code>EventBus</code> 與 <code>ReadModelPersistence</code>。</span></td></tr>
+        <tr><td><code>LocalEventStore</code></td><td><span lang="en"><code>PersistentEventStore</code>: a file-backed <code>EventStore</code> for apps, one JSON file per stream.</span><span lang="zh-Hant"><code>PersistentEventStore</code>：給 app 用的檔案式 <code>EventStore</code>，每個 stream 一個 JSON 檔。</span></td></tr>
         <tr><td><code>MigrationUtility</code></td><td><span lang="en">The <code>Migration</code> protocol and handlers for evolving event schemas.</span><span lang="zh-Hant"><code>Migration</code> 協定與 handler，用於演進事件 schema。</span></td></tr>
         <tr class="group-row"><td colspan="2"><span lang="en">Read model persistence</span><span lang="zh-Hant">Read model 持久化</span></td></tr>
         <tr><td><code>ReadModelPersistence</code></td><td><span lang="en"><code>ReadModelStore</code> protocol plus an in-memory store for read model snapshots.</span><span lang="zh-Hant"><code>ReadModelStore</code> 協定與記憶體內的 read model 快照儲存。</span></td></tr>
@@ -558,6 +605,8 @@ try await EventMetadataContext&lt;AuditMetadata&gt;.withValue(meta) {
       </tbody>
     </table>
   </div>
+  <p lang="en">iOS 18+ is supported for <code>DDDCore</code>, <code>EventSourcing</code> and <code>LocalEventStore</code>; <code>DDDKit</code> and every KurrentDB, Postgres or Pulsar module are server-side.</p>
+  <p lang="zh-Hant"><code>DDDCore</code>、<code>EventSourcing</code> 與 <code>LocalEventStore</code> 支援 iOS 18+；<code>DDDKit</code> 以及所有 KurrentDB、Postgres、Pulsar 模組都是伺服器端用的。</p>
 </section>
 
 <!-- ===================================================================== -->
