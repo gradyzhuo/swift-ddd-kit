@@ -362,7 +362,7 @@ struct LoggingClient: EventStoreClient {
 }
 ```
 
-`tombstoneStream(name:)`, added after beta.14, does have a default but fails at run time; see "EventStore contract" §2 below.
+`tombstoneStream(name:)`, added in 1.4.0 itself, does have a default but fails at run time; see "EventStore contract" §2 below.
 
 ### Behaviour changes (the compiler will not point these out)
 
@@ -386,7 +386,7 @@ struct LoggingClient: EventStoreClient {
   the host resubscribes after a backoff. The new group starts from `subscriptionSettings.startFrom`
   (default `.end`); events written while the group was missing are not forwarded. No code change.
 
-### EventStore contract (on main, not yet in a beta)
+### EventStore contract (1.4.0)
 
 `EventStorageCoordinator` 的實作現在遵守同一份語意契約（見 `docs/superpowers/specs/2026-10-23-eventstore-contract-design.md`）。以下依影響程度列出。
 
