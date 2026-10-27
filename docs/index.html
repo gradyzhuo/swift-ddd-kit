@@ -69,7 +69,7 @@
   <p lang="en">Add the package to your <code>Package.swift</code>. <code>DDDKit</code> is the umbrella product; it re-exports the core protocols, the event sourcing layer, the KurrentDB adapter, the in-memory event bus and read model persistence.</p>
   <p lang="zh-Hant">在 <code>Package.swift</code> 加入套件。<code>DDDKit</code> 是 umbrella product，會一併重新導出核心協定、event sourcing 層、KurrentDB 轉接層、記憶體內 event bus 與 read model 持久化。</p>
   <pre><code class="lang-swift">dependencies: [
-    .package(url: "https://github.com/gradyzhuo/swift-ddd-kit.git", from: "1.3.0")
+    .package(url: "https://github.com/gradyzhuo/swift-ddd-kit.git", from: "1.4.0")
 ],
 targets: [
     .target(
@@ -79,8 +79,6 @@ targets: [
         ]
     )
 ]</code></pre>
-  <p class="note" lang="en">🧪 <strong>Trying 1.4?</strong> Pin <code>from: "1.4.0-beta.14"</code> for template variables and the Postgres read-model work. The <code>EventStore</code> contract, <code>LocalEventStore</code> and the iOS products are on <code>main</code> and ship with 1.4.0; the API may still move until then.</p>
-  <p class="note" lang="zh-Hant">🧪 <strong>想試 1.4？</strong> 將版本設為 <code>from: "1.4.0-beta.14"</code> 即可取得 Template variables 與 Postgres read model 的改進。<code>EventStore</code> 契約、<code>LocalEventStore</code> 與 iOS product 已在 <code>main</code>，隨 1.4.0 正式版發佈；在那之前 API 仍可能調整。</p>
 </section>
 
 <!-- ===================================================================== -->
@@ -92,8 +90,8 @@ targets: [
     <div class="release-picker">
       <label class="visually-hidden" for="release-select"><span lang="en">Choose a release</span><span lang="zh-Hant">選擇版本</span></label>
       <select id="release-select">
-        <option value="v1.4" data-en="1.4 (pre-release)" data-zh="1.4（預覽版）">1.4 (pre-release)</option>
-        <option value="v1.3" data-en="1.3 (latest stable)" data-zh="1.3（最新穩定版）">1.3 (latest stable)</option>
+        <option value="v1.4" data-en="1.4 (latest stable)" data-zh="1.4（最新穩定版）">1.4 (latest stable)</option>
+        <option value="v1.3" data-en="1.3" data-zh="1.3">1.3</option>
         <option value="v1.2" data-en="1.2" data-zh="1.2">1.2</option>
         <option value="v1.1" data-en="1.1" data-zh="1.1">1.1</option>
         <option value="v1.0" data-en="1.0" data-zh="1.0">1.0</option>
@@ -103,7 +101,7 @@ targets: [
 
   <!-- ------------------------------------------------------------------ 1.4 -->
   <article class="release" id="v1.4">
-    <div class="whats-new-tag beta"><span lang="en">Pre-release · 1.4.0-beta.14</span><span lang="zh-Hant">預覽版 · 1.4.0-beta.14</span></div>
+    <div class="whats-new-tag"><span lang="en">Latest stable · 1.4.0</span><span lang="zh-Hant">最新穩定版 · 1.4.0</span></div>
     <h3 class="release-title"><span lang="en">An <code>EventStore</code> contract, a local event store, iOS, and template variables</span><span lang="zh-Hant"><code>EventStore</code> 契約、本機事件儲存、iOS 與 Template variables</span></h3>
     <p class="lead" lang="en">
       1.4 writes down what every <code>EventStore</code> must do (revisions from 0, <code>commitConflict</code> on a
@@ -132,9 +130,9 @@ targets: [
         <tbody>
           <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.9">1.4.0-beta.9</a></td><td><span lang="en">Template variables framework: <code>TemplateVariables</code>, <code>TemplateVariablesDefinition</code>, <code>VariablesGeneratorPlugin</code>. <code>ForwardingRule.translate</code> returns an array.</span><span lang="zh-Hant">Template variables 框架：<code>TemplateVariables</code>、<code>TemplateVariablesDefinition</code>、<code>VariablesGeneratorPlugin</code>。<code>ForwardingRule.translate</code> 改為回傳陣列。</span></td></tr>
           <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.12">1.4.0-beta.12</a></td><td><span lang="en"><strong>Postgres read models, production-ready</strong>: monotonic snapshots by default, runner-managed subscription groups, <code>KurrentProjection.rebuild</code>, stable <code>readModelTypeName</code>, and the generated <code>apply()</code> no longer aborts a fold.</span><span lang="zh-Hant"><strong>Postgres read model 上線強化</strong>：預設 monotonic snapshot、runner 自行管理 subscription group、<code>KurrentProjection.rebuild</code>、穩定的 <code>readModelTypeName</code>，且生成的 <code>apply()</code> 不再中斷整個 fold。</span></td></tr>
-          <tr><td><span lang="en">Unreleased (1.4.0)</span><span lang="zh-Hant">未發行（1.4.0）</span></td><td><span lang="en"><strong><code>EventStore</code> contract</strong>: one set of rules for every store, checked by <code>EventStoreContract</code>. <code>purge</code> tombstones the stream, so the id can never be written again (<code>streamPurged</code>, 502); version mismatches throw <code>commitConflict</code> (501). <code>EventTypeMapper</code>, <code>RecordedEventLike</code> and <code>CustomMetadata</code> move to <code>EventSourcing</code>.</span><span lang="zh-Hant"><strong><code>EventStore</code> 契約</strong>：所有儲存共用一套規則，由 <code>EventStoreContract</code> 檢查。<code>purge</code> 改為 tombstone，該 id 永遠無法再寫入（<code>streamPurged</code>，502）；版本不符丟 <code>commitConflict</code>（501）。<code>EventTypeMapper</code>、<code>RecordedEventLike</code> 與 <code>CustomMetadata</code> 搬到 <code>EventSourcing</code>。</span></td></tr>
-          <tr><td><span lang="en">Unreleased (1.4.0)</span><span lang="zh-Hant">未發行（1.4.0）</span></td><td><span lang="en"><strong><code>PersistentEventStore</code></strong> (<code>LocalEventStore</code>): a file-backed <code>EventStore</code> for apps, one JSON file per stream, atomic writes, one open instance per directory.</span><span lang="zh-Hant"><strong><code>PersistentEventStore</code></strong>（<code>LocalEventStore</code>）：給 app 用的檔案式 <code>EventStore</code>，每個 stream 一個 JSON 檔、原子寫入、每個目錄只能開一個實例。</span></td></tr>
-          <tr><td><span lang="en">Unreleased (1.4.0)</span><span lang="zh-Hant">未發行（1.4.0）</span></td><td><span lang="en"><strong>Products and iOS</strong>: <code>DDDCore</code>, <code>EventSourcing</code> and <code>LocalEventStore</code> are products and build for iOS 18+. CI runs the contract against a live KurrentDB.</span><span lang="zh-Hant"><strong>Product 與 iOS</strong>：<code>DDDCore</code>、<code>EventSourcing</code> 與 <code>LocalEventStore</code> 成為 product，並可建置於 iOS 18+。CI 對真實 KurrentDB 執行契約測試。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0">1.4.0</a></td><td><span lang="en"><strong><code>EventStore</code> contract</strong>: one set of rules for every store, checked by <code>EventStoreContract</code>. <code>purge</code> tombstones the stream, so the id can never be written again (<code>streamPurged</code>, 502); version mismatches throw <code>commitConflict</code> (501). <code>EventTypeMapper</code>, <code>RecordedEventLike</code> and <code>CustomMetadata</code> move to <code>EventSourcing</code>.</span><span lang="zh-Hant"><strong><code>EventStore</code> 契約</strong>：所有儲存共用一套規則，由 <code>EventStoreContract</code> 檢查。<code>purge</code> 改為 tombstone，該 id 永遠無法再寫入（<code>streamPurged</code>，502）；版本不符丟 <code>commitConflict</code>（501）。<code>EventTypeMapper</code>、<code>RecordedEventLike</code> 與 <code>CustomMetadata</code> 搬到 <code>EventSourcing</code>。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0">1.4.0</a></td><td><span lang="en"><strong><code>PersistentEventStore</code></strong> (<code>LocalEventStore</code>): a file-backed <code>EventStore</code> for apps, one JSON file per stream, atomic writes, one open instance per directory.</span><span lang="zh-Hant"><strong><code>PersistentEventStore</code></strong>（<code>LocalEventStore</code>）：給 app 用的檔案式 <code>EventStore</code>，每個 stream 一個 JSON 檔、原子寫入、每個目錄只能開一個實例。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0">1.4.0</a></td><td><span lang="en"><strong>Products and iOS</strong>: <code>DDDCore</code>, <code>EventSourcing</code> and <code>LocalEventStore</code> are products and build for iOS 18+. CI runs the contract against a live KurrentDB.</span><span lang="zh-Hant"><strong>Product 與 iOS</strong>：<code>DDDCore</code>、<code>EventSourcing</code> 與 <code>LocalEventStore</code> 成為 product，並可建置於 iOS 18+。CI 對真實 KurrentDB 執行契約測試。</span></td></tr>
         </tbody>
       </table>
     </div>
@@ -150,13 +148,13 @@ targets: [
     </div>
 
     <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/README.md#local-event-store-ios-and-macos-apps" target="_blank" rel="noopener"><span lang="en">Local Event Store in the README →</span><span lang="zh-Hant">README 的 Local Event Store 章節 →</span></a></p>
-    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0-beta.9" target="_blank" rel="noopener"><span lang="en">Full 1.4.0-beta.9 release notes →</span><span lang="zh-Hant">1.4.0-beta.9 完整 release notes →</span></a></p>
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.4.0" target="_blank" rel="noopener"><span lang="en">Full 1.4.0 release notes →</span><span lang="zh-Hant">1.4.0 完整 release notes →</span></a></p>
     <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/README.md#template-variables" target="_blank" rel="noopener"><span lang="en">Template Variables in the README →</span><span lang="zh-Hant">README 的 Template Variables 章節 →</span></a></p>
   </article>
 
   <!-- ------------------------------------------------------------------ 1.3 -->
   <article class="release" id="v1.3">
-    <div class="whats-new-tag"><span lang="en">Latest stable · 1.3.0</span><span lang="zh-Hant">最新穩定版 · 1.3.0</span></div>
+    <div class="whats-new-tag"><span lang="en">1.3.0</span><span lang="zh-Hant">1.3.0</span></div>
     <h3 class="release-title"><span lang="en">Cross-context events over Apache Pulsar</span><span lang="zh-Hant">跨 Bounded Context 的事件：Apache Pulsar</span></h3>
     <p class="lead" lang="en">
       Domain events stay inside their context. What crosses the boundary is a Published Language
@@ -565,10 +563,10 @@ try await EventMetadataContext&lt;AuditMetadata&gt;.withValue(meta) {
         <tr class="group-row"><td colspan="2"><span lang="en">Cross-context messaging</span><span lang="zh-Hant">跨 context 訊息</span></td></tr>
         <tr><td><code>PublishedLanguage</code></td><td><span lang="en"><code>PublishedLanguageEvent</code>, the wire envelope shared by both sides.</span><span lang="zh-Hant">雙方共用的 wire envelope <code>PublishedLanguageEvent</code>。</span></td></tr>
         <tr><td><code>ContextForwarder</code></td><td><span lang="en">Produce side over Pulsar's REST endpoint: <code>PulsarRESTPublisher</code>, <code>ForwarderGroup</code>.</span><span lang="zh-Hant">透過 Pulsar REST 端點的發送端：<code>PulsarRESTPublisher</code>、<code>ForwarderGroup</code>。</span></td></tr>
-        <tr><td><code>ContextReceiver</code> · <code>ContextReceiverWebSocket</code></td><td><span lang="en">Consume side: portable runner and dead-letter monitor, plus the Linux-only WebSocket transport.</span><span lang="zh-Hant">接收端：可攜的 runner 與 dead-letter monitor，加上僅限 Linux 的 WebSocket transport。</span></td></tr>
+        <tr><td><code>ContextReceiver</code> · <code>ContextReceiverWebSocket</code></td><td><span lang="en">Consume side: portable runner and dead-letter monitor, plus the WebSocket transport (Linux and macOS).</span><span lang="zh-Hant">接收端：可攜的 runner 與 dead-letter monitor，加上 WebSocket transport（Linux 與 macOS）。</span></td></tr>
         <tr class="group-row"><td colspan="2"><span lang="en">Template variables</span><span lang="zh-Hant">模板變數</span></td></tr>
-        <tr><td><code>TemplateVariables</code></td><td><span lang="en">Runtime substitution engine: <code>PlaceholderSubstitution.substitute(_:values:)</code> fills <code>%Placeholder%</code> tokens in a single pass. Pre-release in 1.4.</span><span lang="zh-Hant">Runtime 替換引擎：<code>PlaceholderSubstitution.substitute(_:values:)</code> 以單一遍歷填入 <code>%Placeholder%</code>。1.4 預覽版。</span></td></tr>
-        <tr><td><code>TemplateVariablesDefinition</code></td><td><span lang="en">The <code>variables.yaml</code> model, parser and generator, for building further generators. Pre-release in 1.4.</span><span lang="zh-Hant"><code>variables.yaml</code> 的模型、解析器與生成器，供建立更多生成器使用。1.4 預覽版。</span></td></tr>
+        <tr><td><code>TemplateVariables</code></td><td><span lang="en">Runtime substitution engine: <code>PlaceholderSubstitution.substitute(_:values:)</code> fills <code>%Placeholder%</code> tokens in a single pass.</span><span lang="zh-Hant">Runtime 替換引擎：<code>PlaceholderSubstitution.substitute(_:values:)</code> 以單一遍歷填入 <code>%Placeholder%</code>。</span></td></tr>
+        <tr><td><code>TemplateVariablesDefinition</code></td><td><span lang="en">The <code>variables.yaml</code> model, parser and generator, for building further generators.</span><span lang="zh-Hant"><code>variables.yaml</code> 的模型、解析器與生成器，供建立更多生成器使用。</span></td></tr>
         <tr class="group-row"><td colspan="2"><span lang="en">Testing</span><span lang="zh-Hant">測試</span></td></tr>
         <tr><td><code>KurrentSupportInMemory</code></td><td><span lang="en"><code>InMemoryEventStoreClient</code>: a KurrentDB double that needs no server.</span><span lang="zh-Hant"><code>InMemoryEventStoreClient</code>：不需要伺服器的 KurrentDB 替身。</span></td></tr>
         <tr><td><code>TestUtility</code></td><td><span lang="en">Integration-test helpers against a live KurrentDB: <code>TestBundle</code>, stream cleanup, the optional <code>KurrentDBPool</code> client.</span><span lang="zh-Hant">對真實 KurrentDB 做整合測試的輔助：<code>TestBundle</code>、stream 清理、選用的 <code>KurrentDBPool</code> client。</span></td></tr>
@@ -620,8 +618,8 @@ OrderCancelled:
     </div>
     <div class="api-card">
       <h3>VariablesGeneratorPlugin</h3>
-      <p lang="en"><code>variables.yaml</code> → a <code>Sendable</code> variables protocol with one <code>async throws -&gt; String</code> method per variable, plus the <code>__value(of:inputs:)</code> dispatch seam. Pre-release in 1.4.</p>
-      <p lang="zh-Hant"><code>variables.yaml</code> → 一個 <code>Sendable</code> 變數 protocol，每個變數一個 <code>async throws -&gt; String</code> 方法，另附 <code>__value(of:inputs:)</code> 分派入口。1.4 預覽版。</p>
+      <p lang="en"><code>variables.yaml</code> → a <code>Sendable</code> variables protocol with one <code>async throws -&gt; String</code> method per variable, plus the <code>__value(of:inputs:)</code> dispatch seam.</p>
+      <p lang="zh-Hant"><code>variables.yaml</code> → 一個 <code>Sendable</code> 變數 protocol，每個變數一個 <code>async throws -&gt; String</code> 方法，另附 <code>__value(of:inputs:)</code> 分派入口。</p>
       <pre><code class="lang-yaml">CustomerName:
   placeholder: CustomerName
   inputs:
@@ -676,8 +674,8 @@ swift run generate variables    Sources/MyContext/variables.yaml    -o Generated
     </a>
     <a class="doc-card" href="https://github.com/gradyzhuo/swift-ddd-kit/releases" target="_blank" rel="noopener">
       <h3><span lang="en">All releases</span><span lang="zh-Hant">所有版本</span></h3>
-      <p lang="en">Every tag from 0.1.0 onward with generated notes, including the 1.4 pre-releases.</p>
-      <p lang="zh-Hant">從 0.1.0 起每個 tag 的 release notes，包含 1.4 的預覽版。</p>
+      <p lang="en">Release notes for every release from 0.1.0 onward.</p>
+      <p lang="zh-Hant">從 0.1.0 起每個版本的 release notes。</p>
     </a>
     <a class="doc-card" href="https://gradyzhuo.github.io/swift-kurrentdb/" target="_blank" rel="noopener">
       <h3>swift-kurrentdb</h3>
