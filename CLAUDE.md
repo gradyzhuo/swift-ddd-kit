@@ -35,6 +35,7 @@ swift run generate projection --input Sources/MyTarget/projection-model.yaml
 - A module gets a richer landing page by adding a `Sources/<Module>/<Module>.docc` catalog — the workflow picks it up automatically
 - `DOC_DEPENDENCY_PINS` in the workflow pins upstream releases that break the build (the package has no `Package.resolved`, so old releases resolve to new dependencies too); release symbol graphs are cached per commit + pins
 - Runs on pushes to main and on `*.*.*` tags (the `github-pages` environment must allow both)
+- Pages deploys each commit once: a tag on a commit main already deployed does not publish the new version (the deploy step still succeeds). After tagging main's HEAD, land another commit on main
 
 ## Architecture Overview
 

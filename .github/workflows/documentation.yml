@@ -12,6 +12,11 @@
 # Actions" as its source, and the github-pages environment must allow `*.*.*` tags so that
 # a release deploys as soon as it is tagged.
 #
+# Pages keys a deployment by commit. If the release tag points at a commit that main already
+# deployed (the usual case: merge, then tag main's HEAD), the tag's deploy reports success but
+# the site keeps main's build, which predates the tag and lists no new version. The next push
+# to main deploys a build that includes it, so land a commit on main after tagging.
+#
 # The DocC is built without swift-docc-plugin, so the package gains no dependency: the
 # compiler emits the symbol graphs (scripts/emit-symbol-graphs.sh), the toolchain's own
 # `docc` converts each module and `docc merge` combines the modules of a version into one
