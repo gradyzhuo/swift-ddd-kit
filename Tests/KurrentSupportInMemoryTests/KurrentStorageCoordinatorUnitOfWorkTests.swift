@@ -698,6 +698,40 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         #expect(try await storedRevisions(store, quoteStream) == [0])
     }
 
+    @Test("a read that finds the backend once its commit started reads the server alone: it does not throw, counts no event twice and leaves the scope unfailed")
+    func readOfABackendWhoseCommitStartedReadsTheServerAlone() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let quotes = quotingRepository(client)
+
+        let error = await thrownError {
+            try await withUnitOfWork { work in
+                let quote = try Quoting(id: "q-1", line: "desk")
+                try quote.addLine("chair")
+                try await quotes.save(aggregateRoot: quote)
+                // A Task started in the block can find the backend in the still-open scope
+                // just before the scope's commit starts on another thread, and only then ask
+                // it for the staged events. Starting the commit here, with the scope open,
+                // puts the reads below in that position deterministically.
+                let backend = try #require(work.existingBackend(KurrentUnitOfWorkBackend.self, identity: client.identity))
+                try await backend.commit()
+
+                let found = try #require(try await quotes.find(byId: "q-1"))
+                #expect(found.lines == ["desk", "chair"])
+                #expect(found.version == 1)
+                let afterFirst = try #require(try await quotes.store.fetchEvents(byId: "q-1", afterRevision: 0))
+                #expect(afterFirst.events.count == 1)
+                #expect(afterFirst.latestRevision == 1)
+                #expect(!work.isFailed)
+            }
+        }
+
+        // Only the scope's own commit fails: it finds its backend already committed.
+        expectOperationNotAllow(error, operation: "commit", reason: "unit of work already committed")
+        #expect(client.appendCount == 1)
+        #expect(try await storedRevisions(store, quoteStream) == [0, 1])
+    }
+
     @Test("a read of a stream that so far exists only as staged events logs no stream-not-found warning; with nothing staged it still does")
     func stagedOnlyStreamLogsNoStreamNotFoundWarning() async throws {
         let store = InMemoryEventStoreClient()

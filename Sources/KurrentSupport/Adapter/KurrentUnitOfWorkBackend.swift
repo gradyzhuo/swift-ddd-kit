@@ -144,9 +144,22 @@ package final class KurrentUnitOfWorkBackend: UnitOfWorkBackend {
         }
     }
 
+    /// For read paths: what `stagedEvents(stream:)` returns until `commit()` starts, and
+    /// `nil` from then on, without throwing. So a read that found this backend just before
+    /// its commit started (only a task that outlived the unit of work can) sees nothing
+    /// staged instead of failing. `stagedEvents(stream:)` keeps throwing then, as the second
+    /// line of defence behind the closed scope.
+    package func stagedEventsIfUncommitted(stream: String) -> (firstRevision: UInt64, events: [EventData])? {
+        state.withLock { state in
+            guard !state.committed else { return nil }
+            return state.batches[stream].map { (firstRevision: $0.firstRevision, events: $0.events) }
+        }
+    }
+
     /// Writes every staged batch: nothing for none, the single-stream `append` for one,
     /// one `appendAtomically` call for more. Ends the backend first, whatever the outcome:
-    /// later `stage`, `stagedEvents` and `commit` calls throw.
+    /// later `stage`, `stagedEvents` and `commit` calls throw, and
+    /// `stagedEventsIfUncommitted` returns `nil`.
     ///
     /// A returned revision that differs from the predicted tail is logged, not thrown: the
     /// events are stored, and the server's revision is the true one.

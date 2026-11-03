@@ -151,8 +151,7 @@ public final class KurrentStorageCoordinator<
     /// - Throws: The client's read errors, inside `withUnitOfWork(_:)` as outside it; a
     ///   missing or purged stream is not one. A read never fails because of the unit of work:
     ///   when it commits through a client with another identity, or has ended, the read
-    ///   returns the server's events alone. Only a read from a task that outlived the unit of
-    ///   work and races the start of its commit can throw `DDDError.operationNotAllow`.
+    ///   returns the server's events alone.
     public func fetchEvents(byId id: String) async throws
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         let streamName = StreamNaming.getStreamName(id: id)
@@ -212,7 +211,7 @@ public final class KurrentStorageCoordinator<
             logger.error("The error happened when fetching events: \(error)")
             throw error
         }
-        let staged = try stagedRecords(of: streamName)
+        let staged = stagedRecords(of: streamName)
         if streamNotFound, staged.isEmpty {
             logger.warning("Skip an error happened, stream not found: \(streamName)")
         }
@@ -224,17 +223,19 @@ public final class KurrentStorageCoordinator<
     /// unit of work has no backend for this coordinator's client, or when nothing is staged
     /// for the stream.
     ///
-    /// It only looks the backend up: a read never creates the backend or binds the unit of
-    /// work to this client, and a unit of work that commits through another client or has
-    /// ended reads as one with nothing staged. The backend itself still throws once its
-    /// commit has started, which only a task that outlived the unit of work can run into.
+    /// It only looks: a read never creates the backend, binds the unit of work to this
+    /// client or throws because of it. A unit of work that commits through another client
+    /// or has ended reads as one with nothing staged, and so does a backend whose commit
+    /// started after this read found it, which only a task that outlived the unit of work
+    /// can run into. The server was read before, so that read returns the server's events
+    /// from before the commit, none of them twice.
     ///
     /// The numbering starts from the staged batch's own expected revision, never from the
     /// last record read from the server: a record the mapper skips, or an empty
     /// `afterRevision` window, would make that one wrong.
-    private func stagedRecords(of streamName: String) throws -> [any RecordedEventLike] {
+    private func stagedRecords(of streamName: String) -> [any RecordedEventLike] {
         guard let backend = UnitOfWork.current?.existingBackend(KurrentUnitOfWorkBackend.self, identity: client.identity),
-              let staged = try backend.stagedEvents(stream: streamName)
+              let staged = backend.stagedEventsIfUncommitted(stream: streamName)
         else {
             return []
         }
