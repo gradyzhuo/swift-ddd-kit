@@ -17,6 +17,7 @@
 - Behaviour outside a scope is unchanged, byte for byte: every existing test keeps passing without edits except the two `EventStoreClient` test doubles, which gain `identity`.
 - Locks: `Mutex`/actor only, never `NSLock`. No `@unchecked Sendable` in `Sources/`. Test fixtures may keep the repo's existing style; tests that use `async let`/`TaskGroup` construct the aggregate inside the child task instead of passing a non-`Sendable` aggregate across the boundary.
 - Never run bare `swift test`; always `--filter`. Offline suites: `EventSourcingTests`, `DDDKitUnitTests`, `KurrentSupportUnitTests`, `KurrentSupportInMemoryTests`, `LocalEventStoreTests`. `KurrentSupportUnitTests` is missing from CI's offline filter today; Task 6 adds it.
+- A filter that names a suite is quoted and puts a dot between target and suite: `swift test --filter 'EventSourcingTests\.UnitOfWorkTests'`. Swift Testing names a test `Target.Suite/test()`, so `Target/Suite` matches nothing: `swift test` prints `warning: No matching test cases were run` and exits 0. A step that expects tests to run (every GREEN step, and a RED step that expects a runtime failure) checks the output for `Test run with N tests` (one line per test target) with N > 0; for a single suite, N equals `swift test list | grep -c 'Target\.Suite/'`. A run without that line has tested nothing, whatever its exit code. Only a RED step that expects a compile error is exempt.
 - Live suite `KurrentLiveContractTests` needs a local single-node insecure KurrentDB 26.1.3 **and** the pool URL, otherwise `withPooledIntegrationTestClient` dials a TLS three-node cluster on 2111–2113:
 
 ```bash
@@ -107,15 +108,15 @@ func singleAndOthers() {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `swift test --filter DDDKitUnitTests/DDDErrorStoreCodesTests`
+Run: `swift test --filter 'DDDKitUnitTests\.DDDErrorStoreCodesTests'`
 Expected: FAIL to compile ("no member commitConflicts").
 
-- [ ] **Step 3: Implement** — store the array under `userInfos["commitConflicts"]` and the first under `"commitConflict"`; message lists every `id` as `"[501] Append to q-1, b-1 found other revisions."`; `commitConflicts` reads the array key, falling back to `[commitConflict]` for the single factory.
+- [ ] **Step 3: Implement** — store the array under `userInfos["commitConflicts"]` and the first under `"commitConflict"`; message lists every `id` as `"[commitConflict] Append to q-1, b-1 found other revisions."` (the `[\(errorCode)]` prefix every DDDError factory uses interpolates the case name); `commitConflicts` reads the array key, falling back to `[commitConflict]` for the single factory.
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `swift test --filter DDDKitUnitTests/DDDErrorStoreCodesTests`
-Expected: PASS.
+Run: `swift test --filter 'DDDKitUnitTests\.DDDErrorStoreCodesTests'`
+Expected: PASS, and the output shows `Test run with N tests … passed` with N equal to `swift test list | grep -c 'DDDKitUnitTests\.DDDErrorStoreCodesTests/'` (N > 0).
 
 - [ ] **Step 5: Commit**
 
@@ -181,15 +182,15 @@ public protocol UnitOfWorkParticipant {}
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `swift test --filter EventSourcingTests/UnitOfWorkTests`
+Run: `swift test --filter 'EventSourcingTests\.UnitOfWorkTests'`
 Expected: FAIL to compile ("cannot find 'withUnitOfWork'").
 
 - [ ] **Step 3: Implement `Sources/EventSourcing/UnitOfWork/UnitOfWork.swift`** per the Interfaces block. `body` is not `@Sendable` (same shape as `EventMetadataContext.withValue`).
 
 - [ ] **Step 4: Run to verify they pass**
 
-Run: `swift test --filter EventSourcingTests/UnitOfWorkTests`
-Expected: PASS.
+Run: `swift test --filter 'EventSourcingTests\.UnitOfWorkTests'`
+Expected: PASS, and the output shows `Test run with N tests … passed` with N equal to `swift test list | grep -c 'EventSourcingTests\.UnitOfWorkTests/'` (N > 0).
 
 - [ ] **Step 5: Commit**
 
@@ -229,8 +230,8 @@ git commit -m "feat(event-sourcing): withUnitOfWork scope with one backend, fail
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `swift test --filter '(EventSourcingTests/EventSourcingRepositoryUnitOfWorkTests|LocalEventStoreTests/PersistentEventStoreUnitOfWorkTests)'`
-Expected: `saveInsideScopeThrowsForNonParticipantStore` and the persistent variant FAIL (save succeeds today).
+Run: `swift test --filter '(EventSourcingTests\.EventSourcingRepositoryUnitOfWorkTests|LocalEventStoreTests\.PersistentEventStoreUnitOfWorkTests)'`
+Expected: `saveInsideScopeThrowsForNonParticipantStore` and the persistent variant FAIL (save succeeds today). The output shows a `Test run with N tests … failed` line per target with N > 0 (exit 0 with `warning: No matching test cases were run` means the filter matched nothing).
 
 - [ ] **Step 3: Implement** the gate and the wrapping.
 
@@ -298,7 +299,7 @@ case atomicAppendUnsupported
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `swift test --filter '(KurrentSupportUnitTests/AppendAtomicallyDefaultTests|KurrentSupportInMemoryTests/InMemoryAppendAtomicallyTests)'`
+Run: `swift test --filter '(KurrentSupportUnitTests\.AppendAtomicallyDefaultTests|KurrentSupportInMemoryTests\.InMemoryAppendAtomicallyTests)'`
 Expected: FAIL to compile.
 
 - [ ] **Step 3: Implement** the protocol additions, DTOs, both conformances, `identity` on the two test doubles, and the CI filter entries.
@@ -367,7 +368,7 @@ package final class KurrentUnitOfWorkBackend: UnitOfWorkBackend {
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `swift test --filter KurrentSupportInMemoryTests/KurrentUnitOfWorkBackendTests`
+Run: `swift test --filter 'KurrentSupportInMemoryTests\.KurrentUnitOfWorkBackendTests'`
 Expected: FAIL to compile.
 
 - [ ] **Step 3: Implement** the encoder, move the coordinator's inline encoding onto it, and implement the backend.
@@ -426,8 +427,8 @@ git commit -m "feat(kurrent): unit-of-work backend stages batches and commits vi
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `swift test --filter KurrentSupportInMemoryTests/KurrentStorageCoordinatorUnitOfWorkTests`
-Expected: `twoRepositoriesCommitTogether` FAILS (client receives appends immediately).
+Run: `swift test --filter 'KurrentSupportInMemoryTests\.KurrentStorageCoordinatorUnitOfWorkTests'`
+Expected: `twoRepositoriesCommitTogether` FAILS (client receives appends immediately). The output shows `Test run with N tests … failed` with N > 0 (exit 0 with `warning: No matching test cases were run` means the filter matched nothing).
 
 - [ ] **Step 3: Implement** per the Interfaces block.
 
