@@ -99,7 +99,8 @@ public protocol EventStoreClient: Sendable {
     /// - Throws: `KurrentError.resourceDeleted(resource:)` naming the first tombstoned
     ///   stream in batch order, even when other batches conflict too; otherwise
     ///   `EventStoreClientError.consistencyViolations` listing every stream whose
-    ///   expected revision did not hold.
+    ///   expected revision did not hold, in any order: the unit-of-work backend puts the
+    ///   conflicts it reports in its own batch order.
     /// - Parameter batches: At least two, with distinct streams (the caller's job).
     /// - Returns: Each stream's new revision, in no particular order. Resending a whole
     ///   request (every batch with the same event ids) returns the original revisions and

@@ -307,6 +307,40 @@ struct KurrentUnitOfWorkBackendTests {
         ])
     }
 
+    @Test(
+        "commitConflicts follow the order the streams were first staged, whatever order the client lists the violations in",
+        arguments: [["Order-m", "Order-a", "Order-z"], ["Order-m", "Order-z"]]
+    )
+    func conflictsFollowStagingOrderWhateverTheClientOrder(listedStreams: [String]) async throws {
+        // What the client reports for each stream it lists.
+        let reported = [
+            "Order-z": StreamConflict(stream: "Order-z", expected: .noStream, current: 0),
+            "Order-a": StreamConflict(stream: "Order-a", expected: .at(3), current: 5),
+            "Order-m": StreamConflict(stream: "Order-m", expected: .at(7), current: 9),
+        ]
+        let violations = try listedStreams.map { try #require(reported[$0]) }
+        let client = CountingClient(
+            wrapping: InMemoryEventStoreClient(),
+            errorToThrow: EventStoreClientError.consistencyViolations(violations)
+        )
+        let backend = KurrentUnitOfWorkBackend(client: client)
+        // Staged z, a, m: neither sorted nor the reverse of the client's order.
+        try stage(backend, "z", .noStream, samples("z1"))
+        try stage(backend, "a", .at(3), samples("a4"))
+        try stage(backend, "m", .at(7), samples("m8"))
+
+        let error = await captureDDDError { try await backend.commit() }
+
+        let inStagingOrder = [
+            DDDError.CommitConflict(id: "z", expected: nil, actual: 0),
+            DDDError.CommitConflict(id: "a", expected: 3, actual: 5),
+            DDDError.CommitConflict(id: "m", expected: 7, actual: 9),
+        ]
+        #expect(error?.code == .commitConflict)
+        #expect(error?.commitConflicts == inStagingOrder.filter { listedStreams.contains("Order-\($0.id)") })
+        #expect(client.appendAtomicallyCount == 1)
+    }
+
     @Test("a tombstoned stream becomes streamPurged for its id; nothing is written", arguments: [false, true])
     func tombstonedBecomesStreamPurged(withSecondStream: Bool) async throws {
         let client = InMemoryEventStoreClient()

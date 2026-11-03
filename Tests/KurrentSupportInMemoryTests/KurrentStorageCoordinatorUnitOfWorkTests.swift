@@ -47,6 +47,16 @@ private struct QuoteNoted: DomainEvent {
     var note: String
 }
 
+/// Its `rate` can be NaN, which `JSONEncoder` cannot encode.
+private struct QuoteRated: DomainEvent {
+    typealias Metadata = AuditMetadata
+    var id: UUID = .init()
+    var occurred: Date = .now
+    var aggregateRootId: String
+    var metadata: AuditMetadata? = nil
+    var rate: Double
+}
+
 private struct InvoiceIssued: DomainEvent {
     typealias Metadata = AuditMetadata
     var id: UUID = .init()
@@ -93,6 +103,10 @@ private final class Quoting: AggregateRoot {
 
     func addNote(_ note: String) throws {
         try apply(event: QuoteNoted(aggregateRootId: id, note: note))
+    }
+
+    func rate(_ rate: Double) throws {
+        try apply(event: QuoteRated(aggregateRootId: id, rate: rate))
     }
 
     func when(happened event: some DomainEvent) throws {
@@ -246,6 +260,16 @@ private enum Channel: String, EventMetadata {
     case web
 }
 
+/// Metadata whose `ratio` can be NaN or ±infinity, which `JSONEncoder` cannot encode.
+private struct RatioMetadata: EventMetadata {
+    let ratio: Double
+}
+
+/// Metadata whose `amount` can hold an integer beyond 64 bits.
+private struct AmountMetadata: EventMetadata {
+    let amount: Decimal
+}
+
 /// Builds the quote inside the calling task, so the aggregate never crosses a task boundary.
 private func saveNewQuote(id: String, to repository: QuotingRepository<QuotingCoordinator>) async throws {
     try await repository.save(aggregateRoot: try Quoting(id: id, line: "desk"))
@@ -367,6 +391,15 @@ private func expectOperationNotAllow(
         #expect(refused?.reason == reason, sourceLocation: sourceLocation)
     }
     return refused
+}
+
+/// Whether `error` is the `EncodingError` a default `JSONEncoder` throws for a NaN or
+/// infinite `Double`.
+private func isNonFiniteEncodingError(_ error: (any Error)?) -> Bool {
+    guard case let .invalidValue(value, _) = error as? EncodingError, let double = value as? Double else {
+        return false
+    }
+    return !double.isFinite
 }
 
 /// Checks that `error` is what `withUnitOfWork` throws for a failed scope, and returns the
@@ -1168,6 +1201,117 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
             try await quotes.save(aggregateRoot: quote)
         }
         #expect(try await storedRecords(store, quoteStream).map(\.customMetadata) == [Data(#""web""#.utf8)])
+    }
+
+    @Test(
+        "metadata with a NaN or infinite Double → EncodingError from save, inside a scope (which it fails) and outside one; nothing is written",
+        arguments: [Double.nan, .infinity, -.infinity]
+    )
+    func nonFiniteMetadataThrowsEncodingErrorInAndOutOfScope(ratio: Double) async throws {
+        let store = InMemoryEventStoreClient()
+        let quotes = QuotingRepository(
+            store: KurrentStorageCoordinator<QuotingStream, RatioMetadata>(client: store, eventMapper: QuotingEventMapper())
+        )
+        let metadata = RatioMetadata(ratio: ratio)
+
+        let error = await thrownError {
+            try await withUnitOfWork { work in
+                let saveError = await thrownError {
+                    try await EventMetadataContext<RatioMetadata>.withValue(metadata) {
+                        try await quotes.save(aggregateRoot: try Quoting(id: "q-1", line: "desk"))
+                    }
+                }
+                #expect(isNonFiniteEncodingError(saveError), "got \(String(describing: saveError))")
+                #expect(work.isFailed)
+            }
+        }
+        #expect(isNonFiniteEncodingError(failedScopeCause(error)))
+
+        let outsideError = await thrownError {
+            try await EventMetadataContext<RatioMetadata>.withValue(metadata) {
+                try await quotes.save(aggregateRoot: try Quoting(id: "q-1", line: "desk"))
+            }
+        }
+        #expect(isNonFiniteEncodingError(outsideError), "got \(String(describing: outsideError))")
+        await expectNotWritten(store, quoteStream)
+    }
+
+    @Test("metadata with an integer beyond 64 bits saved to two streams in one scope: no error; the client gets the exact bytes, and EventRecord(eventData:), which AppendRecords sends, holds the nearest Double")
+    func integerBeyond64BitsInMetadataIsAcceptedAndRounded() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let quotes = QuotingRepository(
+            store: KurrentStorageCoordinator<QuotingStream, AmountMetadata>(client: client, eventMapper: QuotingEventMapper())
+        )
+        let bills = BillingRepository(
+            store: KurrentStorageCoordinator<BillingStream, AmountMetadata>(client: client, eventMapper: BillingEventMapper())
+        )
+        let digits = "123456789012345678901234567890"
+        let metadata = AmountMetadata(amount: try #require(Decimal(string: digits)))
+        let exactBytes = Data(#"{"amount":\#(digits)}"#.utf8)
+        let nearestDouble = try #require(Double(digits))
+
+        try await withUnitOfWork { work in
+            try await EventMetadataContext<AmountMetadata>.withValue(metadata) {
+                try await quotes.save(aggregateRoot: try Quoting(id: "q-1", line: "desk"))
+                try await bills.save(aggregateRoot: try Billing(id: "b-1", amount: 100))
+            }
+            let backend = try #require(work.existingBackend(KurrentUnitOfWorkBackend.self, identity: client.identity))
+            for stream in [quoteStream, billStream] {
+                let staged = try #require(try backend.stagedEvents(stream: stream)).events
+                #expect(staged.map(\.customMetadata) == [exactBytes])
+                let record = try EventRecord(eventData: staged[0])
+                let amount = record.properties["amount"] as? Double
+                #expect(amount == nearestDouble)
+                #expect(amount.map { Decimal($0) } != metadata.amount)
+            }
+        }
+
+        #expect(client.appendAtomicallyCount == 1)
+        #expect(try await storedRecords(store, quoteStream).map(\.customMetadata) == [exactBytes])
+        #expect(try await storedRecords(store, billStream).map(\.customMetadata) == [exactBytes])
+    }
+
+    // MARK: unencodable payload
+
+    @Test(
+        "a payload JSONEncoder cannot encode → its own EncodingError at save inside a scope, with or without metadata; nothing is staged, the scope fails and nothing is written",
+        arguments: [false, true]
+    )
+    func unencodablePayloadInsideScopeThrowsAtSaveAsItself(withMetadata: Bool) async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let quotes = quotingRepository(client)
+        let bills = billingRepository(client)
+        let quote = try Quoting(id: "q-1", line: "desk")
+        try quote.rate(.nan)
+
+        let error = await thrownError {
+            try await withUnitOfWork { work in
+                try await saveNewInvoice(id: "b-1", to: bills)
+                let saveError = await thrownError {
+                    if withMetadata {
+                        try await EventMetadataContext<AuditMetadata>.withValue(AuditMetadata(operatorId: "alice")) {
+                            try await quotes.save(aggregateRoot: quote)
+                        }
+                    } else {
+                        try await quotes.save(aggregateRoot: quote)
+                    }
+                }
+                #expect(isNonFiniteEncodingError(saveError), "got \(String(describing: saveError))")
+                #expect(work.isFailed)
+                let backend = try #require(work.existingBackend(KurrentUnitOfWorkBackend.self, identity: client.identity))
+                #expect(try backend.stagedEvents(stream: quoteStream) == nil)
+            }
+        }
+
+        #expect(isNonFiniteEncodingError(failedScopeCause(error)), "got \(String(describing: error))")
+        #expect(client.appendCount == 0)
+        #expect(client.appendAtomicallyCount == 0)
+        await expectNotWritten(store, quoteStream)
+        await expectNotWritten(store, billStream)
+        #expect(quote.version == nil)
+        #expect(quote.events.count == 2)
     }
 
     // MARK: expected version beyond Int64
