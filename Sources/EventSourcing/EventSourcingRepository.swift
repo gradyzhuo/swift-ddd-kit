@@ -17,7 +17,10 @@ extension EventSourcingRepository {
 
     public func find(byId id: AggregateRootType.ID, hiddingDeleted: Bool) async throws -> AggregateRootType? {
 
-        guard let fetchEventsResult = try await store.fetchEvents(byId: id) else {
+        let fetched = try await UnitOfWork.failingCurrentOnError {
+            try await store.fetchEvents(byId: id)
+        }
+        guard let fetchEventsResult = fetched else {
             return nil
         }
 
@@ -49,14 +52,21 @@ extension EventSourcingRepository {
     }
 
     public func save(aggregateRoot: AggregateRootType) async throws {
+        // Before the early return: inside a scope, a store that cannot take part fails
+        // even when there is nothing to save.
+        try await UnitOfWork.failingCurrentOnError {
+            try requireUnitOfWorkParticipantInsideScope(operation: "save")
+        }
         guard !aggregateRoot.events.isEmpty else { return }
         let metadata = EventMetadataContext<Store.Metadata>.current
-        let latestRevision: UInt64? = try await store.append(
-            events: aggregateRoot.events,
-            byId: aggregateRoot.id,
-            version: aggregateRoot.version,
-            metadata: metadata
-        )
+        let latestRevision: UInt64? = try await UnitOfWork.failingCurrentOnError {
+            try await store.append(
+                events: aggregateRoot.events,
+                byId: aggregateRoot.id,
+                version: aggregateRoot.version,
+                metadata: metadata
+            )
+        }
         if let latestRevision {
             aggregateRoot.update(version: latestRevision)
         }
@@ -74,6 +84,19 @@ extension EventSourcingRepository {
 
     /// 危険操作!! 完全移除，不可恢復。該 id 之後永遠無法再寫入，不論先前是否存在。
     public func purge(byId id: AggregateRootType.ID) async throws {
-        try await store.purge(byId: id)
+        try await UnitOfWork.failingCurrentOnError {
+            try requireUnitOfWorkParticipantInsideScope(operation: "purge")
+            try await store.purge(byId: id)
+        }
+    }
+
+    /// Inside a unit of work, throws for a store that would write directly instead of
+    /// handing its writes to the scope. Outside a scope it does nothing.
+    private func requireUnitOfWorkParticipantInsideScope(operation: String) throws {
+        guard UnitOfWork.current != nil, !(store is any UnitOfWorkParticipant) else { return }
+        throw DDDError.operationNotAllow(
+            operation: operation,
+            reason: "\(Store.self) cannot take part in a unit of work"
+        )
     }
 }
