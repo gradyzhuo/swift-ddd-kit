@@ -642,6 +642,68 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         #expect(bill.events.isEmpty)
     }
 
+    // MARK: consecutive scopes
+
+    @Test("consecutive scopes through the same coordinators each stage into a backend of their own: after a failed scope and after a committed one, a scope commits exactly its own events")
+    func consecutiveScopesEachCommitTheirOwnEvents() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let quotes = quotingRepository(client)
+        let bills = billingRepository(client)
+
+        // Block 1 stages q-1 and then fails, so its backend is discarded without a commit.
+        let error = await thrownError {
+            try await withUnitOfWork { _ in
+                try await quotes.save(aggregateRoot: try Quoting(id: "q-1", line: "abandoned"))
+                throw BodyFailure.thrown
+            }
+        }
+        #expect(error as? BodyFailure == .thrown)
+        #expect(client.appendCount == 0)
+        #expect(client.appendAtomicallyCount == 0)
+        await expectNotWritten(store, quoteStream)
+
+        // Block 2, through the same coordinators, stages q-1 and b-1 afresh and commits them.
+        let quote = try Quoting(id: "q-1", line: "desk")
+        let bill = try Billing(id: "b-1", amount: 100)
+        let quoteIds = quote.events.map { $0.id }
+        let billIds = bill.events.map { $0.id }
+        try await withUnitOfWork { _ in
+            try await quotes.save(aggregateRoot: quote)
+            try await bills.save(aggregateRoot: bill)
+        }
+
+        #expect(client.appendAtomicallyCount == 1)
+        #expect(client.appendAtomicallyStreams == [[quoteStream, billStream]])
+        #expect(client.appendCount == 0)
+        let quoteRecords = try await storedRecords(store, quoteStream)
+        #expect(quoteRecords.map(\.revision) == [0])
+        #expect(quoteRecords.map(\.id) == quoteIds)
+        let billRecords = try await storedRecords(store, billStream)
+        #expect(billRecords.map(\.revision) == [0])
+        #expect(billRecords.map(\.id) == billIds)
+        #expect(quote.version == 0)
+        #expect(bill.version == 0)
+
+        // Block 3, after a committed scope, reads block 2's commit and commits on top of it.
+        try await withUnitOfWork { _ in
+            let found = try #require(try await quotes.find(byId: "q-1"))
+            #expect(found.lines == ["desk"])
+            #expect(found.version == 0)
+            try found.addLine("chair")
+            try await quotes.save(aggregateRoot: found)
+            try await saveNewInvoice(id: "b-2", to: bills)
+        }
+
+        #expect(client.appendAtomicallyStreams == [[quoteStream, billStream], [quoteStream, "Billing-b-2"]])
+        #expect(client.appendCount == 0)
+        #expect(try await storedRevisions(store, quoteStream) == [0, 1])
+        #expect(try await storedRevisions(store, billStream) == [0])
+        #expect(try await storedRevisions(store, "Billing-b-2") == [0])
+        let committed = try #require(try await quotes.find(byId: "q-1"))
+        #expect(committed.lines == ["desk", "chair"])
+    }
+
     // MARK: refused inside a scope
 
     @Test("purge inside a scope → operationNotAllow; the stream is left as it was")
