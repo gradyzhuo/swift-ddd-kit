@@ -132,7 +132,7 @@ usecase 要在作用域內外都能用的寫法：`if let work = UnitOfWork.curr
 - 不在區塊內 `do/catch` usecase 的錯誤。要讓區塊回一個正常的失敗 Output，用 `work.fail(error)` 再 return。真正會出事的只有「usecase 先 save 再丟錯、然後被 catch」；框架能看到的錯（經過 repository 的）會自動 `fail`（§6.2），看不到的就靠這條規則。
 - 不在區塊內用 `Task { … }` 把 `save` 丟到背景。非 detached 的 `Task` 會繼承作用域；它若在區塊結束後才跑到 `save`，會撞到已關閉的作用域而丟 `operationNotAllow`（§6.2），不會靜默寫入、也不會進一個已 commit 的批次。要在作用域內做的事都 await 完再返回。
 - usecase 在 `save` 之後直接 `EventBus.publish` 的，在作用域內會在 commit 前就發佈。要在作用域內外都正確，改成 `if let work = UnitOfWork.current { try work.onCommitted { … } } else { … 立刻做 }`；migration 文件要列。
-- 同一作用域內用 `async let` / `TaskGroup` 並行跑**不同** aggregate 的 usecase 可以；並行動同一個 aggregate 不支援，第二個 `save` 會確定性地丟 `commitConflict`（§6.3）。
+- 同一作用域內用 `async let` / `TaskGroup` 並行跑**不同** aggregate 的 usecase 可以；並行動同一個 aggregate 不支援：兩個 task 都在任一方 `save` 之前 `find` 到它時，第二個 `save` 丟 `commitConflict`（§6.3）；其他交錯下結果取決於排程（rev 8 實作補註，2026-11-04）。
 
 不提供：提前 `commit()` / `rollback()`（與「區塊結束才決定」衝突）、跳出作用域直接寫的逃生口（混用問題會回來）、暫存內容的查詢（測試從 client 斷言）。`withUnitOfWork` 目前沒有其他參數；要加時放在 trailing closure 前面並給預設值。
 

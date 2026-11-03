@@ -361,7 +361,7 @@
       "mechanical": false,
       "scope": "do/catch inside the block",
       "before": "do { try await usecase.execute(input: i) } catch { return .failed(error) }   // inside the block",
-      "after": "try work.fail(error); return .failed(error)   // or let the error leave the block",
+      "after": "do { try await usecase.execute(input: i) } catch { try work.fail(error); return .failed(error) }   // or let the error leave the block",
       "action": "Do not catch a usecase's error inside the block. To return a normal failure output, call try work.fail(error) and return."
     },
     {
