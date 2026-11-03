@@ -5,6 +5,7 @@ import DDDCore
 import EventSourcing
 import KurrentSupport
 import KurrentSupportInMemory
+import Synchronization
 
 // `KurrentStorageCoordinator` inside `withUnitOfWork`: appends are staged in the scope's
 // backend and committed when the block ends, reads merge the staged events after the
@@ -197,6 +198,28 @@ private struct BillingEventMapper: EventTypeMapper {
     }
 }
 
+/// Maps like `QuotingEventMapper` and records the stream name, id and revision of every
+/// record it is handed.
+private final class RecordingQuotingMapper: EventTypeMapper {
+    struct Seen: Equatable, Sendable {
+        let streamName: String
+        let id: UUID
+        let revision: UInt64
+    }
+
+    private let records = Mutex<[Seen]>([])
+
+    /// The records handed to `mapping(eventData:)`, in order.
+    var seen: [Seen] { records.withLock { $0 } }
+
+    func mapping(eventData: any RecordedEventLike) throws -> (any DomainEvent)? {
+        records.withLock {
+            $0.append(Seen(streamName: eventData.streamName, id: eventData.id, revision: eventData.revision))
+        }
+        return try QuotingEventMapper().mapping(eventData: eventData)
+    }
+}
+
 private struct QuotingRepository<Store: EventStore>: EventSourcingRepository {
     typealias AggregateRootType = Quoting
     let store: Store
@@ -273,10 +296,31 @@ private enum BodyFailure: Error {
     case thrown
 }
 
+/// Counts how often a hook ran.
+private final class RunCount: Sendable {
+    private let count = Mutex(0)
+
+    var value: Int { count.withLock { $0 } }
+
+    func increment() {
+        count.withLock { $0 += 1 }
+    }
+}
+
+/// The `KurrentError` swift-kurrentdb throws before sending a call the server lacks.
+private let appendRecordsUnsupported = KurrentError.unsupportedFeature(
+    .init(fullyQualifiedService: "kurrentdb.protocol.v2.streams.StreamsService", method: "AppendSession")
+)
+
 // MARK: - Helpers
 
 private let quoteStream = "Quoting-q-1"
 private let billStream = "Billing-b-1"
+
+/// The warning a read logs when the server has no `stream` and nothing is staged for it.
+private func streamNotFoundWarning(_ stream: String) -> LogRecorder.Entry {
+    .init(level: .warning, message: "Skip an error happened, stream not found: \(stream)")
+}
 
 private func storedRecords(_ client: InMemoryEventStoreClient, _ stream: String) async throws -> [any RecordedEventLike] {
     try await client.readStream(name: stream, from: .start, resolveLinks: true)
@@ -385,6 +429,28 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         #expect(client.appendCount == 1)
         #expect(client.appendAtomicallyCount == 0)
         #expect(try await storedRevisions(store, quoteStream) == [0])
+    }
+
+    @Test("the commit returns revisions other than predicted: only logged, so the block returns normally and an onCommitted hook runs")
+    func revisionMismatchIsLoggedAndHooksStillRun() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store, revisionOffset: 10)
+        let quotes = quotingRepository(client)
+        let bills = billingRepository(client)
+        let hookRuns = RunCount()
+
+        let output = try await withUnitOfWork { work in
+            try await saveNewQuote(id: "q-1", to: quotes)
+            try await saveNewInvoice(id: "b-1", to: bills)
+            try work.onCommitted { hookRuns.increment() }
+            return "returned"
+        }
+
+        #expect(output == "returned")
+        #expect(hookRuns.value == 1)
+        #expect(client.appendAtomicallyStreams == [[quoteStream, billStream]])
+        #expect(try await storedRevisions(store, quoteStream) == [0])
+        #expect(try await storedRevisions(store, billStream) == [0])
     }
 
     // MARK: reads inside a scope
@@ -511,6 +577,152 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         }
     }
 
+    @Test("the mapper gets each staged event as a record carrying the stream name, the event's id and its predicted revision")
+    func stagedRecordsCarryStreamNameIdAndRevision() async throws {
+        let store = InMemoryEventStoreClient()
+        let mapper = RecordingQuotingMapper()
+        let quotes = QuotingRepository(store: QuotingCoordinator(client: store, eventMapper: mapper))
+
+        try await withUnitOfWork { _ in
+            let quote = try Quoting(id: "q-1", line: "desk")
+            try quote.addLine("chair")
+            let stagedIds = quote.events.map { $0.id }
+            try await quotes.save(aggregateRoot: quote)
+
+            _ = try #require(try await quotes.store.fetchEvents(byId: "q-1"))
+            #expect(mapper.seen == [
+                .init(streamName: quoteStream, id: stagedIds[0], revision: 0),
+                .init(streamName: quoteStream, id: stagedIds[1], revision: 1),
+            ])
+        }
+    }
+
+    // MARK: reads leave the scope as they found it
+
+    @Test("a find through one client, then a save through another client only: the scope commits through the second")
+    func readThroughOtherClientThenWriteThroughOneClientCommits() async throws {
+        let quoteStore = InMemoryEventStoreClient()
+        let billStore = InMemoryEventStoreClient()
+        try await quotingRepository(quoteStore).save(aggregateRoot: try Quoting(id: "q-1", line: "desk"))
+        let quoteClient = CountingClient(wrapping: quoteStore)
+        let billClient = CountingClient(wrapping: billStore)
+        let quotes = quotingRepository(quoteClient)
+        let bills = billingRepository(billClient)
+
+        try await withUnitOfWork { work in
+            let found = try #require(try await quotes.find(byId: "q-1"))
+            #expect(found.lines == ["desk"])
+            try await saveNewInvoice(id: "b-1", to: bills)
+            #expect(!work.isFailed)
+        }
+
+        #expect(try await storedRevisions(billStore, billStream) == [0])
+        #expect(billClient.appendCount == 1)
+        #expect(quoteClient.appendCount == 0)
+        #expect(quoteClient.appendAtomicallyCount == 0)
+        #expect(try await storedRevisions(quoteStore, quoteStream) == [0])
+    }
+
+    @Test("a find through another client than the scope's backend reads the server and leaves the scope intact")
+    func findThroughOtherClientInsideScopeDoesNotFailTheScope() async throws {
+        let quoteStore = InMemoryEventStoreClient()
+        let billStore = InMemoryEventStoreClient()
+        try await quotingRepository(quoteStore).save(aggregateRoot: try Quoting(id: "q-1", line: "desk"))
+        let quoteClient = CountingClient(wrapping: quoteStore)
+        let billClient = CountingClient(wrapping: billStore)
+        let quotes = quotingRepository(quoteClient)
+        let bills = billingRepository(billClient)
+
+        try await withUnitOfWork { work in
+            // The save binds the scope's backend to the bills' client.
+            try await saveNewInvoice(id: "b-1", to: bills)
+            let found = try #require(try await quotes.find(byId: "q-1"))
+            #expect(found.lines == ["desk"])
+            #expect(found.version == 0)
+            let afterFirst = try #require(try await quotes.store.fetchEvents(byId: "q-1", afterRevision: 0))
+            #expect(afterFirst.events.isEmpty)
+            #expect(afterFirst.latestRevision == 0)
+            #expect(!work.isFailed)
+        }
+
+        #expect(try await storedRevisions(billStore, billStream) == [0])
+        #expect(billClient.appendCount == 1)
+        #expect(quoteClient.appendCount == 0)
+        #expect(quoteClient.appendAtomicallyCount == 0)
+    }
+
+    @Test("a scope that only reads creates no backend, and the client gets no write")
+    func findWithoutAnySaveCreatesNoBackend() async throws {
+        let store = InMemoryEventStoreClient()
+        try await quotingRepository(store).save(aggregateRoot: try Quoting(id: "q-1", line: "desk"))
+        let client = CountingClient(wrapping: store)
+        let quotes = quotingRepository(client)
+
+        try await withUnitOfWork { work in
+            let found = try #require(try await quotes.find(byId: "q-1"))
+            #expect(found.lines == ["desk"])
+            #expect(try await quotes.find(byId: "q-2") == nil)
+            let afterFirst = try #require(try await quotes.store.fetchEvents(byId: "q-1", afterRevision: 0))
+            #expect(afterFirst.events.isEmpty)
+            #expect(work.existingBackend(KurrentUnitOfWorkBackend.self, identity: client.identity) == nil)
+        }
+
+        #expect(client.appendCount == 0)
+        #expect(client.appendAtomicallyCount == 0)
+    }
+
+    @Test("a Task started in the block that finds after the scope committed reads the committed state from the server")
+    func escapedTaskFindAfterScopeEndReadsTheServer() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let quotes = quotingRepository(client)
+        let (scopeEnded, endScope) = AsyncStream.makeStream(of: Void.self)
+        var escaped: Task<(lines: [String], version: UInt64?)?, any Error>?
+
+        try await withUnitOfWork { _ in
+            try await saveNewQuote(id: "q-1", to: quotes)
+            escaped = Task {
+                for await _ in scopeEnded { break }
+                return try await quotes.find(byId: "q-1").map { (lines: $0.lines, version: $0.version) }
+            }
+        }
+        // `withUnitOfWork` has committed q-1; only now does the escaped task find it.
+        endScope.yield()
+        endScope.finish()
+        let task = try #require(escaped)
+        let found = try #require(try await task.value)
+
+        #expect(found.lines == ["desk"])
+        #expect(found.version == 0)
+        #expect(client.appendCount == 1)
+        #expect(try await storedRevisions(store, quoteStream) == [0])
+    }
+
+    @Test("a read of a stream that so far exists only as staged events logs no stream-not-found warning; with nothing staged it still does")
+    func stagedOnlyStreamLogsNoStreamNotFoundWarning() async throws {
+        let store = InMemoryEventStoreClient()
+        let recorder = LogRecorder()
+        let quotes = QuotingRepository(
+            store: QuotingCoordinator(client: store, eventMapper: QuotingEventMapper(), logger: recorder.logger)
+        )
+
+        try await withUnitOfWork { _ in
+            try await saveNewQuote(id: "q-1", to: quotes)
+            let found = try #require(try await quotes.find(byId: "q-1"))
+            #expect(found.lines == ["desk"])
+            let afterFirst = try #require(try await quotes.store.fetchEvents(byId: "q-1", afterRevision: 0))
+            #expect(afterFirst.events.isEmpty)
+            #expect(recorder.warnings == [])
+
+            // Nothing is staged for q-2, so the read warns as it does outside a scope.
+            #expect(try await quotes.find(byId: "q-2") == nil)
+            #expect(recorder.warnings == [streamNotFoundWarning("Quoting-q-2")])
+        }
+
+        #expect(try await quotes.find(byId: "q-3") == nil)
+        #expect(recorder.warnings == [streamNotFoundWarning("Quoting-q-2"), streamNotFoundWarning("Quoting-q-3")])
+    }
+
     // MARK: commit failures
 
     @Test("a stream someone else wrote first → commitConflict naming it; neither stream is written; the aggregates are not rolled back")
@@ -610,6 +822,30 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
             }
         }
 
+        await expectNotWritten(store, quoteStream)
+        await expectNotWritten(store, billStream)
+    }
+
+    @Test("a server without AppendRecords: two streams → withUnitOfWork throws operationNotAllow(commit), nothing is written and no hook runs")
+    func unsupportedFeatureBecomesOperationNotAllow() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store, errorToThrow: appendRecordsUnsupported)
+        let quotes = quotingRepository(client)
+        let bills = billingRepository(client)
+        let hookRuns = RunCount()
+
+        let error = await thrownError {
+            try await withUnitOfWork { work in
+                try await saveNewQuote(id: "q-1", to: quotes)
+                try await saveNewInvoice(id: "b-1", to: bills)
+                try work.onCommitted { hookRuns.increment() }
+            }
+        }
+
+        expectOperationNotAllow(error, operation: "commit", reason: "server does not support AppendRecords (KurrentDB 26.1+)")
+        #expect(client.appendAtomicallyCount == 1)
+        #expect(client.appendCount == 0)
+        #expect(hookRuns.value == 0)
         await expectNotWritten(store, quoteStream)
         await expectNotWritten(store, billStream)
     }
@@ -854,6 +1090,9 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
                 }
                 let refused = expectOperationNotAllow(saveError, operation: "save")
                 #expect(refused?.reason?.hasPrefix("Metadata cannot be carried by AppendRecords: ") == true)
+                // The check runs before staging, so the refused save staged nothing to read back.
+                let readBack = try await quotes.find(byId: "q-1")
+                #expect(readBack == nil)
             }
         }
 

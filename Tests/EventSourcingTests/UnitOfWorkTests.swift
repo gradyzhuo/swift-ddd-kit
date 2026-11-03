@@ -36,6 +36,14 @@ private final class OtherBackend: UnitOfWorkBackend {
     func commit() async throws {}
 }
 
+/// A backend type with a subclass, to check that lookups want exactly the type asked for.
+/// Stateless, so `@unchecked Sendable` is safe.
+private class BaseBackend: UnitOfWorkBackend, @unchecked Sendable {
+    func commit() async throws {}
+}
+
+private final class DerivedBackend: BaseBackend, @unchecked Sendable {}
+
 /// Thread-safe append-only log the hooks and escaped tasks write into.
 private final class Recorder<Value: Sendable>: Sendable {
     private let values = Mutex<[Value]>([])
@@ -289,6 +297,74 @@ struct UnitOfWorkTests {
             #expect(a === b)
         }
         #expect(makes.all.count == 1)
+    }
+
+    @Test("existingBackend never creates a backend: nil in a fresh scope, and a later backend call for another identity still succeeds")
+    func existingBackendNeverCreates() async throws {
+        let registered = RecordingBackend()
+        try await withUnitOfWork { work in
+            #expect(work.existingBackend(RecordingBackend.self, identity: clientA) == nil)
+            #expect(work.existingBackend(RecordingBackend.self, identity: clientA) == nil)
+            // The lookups pinned nothing to clientA, so the scope's backend may be clientB's.
+            let pinned = try register(registered, in: work, identity: clientB)
+            #expect(pinned === registered)
+            #expect(!work.isFailed)
+        }
+        #expect(registered.commitCount == 1)
+    }
+
+    @Test("existingBackend returns the backend registered for the same type and identity")
+    func existingBackendReturnsTheRegisteredOne() async throws {
+        let registered = RecordingBackend()
+        try await withUnitOfWork { work in
+            try register(registered, in: work)
+            #expect(work.existingBackend(RecordingBackend.self, identity: clientA) === registered)
+        }
+        #expect(registered.commitCount == 1)
+    }
+
+    @Test("existingBackend is nil for another type or identity, and leaves the scope and its backend as they were")
+    func existingBackendIsNilForOtherTypeOrIdentity() async throws {
+        let registered = RecordingBackend()
+        try await withUnitOfWork { work in
+            try register(registered, in: work)
+            #expect(work.existingBackend(OtherBackend.self, identity: clientA) == nil)
+            #expect(work.existingBackend(RecordingBackend.self, identity: clientB) == nil)
+            #expect(!work.isFailed)
+            #expect(work.existingBackend(RecordingBackend.self, identity: clientA) === registered)
+        }
+        #expect(registered.commitCount == 1)
+
+        // A subclass of the type asked for is another type too.
+        try await withUnitOfWork { work in
+            let derived = try work.backend(DerivedBackend.self, identity: clientA) { DerivedBackend() }
+            #expect(work.existingBackend(BaseBackend.self, identity: clientA) == nil)
+            #expect(work.existingBackend(DerivedBackend.self, identity: clientA) === derived)
+        }
+    }
+
+    @Test(
+        "existingBackend is nil, without throwing, in an escaped task once the scope ended, however it ended",
+        arguments: ScopeEnding.allCases
+    )
+    func existingBackendIsNilOnceEnded(ending: ScopeEnding) async throws {
+        let backend = makeBackend(endingAs: ending)
+        let (scopeEnded, endScope) = AsyncStream.makeStream(of: Void.self)
+        var escaped: Task<RecordingBackend?, Never>?
+        let error = await runScope(endingAs: ending) { work in
+            try register(backend, in: work)
+            #expect(work.existingBackend(RecordingBackend.self, identity: clientA) === backend)
+            escaped = Task {
+                for await _ in scopeEnded { break }
+                return work.existingBackend(RecordingBackend.self, identity: clientA)
+            }
+        }
+        // `withUnitOfWork` has returned or thrown; only now does the escaped task look.
+        expectError(error, endingAs: ending)
+        let task = try #require(escaped)
+        endScope.yield()
+        endScope.finish()
+        #expect(await task.value == nil)
     }
 
     @Test("Hooks run in registration order, after the commit, before withUnitOfWork returns")
