@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>swift-ddd-kit 1.4 → 1.5 Migration Guide</title>
+<meta name="description" content="Migration guide for projects depending on swift-ddd-kit, upgrading from 1.4 to 1.5 — withUnitOfWork, the new EventStoreClient requirements, and the swift-kurrentdb 2.6.1 floor.">
+<meta name="x-migration-target" content="swift-ddd-kit">
+<meta name="x-migration-from" content="1.4">
+<meta name="x-migration-to" content="1.5">
+<meta name="x-document-kind" content="migration-guide">
+<meta name="x-audience" content="human,ai-agent">
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --ink:#e6e8ee; --muted:#9aa3b2;
+    --line:#2a2f3a; --accent:#5aa9ff; --accent2:#7c5cff;
+    --add:#3fb950; --addbg:#10331c; --del:#f85149; --delbg:#3a1416;
+    --warn:#e3b341; --warnbg:#3a2f12; --ok:#3fb950;
+    --code:#11141a; --kw:#ff7b9c; --str:#9ece6a; --typ:#7dcfff; --com:#5c6370;
+    --chip:#262b36;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans TC",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 22px 120px}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code,pre,.mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  h1{font-size:30px;margin:0 0 6px;letter-spacing:-.01em}
+  h2{font-size:22px;margin:48px 0 14px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:17px;margin:26px 0 10px}
+  p{margin:10px 0}
+  .sub{color:var(--muted);font-size:15px;margin:0 0 18px}
+  .badges{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 8px}
+  .badge{background:var(--chip);border:1px solid var(--line);border-radius:999px;
+    padding:3px 11px;font-size:12px;color:var(--muted)}
+  .badge.v{color:var(--accent);border-color:#2b4a6e}
+  .badge.brk{color:var(--del);border-color:#5a2222}
+  .hero{background:linear-gradient(135deg,#171a21,#1b1830);
+    border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:18px 0 8px}
+  .hero .ver{font-size:13px;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+  .arrowline{display:flex;align-items:center;gap:14px;margin:8px 0 4px;flex-wrap:wrap}
+  .vchip{font:600 20px/1 "SF Mono",monospace;padding:8px 14px;border-radius:9px}
+  .vchip.old{background:var(--delbg);color:#ff9b95;border:1px solid #5a2222}
+  .vchip.new{background:var(--addbg);color:#79e08a;border:1px solid #1d5a2e}
+  .vchip .t{font-size:11px;display:block;color:var(--muted);font-weight:400;margin-bottom:2px}
+  .arrow{font-size:24px;color:var(--accent2)}
+
+  nav.toc{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:14px 18px;margin:22px 0}
+  nav.toc b{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  nav.toc ol{margin:8px 0 0;padding-left:20px;columns:2;column-gap:28px}
+  nav.toc li{margin:3px 0}
+
+  section{margin-top:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;margin:14px 0}
+  .card.tight{padding:12px 16px}
+
+  .tag{display:inline-block;font:600 11px/1 "SF Mono",monospace;padding:4px 8px;
+    border-radius:6px;letter-spacing:.03em;text-transform:uppercase;vertical-align:middle}
+  .tag.rename{background:#1b2c44;color:#7db8ff}
+  .tag.sig{background:#3a2f12;color:var(--warn)}
+  .tag.removed{background:var(--delbg);color:#ff9b95}
+  .tag.new{background:var(--addbg);color:#79e08a}
+  .tag.same{background:#23262e;color:var(--muted)}
+  .tag.auto{background:#16302a;color:#5fd6a8}
+  .tag.manual{background:#3a2412;color:#e0a060}
+
+  .chgid{font:600 12px/1 "SF Mono",monospace;color:var(--accent2);
+    background:#211d33;border:1px solid #352c52;border-radius:6px;padding:4px 8px}
+
+  pre{background:var(--code);border:1px solid var(--line);border-radius:9px;
+    padding:13px 15px;overflow-x:auto;font-size:13px;line-height:1.55;margin:8px 0}
+  pre.diff .a{display:block;background:var(--delbg);color:#ffb3ae;margin:0 -15px;padding:0 15px}
+  pre.diff .d{display:block;background:var(--addbg);color:#9ff0a8;margin:0 -15px;padding:0 15px}
+  pre.diff .x{display:block;color:var(--muted)}
+  .cmt{color:var(--com)}
+  .kw{color:var(--kw)} .ty{color:var(--typ)} .st{color:var(--str)}
+
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:10px 0}
+  @media(max-width:720px){.ba{grid-template-columns:1fr}}
+  .ba .col h4{margin:0 0 5px;font:600 12px/1 "SF Mono",monospace;letter-spacing:.04em}
+  .ba .before h4{color:#ff9b95} .ba .after h4{color:#79e08a}
+  .ba pre{margin:0;height:100%}
+
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px}
+  th,td{border:1px solid var(--line);padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:var(--panel2);font-size:12px;letter-spacing:.03em;color:var(--muted);
+    text-transform:uppercase}
+  td code{background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px;font-size:12.5px}
+  tr:nth-child(even) td{background:#14171e}
+
+  .callout{border-left:3px solid var(--accent);background:var(--panel2);
+    border-radius:0 9px 9px 0;padding:11px 15px;margin:12px 0}
+  .callout.warn{border-color:var(--warn);background:var(--warnbg)}
+  .callout.danger{border-color:var(--del);background:#2a1416}
+  .callout.ok{border-color:var(--ok);background:#10261a}
+  .callout b{display:block;margin-bottom:3px}
+
+
+  .steps{counter-reset:s;list-style:none;padding:0;margin:14px 0}
+  .steps li{position:relative;padding:12px 14px 12px 50px;background:var(--panel);
+    border:1px solid var(--line);border-radius:10px;margin:9px 0}
+  .steps li::before{counter-increment:s;content:counter(s);position:absolute;
+    left:12px;top:12px;width:26px;height:26px;border-radius:50%;
+    background:var(--accent2);color:#fff;font:700 13px/26px monospace;text-align:center}
+  .steps li b{color:var(--ink)}
+  .steps code{background:#11141a;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+
+  .ai{background:linear-gradient(135deg,#141826,#1a1530);
+    border:1px solid #352c52;border-radius:14px;padding:18px 20px;margin:16px 0}
+  .ai h2{border:0;margin:0 0 4px;color:#b8a8ff}
+  .ai .lead{color:var(--muted);font-size:13.5px;margin:0 0 12px}
+  .ai pre{background:#0c0e15;border-color:#2a2440;max-height:none}
+
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0;font-size:12.5px;color:var(--muted)}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .dot{width:11px;height:11px;border-radius:3px;display:inline-block}
+
+  footer{margin-top:60px;padding-top:18px;border-top:1px solid var(--line);
+    color:var(--muted);font-size:12.5px}
+  .kicker{font:600 12px/1 "SF Mono",monospace;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--accent2);margin:0 0 4px}
+  details{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:10px 14px;margin:10px 0}
+  summary{cursor:pointer;font-weight:600}
+  .hl{color:var(--warn)}
+  ul.tite{margin:8px 0;padding-left:20px}
+  ul.tite li{margin:4px 0}
+
+  .sitenav{position:sticky;top:0;z-index:50;background:rgba(15,17,21,.92);
+    backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .sn-inner{max-width:1080px;margin:0 auto;padding:10px 22px;display:flex;
+    align-items:center;gap:18px;flex-wrap:wrap}
+  .sn-brand{font:700 15px/1 "SF Mono",monospace;color:var(--ink)}
+  .sn-links{display:flex;gap:16px;flex-wrap:wrap;font-size:13.5px;margin-left:auto}
+  .sn-links a{color:var(--muted)}
+  .sn-links a:hover,.sn-links a.active{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+
+<nav class="sitenav"><div class="sn-inner">
+  <a class="sn-brand" href="../index.html">swift-ddd-kit</a>
+  <div class="sn-links">
+    <a href="../index.html">Home</a>
+    <a href="../index.html#whats-new">What's new</a>
+    <a href="./swift-ddd-kit-0.x-to-1.0.html">Migration 0.x→1.0</a>
+    <a href="./swift-ddd-kit-1.3-to-1.4.html">Migration 1.3→1.4</a>
+    <a href="./swift-ddd-kit-1.4-to-1.5.html" class="active">Migration 1.4→1.5</a>
+    <a href="https://github.com/gradyzhuo/swift-ddd-kit">GitHub ↗</a>
+  </div>
+</div></nav>
+
+<div class="wrap">
+
+  <p class="kicker">Framework Migration Guide</p>
+  <h1>swift-ddd-kit &nbsp;1.4 → 1.5</h1>
+  <p class="sub"><code>withUnitOfWork</code>: one atomic write across usecases and aggregates — an upgrade guide for projects that depend on swift-ddd-kit</p>
+
+  <div class="badges">
+    <span class="badge v">target: swift-ddd-kit</span>
+    <span class="badge">Swift 6.1+ / Ubuntu / macOS 15+ / iOS 18+</span>
+    <span class="badge brk">⚠ source-breaking for custom EventStoreClient conformances</span>
+    <span class="badge">audience: human + AI agent</span>
+  </div>
+
+  <div class="hero">
+    <div class="ver">version transition</div>
+    <div class="arrowline">
+      <div class="vchip old"><span class="t">FROM</span>1.4</div>
+      <div class="arrow">→</div>
+      <div class="vchip new"><span class="t">TO</span>1.5</div>
+      <div style="flex:1"></div>
+    </div>
+    <p style="margin:10px 0 0;color:var(--muted);font-size:13.5px">
+      1.5 adds <code>withUnitOfWork { work in … }</code>: every <code>repository.save</code> inside the block is collected and
+      written together when the block returns, or not at all when it throws. Existing usecases, repositories, generated code
+      and the composition root take part <b>unchanged</b>; code that never calls <code>withUnitOfWork</code> behaves exactly as in 1.4.
+      What breaks the build is limited to custom <code>EventStoreClient</code> conformances, exhaustive <code>switch</code>es over
+      <code>EventStoreClientError</code>, and a direct swift-kurrentdb requirement below 2.6.1.
+      The public signatures of <code>Usecase</code>, <code>EventStore</code>, <code>EventSourcingRepository</code> and
+      <code>KurrentStorageCoordinator</code> do not change.
+    </p>
+  </div>
+
+  <nav class="toc">
+    <b>Contents</b>
+    <ol>
+      <li><a href="#who">Who is affected</a></li>
+      <li><a href="#ai-manifest">AI Migration Manifest (machine-readable)</a></li>
+      <li><a href="#breaking">Source-breaking changes</a></li>
+      <li><a href="#behaviour">Behaviour changes</a></li>
+      <li><a href="#scope">Behaviour inside a scope</a></li>
+      <li><a href="#rules">Rules inside the block</a></li>
+      <li><a href="#projections">Projections run on subscription runners</a></li>
+      <li><a href="#additions">Additions</a></li>
+      <li><a href="#checklist">Upgrade checklist</a></li>
+      <li><a href="#reference">Reference KurrentDB version</a></li>
+    </ol>
+  </nav>
+
+  <!-- ================= WHO ================= -->
+  <section id="who">
+    <h2>Who is affected</h2>
+    <div class="card">
+      <table>
+        <thead><tr><th style="width:42%">If your project…</th><th>Read</th></tr></thead>
+        <tbody>
+          <tr><td>depends on swift-kurrentdb directly</td><td><span class="chgid">SB3</span> swift-kurrentdb ≥ 2.6.1</td></tr>
+          <tr><td>implements or wraps <code>EventStoreClient</code></td><td><span class="chgid">SB1</span>, <span class="chgid">BC1</span></td></tr>
+          <tr><td>has a <code>switch</code> over <code>EventStoreClientError</code> without <code>default</code></td><td><span class="chgid">SB2</span></td></tr>
+          <tr><td>adopts <code>withUnitOfWork</code></td><td><span class="chgid">BC2</span>–<span class="chgid">BC6</span>, <a href="#scope">behaviour inside a scope</a>, <a href="#rules">rules inside the block</a>, <a href="#projections">projections</a></td></tr>
+          <tr><td>only uses <code>AggregateRoot</code> / <code>DomainEvent</code> / <code>Usecase</code> and the built-in stores, without <code>withUnitOfWork</code></td><td>bump the version and run the tests; nothing else changes</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= AI MANIFEST ================= -->
+  <section id="ai-manifest" class="ai">
+    <h2>🤖 AI Migration Manifest (machine-readable)</h2>
+    <p class="lead">
+      If you are an AI agent upgrading a project that depends on <code>swift-ddd-kit</code> from 1.4 to 1.5, consume the JSON
+      below. Each rule has a <code>kind</code>, <code>mechanical</code> (whether plain text replacement is enough),
+      <code>before</code>/<code>after</code> and <code>action</code>. Apply order: <code>source-breaking</code> first so the
+      project compiles, then check every <code>behaviour-change</code> (the compiler will not point these out).
+      <code>scope-rule</code> entries apply to code that runs inside <code>withUnitOfWork</code>. <code>scope</code> says
+      where to look.
+    </p>
+<pre id="migration-rules" data-format="swift-ddd-kit-migration/v1">{
+  "schema": "swift-ddd-kit-migration/v1",
+  "package": "swift-ddd-kit",
+  "from": "1.4",
+  "to": "1.5",
+  "domainLayerImpact": "none",
+  "applyOrder": ["source-breaking", "behaviour-change", "new", "scope-rule"],
+  "rules": [
+    {
+      "id": "SB1",
+      "kind": "source-breaking",
+      "mechanical": false,
+      "scope": "types conforming to EventStoreClient (wrappers, decorators, custom fakes)",
+      "before": "no identity requirement",
+      "after": "var identity: ObjectIdentifier { base.identity }   // a wrapper forwards the wrapped client's identity",
+      "action": "Implement identity (no default; compile error otherwise). A wrapper forwards the identity of the client it wraps. Never return a constant shared by clients of different clusters: only clients with the same identity commit together in one unit of work."
+    },
+    {
+      "id": "SB2",
+      "kind": "source-breaking",
+      "mechanical": false,
+      "scope": "exhaustive switch statements over EventStoreClientError without a default",
+      "before": "switch error { case .streamNotFound: ... }",
+      "after": "add cases .consistencyViolations([StreamConflict]) and .atomicAppendUnsupported",
+      "action": "Handle the two new enum cases or add a default."
+    },
+    {
+      "id": "SB3",
+      "kind": "source-breaking",
+      "mechanical": true,
+      "scope": "Package.swift of the downstream project, only if it depends on swift-kurrentdb directly",
+      "before": ".package(url: \"https://github.com/gradyzhuo/swift-kurrentdb.git\", from: \"2.6.0\")",
+      "after": ".package(url: \"https://github.com/gradyzhuo/swift-kurrentdb.git\", from: \"2.6.1\")",
+      "action": "swift-ddd-kit 1.5 requires swift-kurrentdb 2.6.1 or later (2.6.0 dropped custom metadata on AppendRecords). Raise any direct requirement below 2.6.1."
+    },
+    {
+      "id": "BC1",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "types conforming to EventStoreClient, including wrappers around LiveEventStoreClient",
+      "before": "no appendAtomically requirement",
+      "after": "func appendAtomically(_ batches: [StreamBatch]) async throws -> [StreamBatchResult] { try await base.appendAtomically(batches) }",
+      "action": "Without it the conformance still compiles (deprecated default, warning), but a unit of work that writes two or more streams through it throws EventStoreClientError.atomicAppendUnsupported at commit. Implement or forward it."
+    },
+    {
+      "id": "BC2",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "usecases that publish events (EventBus.publish, notifications) right after repository.save",
+      "before": "try await repository.save(aggregateRoot: x); try await eventBus.publish(event: e)",
+      "after": "if let work = UnitOfWork.current { try work.onCommitted { ... } } else { ... }",
+      "action": "Inside withUnitOfWork the publish happens before the commit. Register it with onCommitted when a unit of work is running, publish immediately otherwise."
+    },
+    {
+      "id": "BC3",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "composition roots that give repositories different KurrentDBClient instances (e.g. one KurrentDBPool.borrow() each)",
+      "before": "any KurrentDBClient of the cluster",
+      "after": "every repository that writes in one unit of work wraps the same KurrentDBClient instance",
+      "action": "Identity is the client instance, not the cluster. The first write through a second instance throws DDDError.operationNotAllow. Reads may go through any client."
+    },
+    {
+      "id": "BC4",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "custom repositories overriding find/save/delete/purge; code calling store.append directly",
+      "before": "n/a (new in 1.5)",
+      "after": "only EventSourcingRepository's default implementations refuse non-participating stores inside a unit of work and fail the unit of work on store errors",
+      "action": "Inside withUnitOfWork, call the default repository methods. Direct store.append on InMemoryEventStore or PersistentEventStore still writes immediately; an overriding repository does not fail the unit of work on store errors."
+    },
+    {
+      "id": "BC5",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "handlers that keep using aggregate instances after withUnitOfWork returns or throws",
+      "before": "n/a (new in 1.5)",
+      "after": "find the aggregate again after the block",
+      "action": "Inside a unit of work the version after save is predicted; a differing server revision (e.g. a soft-deleted stream recreated continues from the old tail + 1) is only logged. After a block that threw, the instance still reflects the discarded save."
+    },
+    {
+      "id": "BC6",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "EventMetadata types saved inside withUnitOfWork",
+      "before": "metadata stored as raw JSON bytes",
+      "after": "a unit of work of two or more streams sends metadata as protobuf Value (AppendRecords properties)",
+      "action": "Metadata must encode to a JSON object; NaN, infinity and integers beyond 64 bits throw operationNotAllow at save. Integers beyond ±2^53 are rounded to the nearest Double: store them as strings. On read the server adds $schema.name and $schema.format keys: compare decoded structs, not raw bytes."
+    },
+    {
+      "id": "N1",
+      "kind": "new",
+      "mechanical": false,
+      "scope": "handlers that must write several usecases' or aggregates' events together",
+      "after": "try await withUnitOfWork { work in ... }   // EventSourcing: withUnitOfWork, UnitOfWork, UnitOfWorkBackend, UnitOfWorkParticipant",
+      "action": "Optional. Wrap the usecase calls of one operation in withUnitOfWork; KurrentStorageCoordinator takes part, InMemoryEventStore and PersistentEventStore do not."
+    },
+    {
+      "id": "N2",
+      "kind": "new",
+      "mechanical": false,
+      "scope": "catch clauses for DDDError.commitConflict",
+      "after": "DDDError.commitConflict(conflicts:) and error.commitConflicts (one entry per conflicting stream, batch order; code still 501)",
+      "action": "Optional. error.commitConflict still returns the first conflict."
+    },
+    {
+      "id": "N3",
+      "kind": "new",
+      "mechanical": false,
+      "scope": "KurrentSupport seam",
+      "after": "EventStoreClient.appendAtomically(_:), StreamBatch, StreamBatchResult, StreamConflict; InMemoryEventStoreClient implements it",
+      "action": "Optional; see BC1 for wrappers."
+    },
+    {
+      "id": "R1",
+      "kind": "scope-rule",
+      "scope": "calls of withUnitOfWork",
+      "action": "No nesting: withUnitOfWork inside a unit of work throws operationNotAllow. Usecases never call it; handlers do. Shared logic goes in a function that does not open a scope."
+    },
+    {
+      "id": "R2",
+      "kind": "scope-rule",
+      "scope": "do/catch inside the block",
+      "action": "Do not catch a usecase's error inside the block. To return a normal failure output, call try work.fail(error) and return."
+    },
+    {
+      "id": "R3",
+      "kind": "scope-rule",
+      "scope": "Task { } inside the block",
+      "action": "Do not move a save into Task { }. A save that runs after the block ended throws operationNotAllow. Await everything before returning."
+    },
+    {
+      "id": "R4",
+      "kind": "scope-rule",
+      "scope": "side effects after save",
+      "action": "Publish through work.onCommitted (see BC2)."
+    },
+    {
+      "id": "R5",
+      "kind": "scope-rule",
+      "scope": "async let / TaskGroup inside the block",
+      "action": "Concurrent usecases on different aggregates are fine; concurrent changes to the same aggregate make the second save throw commitConflict."
+    }
+  ],
+  "downstreamProcedure": [
+    "Bump swift-ddd-kit to from: \"1.5.0\"; raise any direct swift-kurrentdb requirement to 2.6.1 (SB3).",
+    "In custom EventStoreClient conformances, implement or forward identity and appendAtomically (SB1, BC1).",
+    "Handle the new EventStoreClientError cases (SB2).",
+    "Build; run the test suite.",
+    "Before adopting withUnitOfWork: move post-save publishing to onCommitted (BC2), give writing repositories one KurrentDBClient instance (BC3), check metadata types (BC6), and follow R1–R5."
+  ]
+}</pre>
+  </section>
+
+  <!-- ================= BREAKING ================= -->
+  <section id="breaking">
+    <h2>Source-breaking changes</h2>
+    <p>These stop existing code from compiling, and the compiler points at each place.</p>
+
+    <div class="card">
+      <h3><span class="chgid">SB1</span> &nbsp;<span class="tag sig">protocol</span> &nbsp;<code>EventStoreClient.identity</code> has no default</h3>
+      <p>Custom <code>EventStoreClient</code> conformances (wrappers, decorators, hand-written fakes) must implement
+         <code>var identity: ObjectIdentifier { get }</code>. Inside one unit of work only clients with the same identity commit
+         together. There is no default on purpose: two clusters taken for one would send events to the wrong cluster.
+         <code>LiveEventStoreClient</code> reports the identity of the <code>KurrentDBClient</code> it wraps; every
+         <code>InMemoryEventStoreClient</code> instance is an identity of its own. A wrapper forwards the identity of the client it
+         wraps, and forwards <code>appendAtomically(_:)</code> too (<span class="chgid">BC1</span>):</p>
+<pre class="diff"><span class="x"><span class="kw">struct</span> <span class="ty">LoggingClient</span>: <span class="ty">EventStoreClient</span> {</span>
+<span class="x">    <span class="kw">let</span> base: <span class="kw">any</span> <span class="ty">EventStoreClient</span></span>
+<span class="x">    <span class="cmt">// ...other requirements...</span></span>
+<span class="d">+   var identity: ObjectIdentifier { base.identity }</span>
+<span class="d">+   func appendAtomically(_ batches: [StreamBatch]) async throws -&gt; [StreamBatchResult] {</span>
+<span class="d">+       try await base.appendAtomically(batches)</span>
+<span class="d">+   }</span>
+<span class="x">}</span></pre>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">SB2</span> &nbsp;<span class="tag new">enum case</span> &nbsp;New <code>EventStoreClientError</code> cases</h3>
+      <table>
+        <thead><tr><th>Case</th><th>Thrown when</th></tr></thead>
+        <tbody>
+          <tr><td><code>consistencyViolations([StreamConflict])</code></td><td><code>appendAtomically</code> found streams whose expected revision did not hold; nothing was written. Never empty. <code>KurrentStorageCoordinator</code> turns it into <code>DDDError.commitConflict(conflicts:)</code>.</td></tr>
+          <tr><td><code>atomicAppendUnsupported</code></td><td>the conformance relies on the deprecated default of <code>appendAtomically(_:)</code>.</td></tr>
+        </tbody>
+      </table>
+      <p>An exhaustive <code>switch</code> over <code>EventStoreClientError</code> without a <code>default</code> must handle both.</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">SB3</span> &nbsp;<span class="tag sig">dependency</span> &nbsp;swift-kurrentdb ≥ 2.6.1</h3>
+      <p>swift-kurrentdb 2.6.0 silently dropped custom metadata from events written through <code>AppendRecords</code>, the call a
+         unit of work uses for two or more streams; 2.6.1 carries it, and throws for metadata it cannot carry. If your
+         <code>Package.swift</code> depends on swift-kurrentdb directly, raise the requirement too.</p>
+      <pre class="diff"><span class="a">- .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0")</span>
+<span class="d">+ .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.1")</span></pre>
+    </div>
+  </section>
+
+  <!-- ================= BEHAVIOUR ================= -->
+  <section id="behaviour">
+    <h2>Behaviour changes</h2>
+    <div class="callout warn"><b>The compiler will not point these out</b>
+      They compile unchanged but behave differently, mostly once code runs inside <code>withUnitOfWork</code>. Check each one
+      against your code and tests.</div>
+
+    <div class="card">
+      <h3><span class="chgid">BC1</span> &nbsp;<span class="tag manual">runtime</span> &nbsp;Wrappers must forward <code>appendAtomically(_:)</code></h3>
+      <p><code>EventStoreClient</code> gains <code>appendAtomically(_:)</code>. The protocol extension provides a deprecated default,
+         so an existing conformance <b>compiles, with a deprecation warning</b>; but a unit of work that writes two or more
+         streams through it throws <code>EventStoreClientError.atomicAppendUnsupported</code> at commit. Forward it as in
+         <span class="chgid">SB1</span>.</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC2</span> &nbsp;<span class="tag sig">usecase</span> &nbsp;Publishing right after <code>save</code></h3>
+      <p>A usecase that calls <code>EventBus.publish</code> right after <code>repository.save</code> publishes before the commit when
+         it runs inside <code>withUnitOfWork</code>, so subscribers can see events that are never written. To be right inside and
+         outside a unit of work:</p>
+<pre><span class="kw">if let</span> work = <span class="ty">UnitOfWork</span>.current {
+    <span class="kw">try</span> work.onCommitted { <span class="kw">try await</span> notifier.send(.quotingCreated(id)) }
+} <span class="kw">else</span> {
+    <span class="kw">try await</span> notifier.send(.quotingCreated(id))
+}</pre>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC3</span> &nbsp;<span class="tag sig">client</span> &nbsp;One <code>KurrentDBClient</code> instance per unit of work</h3>
+      <p>Writes in one unit of work commit together only through clients with the same identity, and the identity is the
+         <code>KurrentDBClient</code> <b>instance</b>, not the cluster. Coordinators built with
+         <code>init(client: KurrentDBClient, eventMapper:)</code> over one instance share the unit of work, so a composition root
+         that passes one client everywhere needs no change. Two instances connected to the same cluster (two
+         <code>KurrentDBPool.borrow()</code> results, say) count as two: the first write through the second one throws
+         <code>DDDError.operationNotAllow</code>. Reads may go through any client.</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC4</span> &nbsp;<span class="tag sig">repository</span> &nbsp;The check lives in <code>EventSourcingRepository</code>'s default implementations</h3>
+      <p>Inside a unit of work, the default <code>save</code> and <code>purge</code> refuse a store that cannot take part, and errors
+         from store calls in the default <code>find</code>, <code>save</code>, <code>delete</code> and <code>purge</code> fail the unit
+         of work even when the caller catches them. Code that calls <code>store.append</code> directly still writes straight to a
+         non-participating store inside a unit of work, and a repository that overrides those methods gets neither the refusal
+         nor the automatic failure.</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC5</span> &nbsp;<span class="tag sig">aggregate</span> &nbsp;Do not reuse aggregate instances after a unit of work</h3>
+      <p>Inside a unit of work, an aggregate's version after <code>save</code> is the revision the commit is predicted to give it.
+         When the server returns another one, the commit logs a warning and succeeds: the server's revision is the true one. That
+         happens, for example, when a soft-deleted stream is recreated: it continues from the old tail + 1 instead of 0. After a
+         block that threw, the instance still reflects the discarded save. Find aggregates again after the block.</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC6</span> &nbsp;<span class="tag sig">metadata</span> &nbsp;Metadata inside a unit of work</h3>
+      <p>A unit of work that writes two or more streams sends metadata as protobuf <code>Value</code> (<code>AppendRecords</code>
+         properties) instead of raw JSON bytes, and every <code>save</code> inside a unit of work checks it can:</p>
+      <ul class="tite">
+        <li>it must encode to a JSON object (a <code>String</code>-backed enum encodes to a scalar and fails);</li>
+        <li>NaN, ±infinity and integers beyond 64 bits fail.</li>
+      </ul>
+      <p>A failing check throws <code>DDDError.operationNotAllow(operation: "save", …)</code> at <code>save</code>, not at commit;
+         <code>nil</code> metadata and saves outside a unit of work are not checked. Integers beyond ±2^53 are not rejected but
+         rounded to the nearest <code>Double</code>: <b>store values whose every digit matters as strings</b>. Read back, the custom
+         metadata also holds the server's <code>$schema.name</code> and <code>$schema.format</code> keys; decoding into a struct is
+         unaffected, so compare decoded values, not raw bytes or dictionaries.</p>
+    </div>
+  </section>
+
+  <!-- ================= SCOPE ================= -->
+  <section id="scope">
+    <h2>Behaviour inside a scope</h2>
+    <p>Everything here is new in 1.5 and applies only while <code>withUnitOfWork</code> runs. Outside a scope nothing changed.</p>
+
+    <div class="card">
+      <h3>How the scope ends</h3>
+      <ol class="steps">
+        <li><b>The block returns or throws, and the scope closes at once.</b> From then on <code>work.fail(_:)</code>,
+            <code>work.onCommitted(_:)</code> and <code>work.backend(_:identity:make:)</code> throw <code>operationNotAllow</code>,
+            also from a <code>Task</code> started in the block, which still sees the scope as <code>UnitOfWork.current</code>.
+            So a <code>save</code> that runs after the block throws instead of writing.</li>
+        <li><b>The block threw</b> (<code>CancellationError</code> included): nothing is committed, no hook runs, the error is rethrown.</li>
+        <li><b>The scope was failed</b> (by <code>work.fail(_:)</code> or by a repository error): nothing is committed, no hook runs,
+            and <code>withUnitOfWork</code> throws <code>DDDError.operationNotAllow(operation: "commit", reason: "unit of work failed")</code>
+            with the first cause in <code>userInfos["cause"]</code>.</li>
+        <li><b>Otherwise the staged writes commit.</b> One stream goes through the same single-stream append as a plain
+            <code>save</code>; two or more go through one <code>AppendRecords</code> call (KurrentDB 26.1+; an older server gives
+            <code>operationNotAllow(operation: "commit", reason: "server does not support AppendRecords (KurrentDB 26.1+)")</code>).
+            A conflict on any stream rejects everything with <code>commitConflict</code> and <code>error.commitConflicts</code>
+            lists every conflicting stream; a purged stream gives <code>streamPurged</code>, also when other streams conflict.</li>
+        <li><b>The <code>onCommitted</code> hooks run</b> in registration order, outside the scope
+            (<code>UnitOfWork.current == nil</code>): a <code>save</code> inside a hook writes directly and is not part of the commit.
+            A throwing hook stops the later ones and its error is rethrown, but the commit stands.</li>
+      </ol>
+    </div>
+
+    <div class="callout danger"><b>Commit errors</b>
+      After <code>commitConflict</code> or <code>streamPurged</code> nothing was written. After any other commit error (transport,
+      <code>atomicAppendUnsupported</code>, a server without <code>AppendRecords</code>) the writes <b>may have landed</b>, for
+      example when the response was lost after the server committed: read the streams before running the block again.</div>
+
+    <div class="card">
+      <h3>Stores, reads and purge</h3>
+      <ul class="tite">
+        <li>Only <code>KurrentStorageCoordinator</code> takes part. <code>save</code> and <code>purge</code> through a repository over
+            <code>InMemoryEventStore</code> or <code>PersistentEventStore</code> throw <code>operationNotAllow</code>; <code>save</code>
+            does so even when the aggregate has no new events (outside a scope such a save still returns without calling the
+            store). <code>find</code> is never refused. Tests use <code>KurrentStorageCoordinator</code> over
+            <code>InMemoryEventStoreClient</code>: no server needed.</li>
+        <li><code>KurrentStorageCoordinator.purge</code> throws <code>operationNotAllow(operation: "purge", reason: "not allowed inside a unit of work")</code>.</li>
+        <li>Reads through a coordinator see the events the scope has staged, after the server's (read-your-writes). A read never
+            creates, binds or fails on the scope's backend, so a usecase may read through a repository over another
+            <code>KurrentDBClient</code> and write through one.</li>
+        <li>A second <code>save</code> of the same stream must expect the revision the first one predicted, or it throws
+            <code>commitConflict</code> at once; so do two aggregate types whose stream names collide.</li>
+        <li>Each usecase's <code>EventMetadataContext&lt;M&gt;.withValue</code> value travels with that usecase's events; repositories with
+            different <code>Metadata</code> types can save in one scope.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= RULES ================= -->
+  <section id="rules">
+    <h2>Rules inside the block</h2>
+    <ol class="steps">
+      <li><b>No nesting.</b> <code>withUnitOfWork</code> inside a scope throws <code>operationNotAllow</code> and leaves the outer scope
+          alone. A usecase does not call <code>withUnitOfWork</code>; it belongs to the handler. When two handlers share logic,
+          extract a function that does not open a scope and let each handler wrap it.</li>
+      <li><b>Do not <code>do/catch</code> a usecase's error inside the block.</b> To return a normal failure output, call
+          <code>try work.fail(error)</code> and return. What goes wrong otherwise is a usecase that saves, then throws, and is
+          caught: errors that pass through a repository fail the scope automatically, and this rule covers the rest.</li>
+      <li><b>Do not move a <code>save</code> into <code>Task { … }</code>.</b> A task that is not detached inherits the scope; a
+          <code>save</code> it reaches after the block ended throws <code>operationNotAllow</code>, never writes directly and never
+          joins a batch that was already committed. Await everything before returning.</li>
+      <li><b>Publish after the commit.</b> A usecase that calls <code>EventBus.publish</code> right after <code>save</code> publishes
+          before the commit inside a scope; use <code>if let work = UnitOfWork.current { try work.onCommitted { … } } else { … }</code>
+          (<span class="chgid">BC2</span>).</li>
+      <li><b>Different aggregates may run concurrently, the same one may not.</b> <code>async let</code> and <code>TaskGroup</code> over
+          <b>different</b> aggregates are fine; changing the same aggregate concurrently makes the second <code>save</code> throw
+          <code>commitConflict</code>.</li>
+    </ol>
+<pre><span class="kw">let</span> quoting = <span class="kw">try await</span> withUnitOfWork { work <span class="kw">in</span>
+    <span class="kw">let</span> quoting = <span class="kw">try await</span> createQuotingCaseService.execute(
+        input: .init(operatorId: input.operatorId, name: input.name))
+    <span class="kw">try await</span> openBillingAccountService.execute(input: .init(for: quoting.id))
+    <span class="kw">try</span> work.onCommitted { <span class="kw">try await</span> notifier.send(.quotingCreated(quoting.id)) }   <span class="cmt">// after the commit</span>
+    <span class="kw">return</span> quoting
+}</pre>
+  </section>
+
+  <!-- ================= PROJECTIONS ================= -->
+  <section id="projections">
+    <h2>Projections run on subscription runners, not inside a scope</h2>
+    <div class="callout warn"><b>Do not run a projector synchronously inside <code>withUnitOfWork</code></b>
+      Every read through a <code>KurrentStorageCoordinator</code> inside a scope sees the staged events, including an
+      <code>EventSourcingProjector</code> called from the block. Read model snapshots go to another store and are not part of the
+      unit of work, so such a projector folds events that a failed commit never writes, and its snapshot runs ahead of the
+      event store. Run projections on the <code>KurrentProjection</code> subscription runners: they run in their own task,
+      outside any scope, and see only committed events.</div>
+  </section>
+
+  <!-- ================= ADDITIONS ================= -->
+  <section id="additions">
+    <h2>Additions</h2>
+    <p>None of these requires changes to existing code.</p>
+    <table>
+      <thead><tr><th>ID</th><th>Addition</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td><span class="chgid">N1</span></td><td><code>withUnitOfWork</code>, <code>UnitOfWork</code>, <code>UnitOfWorkBackend</code>, <code>UnitOfWorkParticipant</code> (<code>EventSourcing</code>)</td><td>The scope and the hooks for store authors. <code>work</code> offers <code>id</code>, <code>isFailed</code>, <code>try work.fail(_:)</code> and <code>try work.onCommitted(_:)</code>. See the README section <a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/README.md#6-compose-usecases-with-withunitofwork">Compose Usecases with <code>withUnitOfWork</code></a>.</td></tr>
+        <tr><td><span class="chgid">N2</span></td><td><code>DDDError.commitConflict(conflicts:)</code>, <code>error.commitConflicts</code> (<code>DDDCore</code>)</td><td>One entry per conflicting stream, in batch order; still code 501. <code>error.commitConflict</code> returns the first.</td></tr>
+        <tr><td><span class="chgid">N3</span></td><td><code>EventStoreClient.appendAtomically(_:)</code>, <code>StreamBatch</code>, <code>StreamBatchResult</code>, <code>StreamConflict</code> (<code>KurrentSupport</code>)</td><td>Atomic multi-stream append through KurrentDB's <code>AppendRecords</code>; <code>InMemoryEventStoreClient</code> implements it too. <code>KurrentStorageCoordinator</code> is a <code>UnitOfWorkParticipant</code>.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ================= CHECKLIST ================= -->
+  <section id="checklist">
+    <h2>Upgrade checklist</h2>
+    <p>Fix what breaks the build first, then check the behaviour changes.</p>
+    <ol class="steps">
+      <li><b>Bump dependencies</b> — <code>swift-ddd-kit</code> to <code>from: "1.5.0"</code>; a direct swift-kurrentdb requirement to <code>2.6.1</code> (<span class="chgid">SB3</span>).</li>
+      <li><b>Custom <code>EventStoreClient</code></b> — implement or forward <code>identity</code> and <code>appendAtomically(_:)</code>; check that no <code>appendAtomically</code> deprecation warning is left (<span class="chgid">SB1</span>, <span class="chgid">BC1</span>).</li>
+      <li><b>Exhaustive switch</b> — handle <code>consistencyViolations</code> and <code>atomicAppendUnsupported</code> (<span class="chgid">SB2</span>).</li>
+      <li><b>Build + test</b> — <code>swift build</code>, then run the test suite.</li>
+      <li><b>Before adopting <code>withUnitOfWork</code></b> — move post-save publishing to <code>onCommitted</code> (<span class="chgid">BC2</span>), give the repositories that write together one <code>KurrentDBClient</code> instance (<span class="chgid">BC3</span>), check metadata types (<span class="chgid">BC6</span>), keep projections on the subscription runners, and follow the <a href="#rules">rules inside the block</a>.</li>
+    </ol>
+  </section>
+
+  <!-- ================= REFERENCE ================= -->
+  <section id="reference">
+    <h2>Reference KurrentDB version</h2>
+    <div class="callout ok"><b>KurrentDB 26.1 or later; CI runs kurrentplatform/kurrentdb:26.1.3</b>
+      A unit of work that writes two or more streams needs <code>AppendRecords</code>, which KurrentDB 26.1 introduced; one stream
+      works on older servers too. CI's <code>kurrent-live-contract</code> job runs <code>KurrentLiveContractTests</code>, including
+      the unit-of-work suites, against <code>kurrentplatform/kurrentdb:26.1.3</code> started with standard projections
+      (<code>KURRENTDB_RUN_PROJECTIONS=All</code>, <code>KURRENTDB_START_STANDARD_PROJECTIONS=true</code>). Re-run those tests when
+      you upgrade KurrentDB.</div>
+  </section>
+
+  <footer>
+    <p>swift-ddd-kit 1.4 → 1.5 Migration Guide · Design document:
+       <code>docs/superpowers/specs/2026-11-01-unit-of-work-design.md</code> · Text version: the 1.5.0 section of
+       <code>MIGRATION.md</code> · API reference: the DocC articles <a href="https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/eventsourcing/composingusecases">Composing usecases with a unit of work</a>
+       and <a href="https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/kurrentsupport/unitofwork">Unit of work on KurrentDB</a>.</p>
+    <p>This document is written for both humans and AI agents — AI tools should consume the JSON block of the
+       <a href="#ai-manifest">AI Migration Manifest</a> first.</p>
+  </footer>
+
+</div>
+</body>
+</html>

@@ -483,3 +483,86 @@ dependencies:
 #### 13. 超過 `Int64.max` 的預期 revision 改丟 `commitConflict`（behaviour change）
 
 KurrentDB 無法接受大於 `Int64.max` 的預期 revision，以前 `KurrentStorageCoordinator.append` 會把它送出去，得到 server 回的 gRPC 內部錯誤。現在 `version` 大於 `UInt64(Int64.max)` 時不送出 append，改丟 `DDDError.commitConflict`，`actual` 為讀 stream 得到的尾端 revision（stream 不存在時為 `nil`）；若該 stream 已被 tombstone，則丟 `streamPurged`。`Int64.max` 本身照常送出。
+
+## 1.5.0
+
+1.5.0 adds `withUnitOfWork`, which commits the saves of several usecases together (README section
+"Compose Usecases with `withUnitOfWork`"). Code that never calls it behaves exactly as before. The
+IDs below are the same as in the
+[1.4 → 1.5 migration guide](https://gradyzhuo.github.io/swift-ddd-kit/migration/swift-ddd-kit-1.4-to-1.5.html).
+
+### SB1 — `EventStoreClient.identity` has no default
+
+Custom `EventStoreClient` conformances (wrappers, decorators, hand-written fakes) must implement
+`var identity: ObjectIdentifier { get }`; without it they no longer compile. There is no default
+on purpose: inside one unit of work only clients with the same identity commit together, and two
+clusters taken for one would send events to the wrong cluster. A wrapper forwards the identity of
+the client it wraps, and should forward `appendAtomically(_:)` too (BC1):
+
+```swift
+struct LoggingClient: EventStoreClient {
+    let base: any EventStoreClient
+    // ...other requirements...
++   var identity: ObjectIdentifier { base.identity }
++   func appendAtomically(_ batches: [StreamBatch]) async throws -> [StreamBatchResult] {
++       try await base.appendAtomically(batches)
++   }
+}
+```
+
+### SB2 — New `EventStoreClientError` cases
+
+`EventStoreClientError` gains `consistencyViolations([StreamConflict])` and
+`atomicAppendUnsupported`. An exhaustive `switch` over it without a `default` must handle both.
+
+### SB3 — swift-kurrentdb 2.6.1 minimum
+
+```diff
+- .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0")
++ .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.1")
+```
+
+swift-kurrentdb 2.6.0 silently dropped custom metadata from events written through
+`AppendRecords`, the call a unit of work uses for two or more streams; 2.6.1 carries it. Raise any
+direct requirement below 2.6.1.
+
+### Behaviour changes (the compiler will not point these out)
+
+- **BC1 — Forward `appendAtomically(_:)`.** `EventStoreClient` gains `appendAtomically(_:)` with a
+  deprecated default, so an existing conformance still compiles, with a warning. A unit of work
+  that writes two or more streams through it fails at commit with
+  `EventStoreClientError.atomicAppendUnsupported`. Implement or forward it.
+- **BC2 — Publishing right after `save`.** A usecase that calls `EventBus.publish` right after
+  `repository.save` publishes before the commit when it runs inside `withUnitOfWork`, so
+  subscribers can see events that are never written. To be right in and out of a unit of work,
+  write `if let work = UnitOfWork.current { try work.onCommitted { … } } else { … }`.
+- **BC3 — One `KurrentDBClient` instance per unit of work.** Writes in one unit of work commit
+  together only through the same `KurrentDBClient` instance. Two instances connected to the same
+  cluster (two `KurrentDBPool.borrow()` results, say) count as different clients: the first write
+  through the second one throws `DDDError.operationNotAllow`. Reads may go through any client.
+- **BC4 — The unit-of-work check lives in `EventSourcingRepository`'s default implementations.**
+  Inside a unit of work, the default `save` and `purge` refuse a store that cannot take part
+  (`InMemoryEventStore`, `PersistentEventStore`) with `operationNotAllow`, `save` even when the
+  aggregate has no new events; outside one, a `save` without new events still does not call the
+  store. Code that calls `store.append` directly still writes straight to a non-participating
+  store inside a unit of work, and a repository that overrides `find`, `save`, `delete` or
+  `purge` neither refuses such stores nor fails the unit of work on store errors.
+- **BC5 — Do not reuse aggregate instances after a unit of work.** Inside a unit of work an
+  aggregate's version after `save` is the revision the commit is predicted to give it. When the
+  server returns another one (a soft-deleted stream that is recreated continues from its old
+  tail + 1), the commit only logs a warning, and the instance's version is behind the server's;
+  after a block that threw, it still reflects the discarded save. Find the aggregate again.
+- **BC6 — Metadata inside a unit of work.** A unit of work that writes two or more streams sends
+  metadata as protobuf `Value` (`AppendRecords` properties), and every `save` inside one checks it
+  can: it must encode to a JSON object, and NaN, ±infinity or integers beyond 64 bits fail at
+  `save` with `operationNotAllow`. Integers beyond ±2^53 are not rejected but rounded to the
+  nearest `Double`, so store values whose every digit matters as strings. Read back, the custom
+  metadata also holds the server's `$schema.name` and `$schema.format` keys; compare decoded
+  structs, not raw bytes or dictionaries.
+
+Also inside a unit of work: `purge` is refused by every store in this package; after a `commitConflict` or
+`streamPurged` from the commit nothing was written, but after any other commit error the writes
+may have landed, so read before running the block again; a `save` from a `Task` that outlives the
+block throws, while a `save` inside an `onCommitted` hook writes directly; run projectors on the
+subscription runners, never synchronously inside a block. KurrentDB 26.1 or later is needed for a
+unit of work that writes two or more streams.
