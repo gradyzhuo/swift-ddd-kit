@@ -23,6 +23,11 @@ public struct LiveEventStoreClient: EventStoreClient {
         self.client = client
     }
 
+    /// The wrapped `KurrentDBClient`'s identity: seams over one `KurrentDBClient` commit
+    /// together in a unit of work; two `KurrentDBClient` instances never do, even when
+    /// they connect to the same cluster.
+    public var identity: ObjectIdentifier { ObjectIdentifier(client) }
+
     public func append(
         events: [EventData],
         toStream name: String,
@@ -71,6 +76,70 @@ public struct LiveEventStoreClient: EventStoreClient {
         _ = try await client.streams(specified: name).tombstone {
             $0.expectedRevision = .any
         }
+    }
+
+    /// One `appendRecords` call (KurrentDB 26.1+). No extra checks are sent: swift-kurrentdb
+    /// derives one from every batch whose expected revision is not `.any`.
+    public func appendAtomically(_ batches: [StreamBatch]) async throws -> [StreamBatchResult] {
+        let streamEvents = try batches.map { batch in
+            StreamEvent(
+                stream: batch.stream,
+                records: try batch.events.map(EventRecord.init(eventData:)),
+                expectedRevision: batch.expectedRevision
+            )
+        }
+        do {
+            let response = try await client.multiStreams.appendRecords(events: streamEvents)
+            return response.revisions.map {
+                StreamBatchResult(stream: $0.streamIdentifier.name, revision: $0.revision)
+            }
+        } catch {
+            guard case let .consistencyViolation(violations) = error,
+                  let mapped = Self.mapConsistencyViolations(
+                      violations.map { (stream: $0.stream, actualState: $0.actualState) },
+                      in: batches
+                  )
+            else { throw error }
+            throw mapped
+        }
+    }
+
+    /// `actualState` of a tombstoned stream in an `appendRecords` consistency violation
+    /// (KurrentDB 26.1 and 26.2; `-5` is soft-deleted, `-1` missing).
+    static let tombstonedActualState: Int64 = -6
+
+    /// Maps `appendRecords`' consistency violations to the seam's errors, or returns `nil`
+    /// when the caller must rethrow the original `KurrentError` unchanged.
+    ///
+    /// - A tombstoned stream wins: the server lists tombstones and revision conflicts
+    ///   together with no precedence, so the first batch in `batches` order whose stream is
+    ///   tombstoned gives `KurrentError.resourceDeleted(resource:)`.
+    /// - Otherwise every violation becomes a `StreamConflict` carrying its batch's own
+    ///   `expectedRevision`. Any negative `actualState` (missing, soft-deleted) means the
+    ///   stream has no current revision, so `current` is `nil`.
+    /// - `nil` for an empty list, because `consistencyViolations` is never empty (the
+    ///   unit-of-work backend turns it into `DDDError.commitConflict(conflicts:)`, which
+    ///   requires at least one conflict), and for a violation on a stream no batch writes,
+    ///   rather than inventing its expected revision.
+    package static func mapConsistencyViolations(
+        _ violations: [(stream: String, actualState: Int64)],
+        in batches: [StreamBatch]
+    ) -> (any Error)? {
+        guard !violations.isEmpty else { return nil }
+        let tombstonedStreams = Set(violations.filter { $0.actualState == tombstonedActualState }.map { $0.stream })
+        if let tombstoned = batches.first(where: { tombstonedStreams.contains($0.stream) }) {
+            return KurrentError.resourceDeleted(resource: tombstoned.stream)
+        }
+        var conflicts: [StreamConflict] = []
+        for violation in violations {
+            guard let batch = batches.first(where: { $0.stream == violation.stream }) else { return nil }
+            conflicts.append(StreamConflict(
+                stream: violation.stream,
+                expected: batch.expectedRevision,
+                current: violation.actualState < 0 ? nil : UInt64(violation.actualState)
+            ))
+        }
+        return EventStoreClientError.consistencyViolations(conflicts)
     }
 
     public func subscribePersistent(stream: String, group: String) async throws -> any PersistentSubscriptionSession {
