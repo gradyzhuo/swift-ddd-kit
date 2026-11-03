@@ -240,6 +240,7 @@ let package = Package(
                 "ReadModelPersistence",
                 "DDDCore",
                 .product(name: "KurrentDB", package: "swift-kurrentdb"),
+                .product(name: "Logging", package: "swift-log"),
             ]),
         .testTarget(
             name: "ReadModelPersistencePostgresIntegrationTests",
