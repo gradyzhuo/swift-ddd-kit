@@ -118,8 +118,9 @@ scope has ended, which is why both are called with `try`.
   and let each handler wrap it.
 - **Do not `do/catch` a usecase's error inside the block.** To return a normal failure output,
   call `try work.fail(error)` and return. What goes wrong otherwise is a usecase that saves, then
-  throws, and is caught: errors that pass through a repository fail the scope automatically (see
-  <doc:ComposingUsecases#How-a-unit-of-work-ends>), and this rule covers the rest.
+  throws, and is caught: store errors in the default repository methods fail the scope
+  automatically (see <doc:ComposingUsecases#How-a-unit-of-work-ends>), and this rule covers the
+  rest.
 - **Do not move a `save` into `Task { … }`.** A task that is not detached inherits the scope. If
   it reaches `save` after the block ended, it hits the closed scope and throws `operationNotAllow`;
   it never writes directly and never joins a batch that was already committed. Await everything
@@ -129,7 +130,8 @@ scope has ended, which is why both are called with `try`.
   `if let work = UnitOfWork.current { try work.onCommitted { … } } else { … }`.
 - **Run different aggregates concurrently, never the same one.** `async let` and `TaskGroup` may
   run usecases on **different** aggregates in one scope. Changing the same aggregate concurrently
-  is not supported: the second `save` deterministically throws `commitConflict`.
+  is not supported: when both tasks found the aggregate before either saved it, the second `save`
+  throws `commitConflict`.
 
 There is no early `commit()` or `rollback()`, no way to write directly from inside a scope, and no
 query of what is staged (tests assert on the store). `withUnitOfWork` takes no other parameters.
@@ -170,8 +172,9 @@ Inside a scope, ``EventSourcingRepository``'s default `save` and `purge` refuse 
 (``InMemoryEventStore``, `PersistentEventStore`) with `operationNotAllow` rather than letting it
 write directly. `save` refuses even when the aggregate has no new events; outside a scope, a save
 without new events still returns without calling the store. `find` is never refused: reads have
-no side effects. The default `purge` never runs inside a scope: `KurrentStorageCoordinator`
-refuses it too, even when it is called directly.
+no side effects. With this package's stores the default `purge` never runs inside a scope: the
+repository refuses the stores that do not take part, and `KurrentStorageCoordinator` refuses it
+itself, even when it is called directly.
 
 The check and the automatic failure live in ``EventSourcingRepository``'s default
 implementations only. A repository that overrides `find`, `save`, `delete` or `purge`, or code
@@ -194,3 +197,8 @@ Looking up, creating (`make`) and storing happen under one lock, so concurrent f
 one backend; `make` must not call back into the scope. ``UnitOfWorkBackend/commit()`` is called at
 most once, after a block that returned on a scope that was not failed; otherwise the backend is
 dropped with what it collected.
+
+A participant's `purge` must refuse inside a scope, as `KurrentStorageCoordinator.purge` does with
+`DDDError.operationNotAllow(operation: "purge", …)`. The repository's default `purge` lets a
+participant through, and a purge that ran at once would be permanent even when the block then
+throws.
