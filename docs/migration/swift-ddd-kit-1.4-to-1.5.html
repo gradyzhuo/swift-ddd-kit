@@ -368,10 +368,10 @@
       "id": "R3",
       "kind": "scope-rule",
       "mechanical": false,
-      "scope": "Task { } inside the block",
+      "scope": "Task { } and Task.detached inside the block",
       "before": "Task { try await repository.save(aggregateRoot: x) }   // inside the block",
       "after": "try await repository.save(aggregateRoot: x)   // awaited before the block returns",
-      "action": "Do not move a save into Task { }. A save that runs after the block ended throws operationNotAllow. Await everything before returning."
+      "action": "Do not move a save into Task { }. A save that runs after the block ended throws operationNotAllow. Do not move one into Task.detached or into code that does not run in the block's task tree (a NIO future callback, a DispatchQueue block, a timer) either: it does not see the unit of work, so the save writes at once and stays written when the block throws or the commit fails. Await everything before returning; run usecases in parallel with async let or a TaskGroup."
     },
     {
       "id": "R4",
