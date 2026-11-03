@@ -15,6 +15,9 @@ extension EventSourcingRepository {
         return try await self.find(byId: id, hiddingDeleted: true)
     }
 
+    /// Rebuilds the aggregate from its stream. Inside ``withUnitOfWork(_:)`` an error
+    /// thrown by the store's read fails the unit of work before it is rethrown, so the
+    /// scope will not commit even if the caller catches it.
     public func find(byId id: AggregateRootType.ID, hiddingDeleted: Bool) async throws -> AggregateRootType? {
 
         let fetched = try await UnitOfWork.failingCurrentOnError {
@@ -51,6 +54,13 @@ extension EventSourcingRepository {
         return aggregateRoot
     }
 
+    /// Appends the aggregate's new events and updates its version.
+    ///
+    /// Outside a unit of work an aggregate with no new events returns without calling
+    /// the store. Inside ``withUnitOfWork(_:)`` a store that is not a
+    /// ``UnitOfWorkParticipant`` throws `DDDError.operationNotAllow(operation: "save")`,
+    /// even when there is nothing to save, and any error from that check or from the
+    /// store's append fails the unit of work before it is rethrown.
     public func save(aggregateRoot: AggregateRootType) async throws {
         // Before the early return: inside a scope, a store that cannot take part fails
         // even when there is nothing to save.
@@ -83,6 +93,10 @@ extension EventSourcingRepository {
     }
 
     /// 危険操作!! 完全移除，不可恢復。該 id 之後永遠無法再寫入，不論先前是否存在。
+    ///
+    /// Inside ``withUnitOfWork(_:)`` a store that is not a ``UnitOfWorkParticipant``
+    /// throws `DDDError.operationNotAllow(operation: "purge")`, and that error or one from
+    /// the store's purge fails the unit of work before it is rethrown.
     public func purge(byId id: AggregateRootType.ID) async throws {
         try await UnitOfWork.failingCurrentOnError {
             try requireUnitOfWorkParticipantInsideScope(operation: "purge")

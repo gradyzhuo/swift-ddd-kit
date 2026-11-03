@@ -117,6 +117,35 @@ struct PersistentEventStoreUnitOfWorkTests {
         await store.close()
     }
 
+    @Test("purge inside a scope throws operationNotAllow, fails the scope and leaves the stream file unchanged")
+    func purgeInsideScopeThrowsForPersistentEventStore() async throws {
+        let directory = makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try NoteStore.open(directory: directory, eventMapper: NoteMapper())
+        let repository = NoteRepository(store: store)
+        try await repository.save(aggregateRoot: try Note(id: "n-1", text: "first"))
+        let file = try streamFile(in: directory, id: "n-1")
+        let before = try Data(contentsOf: file)
+
+        var refusal: DDDError?
+        var failedInside = false
+        let error = await dddError {
+            try await withUnitOfWork { work in
+                refusal = await dddError { try await repository.purge(byId: "n-1") }
+                failedInside = work.isFailed
+            }
+        }
+
+        #expect(refusal?.code == .aggregateOperationNotAllowed)
+        #expect(refusal?.userInfos["operation"] as? String == "purge")
+        #expect(refusal?.userInfos["reason"] as? String == "\(NoteStore.self) cannot take part in a unit of work")
+        #expect(failedInside)
+        #expect(error?.userInfos["operation"] as? String == "commit")
+        #expect(try Data(contentsOf: file) == before)
+        #expect(try await repository.find(byId: "n-1")?.text == "first")
+        await store.close()
+    }
+
     @Test("find inside a scope reads the stream and leaves the scope intact")
     func findInsideScopeWorksForPersistentEventStore() async throws {
         let directory = makeTemporaryDirectory()
