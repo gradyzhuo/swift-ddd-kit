@@ -189,6 +189,7 @@ let package = Package(
             dependencies: [
                 "EventStoreContract",
                 "EventSourcing",
+                "DDDCore",
                 "KurrentSupport",
                 "TestUtility",
                 .product(name: "KurrentDB", package: "swift-kurrentdb"),
