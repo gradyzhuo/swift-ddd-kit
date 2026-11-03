@@ -5,6 +5,8 @@ import DDDCore
 import EventSourcing
 import KurrentSupport
 import KurrentSupportInMemory
+import Logging
+import Synchronization
 
 private struct Sample: Codable, Sendable {
     let text: String
@@ -78,57 +80,69 @@ private let appendRecordsUnsupported = KurrentError.unsupportedFeature(
     .init(fullyQualifiedService: "kurrentdb.protocol.v2.streams.StreamsService", method: "AppendSession")
 )
 
-// MARK: - Event encoding fixtures
+// MARK: - Log capture
 
-private struct Placed: DomainEvent {
-    typealias Metadata = CustomMetadata
-    var id: UUID = .init()
-    var occurred: Date = Date(timeIntervalSince1970: 1_700_000_000)
-    var aggregateRootId: String
-    var metadata: CustomMetadata? = nil
-    var amount: Int
-}
+/// Records what a `Logger` from `logger` logs, at every level.
+private final class LogRecorder: Sendable {
+    struct Entry: Equatable, Sendable {
+        let level: Logger.Level
+        let message: String
+    }
 
-private struct NoMapper: EventTypeMapper {
-    func mapping(eventData: any RecordedEventLike) throws -> (any DomainEvent)? { nil }
-}
+    private let entries = Mutex<[Entry]>([])
 
-private enum Naming: EventStreamNaming {
-    static var categoryRule: StreamCategoryRule { .custom("Order") }
-    static var category: String { "Order" }
-}
+    /// A logger whose every message, at every level, is recorded here.
+    var logger: Logger {
+        Logger(label: "KurrentUnitOfWorkBackendTests") { _ in RecordingLogHandler(recorder: self) }
+    }
 
-/// A payload decoded as plain JSON, so two payloads compare field by field.
-private enum JSONValue: Decodable, Equatable {
-    case null
-    case bool(Bool)
-    case number(Double)
-    case string(String)
-    case array([JSONValue])
-    case object([String: JSONValue])
+    /// The recorded messages at `.warning` or above, in the order they were logged.
+    var warnings: [Entry] {
+        entries.withLock { $0.filter { $0.level >= .warning } }
+    }
 
-    init(from decoder: any Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if container.decodeNil() {
-            self = .null
-        } else if let value = try? container.decode(Bool.self) {
-            self = .bool(value)
-        } else if let value = try? container.decode(Double.self) {
-            self = .number(value)
-        } else if let value = try? container.decode(String.self) {
-            self = .string(value)
-        } else if let value = try? container.decode([JSONValue].self) {
-            self = .array(value)
-        } else {
-            self = .object(try container.decode([String: JSONValue].self))
-        }
+    func record(_ entry: Entry) {
+        entries.withLock { $0.append(entry) }
     }
 }
 
-/// `customMetadata` parsed by `JSONSerialization`; `nil` for no bytes.
-private func jsonObject(_ data: Data) throws -> NSDictionary? {
-    guard !data.isEmpty else { return nil }
-    return try JSONSerialization.jsonObject(with: data) as? NSDictionary
+private struct RecordingLogHandler: LogHandler {
+    let recorder: LogRecorder
+    var metadata: Logger.Metadata = [:]
+    var logLevel: Logger.Level = .trace
+
+    subscript(metadataKey key: String) -> Logger.Metadata.Value? {
+        get { metadata[key] }
+        set { metadata[key] = newValue }
+    }
+
+    func log(event: LogEvent) {
+        recorder.record(.init(level: event.level, message: event.message.description))
+    }
+}
+
+/// The warning `commit()` logs when the client reports `returned` for `stream` instead of
+/// the predicted tail.
+private func revisionWarning(_ stream: String, predicted: UInt64, returned: String) -> LogRecorder.Entry {
+    .init(level: .warning, message: "Committed \(stream): predicted revision \(predicted), server returned \(returned)")
+}
+
+// MARK: - Event encoding fixtures
+
+private struct Placed: DomainEvent, Equatable {
+    typealias Metadata = [String: String]
+    var id: UUID = .init()
+    var occurred: Date = Date(timeIntervalSince1970: 1_700_000_000)
+    var aggregateRootId: String
+    var metadata: [String: String]? = nil
+    var amount: Int
+}
+
+/// `bytes` parsed by `JSONSerialization` as a JSON object of strings; `nil` for no bytes or
+/// anything else.
+private func jsonStringObject(_ bytes: Data?) throws -> [String: String]? {
+    guard let bytes else { return nil }
+    return try JSONSerialization.jsonObject(with: bytes) as? [String: String]
 }
 
 @Suite("KurrentUnitOfWorkBackend")
@@ -250,6 +264,24 @@ struct KurrentUnitOfWorkBackendTests {
         #expect(try await storedIds(store, "Order-b").last == b[0].id)
     }
 
+    @Test("appendAtomically gets the batches in the order their streams were first staged")
+    func commitSendsBatchesInStagingOrder() async throws {
+        let client = CountingClient(wrapping: InMemoryEventStoreClient())
+        let backend = KurrentUnitOfWorkBackend(client: client)
+        // Not sorted, and eight of them: batches taken in hash order would match by chance
+        // about once in 40,000 runs (with three, once in six).
+        let ids = ["z", "a", "m", "q", "c", "x", "f", "k"]
+        for id in ids {
+            try stage(backend, id, .noStream, samples("\(id)1"))
+        }
+        // Joins z's batch; z stays first.
+        try stage(backend, "z", .at(0), samples("z2"))
+
+        try await backend.commit()
+
+        #expect(client.appendAtomicallyStreams == [ids.map { "Order-\($0)" }])
+    }
+
     @Test("one stream at another revision becomes commitConflict for its id")
     func singleBatchConflictBecomesCommitConflict() async throws {
         let client = InMemoryEventStoreClient()
@@ -262,6 +294,32 @@ struct KurrentUnitOfWorkBackendTests {
         #expect(error?.code == .commitConflict)
         #expect(error?.commitConflicts == [DDDError.CommitConflict(id: "a", expected: nil, actual: 0)])
         #expect(try await storedRevisions(client, "Order-a") == [0])
+    }
+
+    @Test("one stream staged at .at(1) while the server is at 3 → commitConflict(id, expected 1, actual 3)")
+    func singleStreamConflictCarriesExpectedRevision() async throws {
+        let client = InMemoryEventStoreClient()
+        _ = try await client.append(events: samples("a0", "a1", "a2", "a3"), toStream: "Order-a", category: "Order", expectedRevision: .noStream)
+        let backend = KurrentUnitOfWorkBackend(client: client)
+        try stage(backend, "a", .at(1), samples("x"))
+
+        let error = await captureDDDError { try await backend.commit() }
+
+        #expect(error?.code == .commitConflict)
+        #expect(error?.commitConflicts == [DDDError.CommitConflict(id: "a", expected: 1, actual: 3)])
+        #expect(try await storedRevisions(client, "Order-a") == [0, 1, 2, 3])
+    }
+
+    @Test("one stream: unsupportedFeature is rethrown unchanged, since the single-stream append is not AppendRecords")
+    func singleStreamUnsupportedFeatureIsRethrownUnchanged() async throws {
+        let client = CountingClient(wrapping: InMemoryEventStoreClient(), errorToThrow: appendRecordsUnsupported)
+        let backend = KurrentUnitOfWorkBackend(client: client)
+        try stage(backend, "a", .noStream, samples("a1"))
+
+        await #expect(throws: appendRecordsUnsupported) { try await backend.commit() }
+
+        #expect(client.appendCount == 1)
+        #expect(client.appendAtomicallyCount == 0)
     }
 
     @Test("consistency violations become commitConflict(conflicts:) with each stream's id; nothing is written")
@@ -310,7 +368,13 @@ struct KurrentUnitOfWorkBackendTests {
 
         #expect(error?.code == .streamPurged)
         #expect(error?.userInfos["id"] as? String == "t")
-        await expectNotWritten(client, "Order-u")
+        // Still tombstoned: nothing recreated it.
+        await #expect(throws: KurrentError.resourceDeleted(resource: "Order-t")) {
+            _ = try await client.readStream(name: "Order-t", from: .start, resolveLinks: true)
+        }
+        if withSecondStream {
+            await expectNotWritten(client, "Order-u")
+        }
     }
 
     @Test("a server without AppendRecords becomes operationNotAllow on commit")
@@ -359,25 +423,78 @@ struct KurrentUnitOfWorkBackendTests {
         await #expect(throws: error) { try await backend.commit() }
     }
 
-    @Test("returned revisions that differ from the prediction are logged, not thrown", arguments: [1, 2])
-    func revisionMismatchIsLoggedNotThrown(streamCount: Int) async throws {
+    @Test("returned revisions that match the prediction log no warning", arguments: [1, 2])
+    func matchingRevisionsLogNothing(streamCount: Int) async throws {
         let store = InMemoryEventStoreClient()
-        let backend = KurrentUnitOfWorkBackend(client: CountingClient(wrapping: store, revisionOffset: 10))
-        let streams = ["a", "b"].prefix(streamCount)
-        for id in streams {
-            try stage(backend, id, .noStream, samples("\(id)1"))
+        let recorder = LogRecorder()
+        let backend = KurrentUnitOfWorkBackend(client: store, logger: recorder.logger)
+        // Two events on a: its predicted tail (1) differs from its first revision (0).
+        let batches = [(id: "a", events: samples("a1", "a2")), (id: "b", events: samples("b1"))].prefix(streamCount)
+        for batch in batches {
+            try stage(backend, batch.id, .noStream, batch.events)
         }
 
         try await backend.commit()
 
-        for id in streams {
-            #expect(try await storedRevisions(store, "Order-\(id)") == [0])
+        #expect(recorder.warnings == [])
+        for batch in batches {
+            #expect(try await storedIds(store, "Order-\(batch.id)") == batch.events.map(\.id))
+        }
+    }
+
+    @Test("returned revisions that differ from the prediction are logged, one warning per stream, not thrown", arguments: [1, 2])
+    func revisionMismatchIsLoggedNotThrown(streamCount: Int) async throws {
+        let store = InMemoryEventStoreClient()
+        let recorder = LogRecorder()
+        let backend = KurrentUnitOfWorkBackend(client: CountingClient(wrapping: store, revisionOffset: 10), logger: recorder.logger)
+        // a is predicted at 0 and b at 1; the client reports each 10 higher.
+        let batches = [(id: "a", events: samples("a1")), (id: "b", events: samples("b1", "b2"))].prefix(streamCount)
+        for batch in batches {
+            try stage(backend, batch.id, .noStream, batch.events)
+        }
+
+        try await backend.commit()
+
+        let expected = [
+            revisionWarning("Order-a", predicted: 0, returned: "10"),
+            revisionWarning("Order-b", predicted: 1, returned: "11"),
+        ]
+        #expect(recorder.warnings == Array(expected.prefix(streamCount)))
+        for batch in batches {
+            #expect(try await storedIds(store, "Order-\(batch.id)") == batch.events.map(\.id))
+        }
+    }
+
+    @Test(
+        "a stream the client reports no revision for is logged, not thrown: append returns nil, or appendAtomically leaves it out",
+        arguments: [1, 2]
+    )
+    func missingResultIsLoggedNotThrown(streamCount: Int) async throws {
+        let store = InMemoryEventStoreClient()
+        let recorder = LogRecorder()
+        let batches = [(id: "a", events: samples("a1")), (id: "b", events: samples("b1", "b2"))].prefix(streamCount)
+        let missing = try #require(batches.last)
+        let client = CountingClient(wrapping: store, withholdingRevisionOf: "Order-\(missing.id)")
+        let backend = KurrentUnitOfWorkBackend(client: client, logger: recorder.logger)
+        for batch in batches {
+            try stage(backend, batch.id, .noStream, batch.events)
+        }
+
+        try await backend.commit()
+
+        #expect(recorder.warnings == [
+            revisionWarning("Order-\(missing.id)", predicted: UInt64(missing.events.count - 1), returned: "no revision"),
+        ])
+        #expect(client.appendCount == (streamCount == 1 ? 1 : 0))
+        #expect(client.appendAtomicallyCount == (streamCount == 1 ? 0 : 1))
+        for batch in batches {
+            #expect(try await storedIds(store, "Order-\(batch.id)") == batch.events.map(\.id))
         }
     }
 
     // MARK: after commit
 
-    @Test("once committed, stage, stagedEvents and commit throw operationNotAllow")
+    @Test("once committed, stage and stagedEvents throw operationNotAllow(\"stage\") and commit throws operationNotAllow(\"commit\")")
     func stageAfterCommitThrows() async throws {
         let client = InMemoryEventStoreClient()
         let backend = KurrentUnitOfWorkBackend(client: client)
@@ -386,7 +503,7 @@ struct KurrentUnitOfWorkBackendTests {
 
         let staging = await captureOperationNotAllow("stage") { try stage(backend, "b", .noStream, samples("b1")) }
         #expect((staging?.userInfos["reason"] as? String)?.contains("already committed") == true)
-        let reading = await captureOperationNotAllow("stagedEvents") { _ = try backend.stagedEvents(stream: "Order-a") }
+        let reading = await captureOperationNotAllow("stage") { _ = try backend.stagedEvents(stream: "Order-a") }
         #expect((reading?.userInfos["reason"] as? String)?.contains("already committed") == true)
         _ = await captureOperationNotAllow("commit") { try await backend.commit() }
 
@@ -401,7 +518,7 @@ struct KurrentUnitOfWorkBackendTests {
         await #expect(throws: EventStoreClientError.atomicAppendUnsupported) { try await backend.commit() }
 
         _ = await captureOperationNotAllow("stage") { try stage(backend, "c", .noStream, samples("c1")) }
-        _ = await captureOperationNotAllow("stagedEvents") { _ = try backend.stagedEvents(stream: "Order-a") }
+        _ = await captureOperationNotAllow("stage") { _ = try backend.stagedEvents(stream: "Order-a") }
     }
 
     @Test(
@@ -432,7 +549,7 @@ struct KurrentUnitOfWorkBackendTests {
         // The client append is in flight: the backend must already be ended.
         let staging = await captureOperationNotAllow("stage") { try stage(backend, "c", .noStream, samples("c1")) }
         #expect((staging?.userInfos["reason"] as? String)?.contains("already committed") == true)
-        let reading = await captureOperationNotAllow("stagedEvents") { _ = try backend.stagedEvents(stream: "Order-a") }
+        let reading = await captureOperationNotAllow("stage") { _ = try backend.stagedEvents(stream: "Order-a") }
         #expect((reading?.userInfos["reason"] as? String)?.contains("already committed") == true)
         let recommitting = await captureOperationNotAllow("commit") { try await backend.commit() }
         #expect((recommitting?.userInfos["reason"] as? String)?.contains("already committed") == true)
@@ -450,41 +567,24 @@ struct KurrentUnitOfWorkBackendTests {
 
     // MARK: encodeForKurrent
 
-    @Test("encodeForKurrent + client.append stores what KurrentStorageCoordinator.append stores")
-    func encodeForKurrentMatchesCoordinatorOutput() async throws {
-        let client = InMemoryEventStoreClient()
-        let coordinator = KurrentStorageCoordinator<Naming, CustomMetadata>(client: client, eventMapper: NoMapper())
+    @Test("encodeForKurrent keeps each event's id, type and payload and carries the metadata as a JSON object; nil metadata carries no bytes")
+    func encodeForKurrentWritesMetadataAsJSONObject() throws {
         let events = [Placed(aggregateRootId: "1", amount: 3), Placed(aggregateRootId: "1", amount: 5)]
-        let metadata = CustomMetadata(operatorId: "operator-7")
 
-        _ = try await coordinator.append(events: events, byId: "1", version: nil, metadata: metadata)
-        let encoded = try encodeForKurrent(events: events, metadata: metadata)
-        _ = try await client.append(events: encoded.events, toStream: "Order-direct", category: "Order", expectedRevision: .noStream)
+        let encoded = try encodeForKurrent(events: events, metadata: CustomMetadata(operatorId: "operator-7"))
 
-        let viaCoordinator = try await client.readStream(name: Naming.getStreamName(id: "1"), from: .start, resolveLinks: true)
-        let viaEncoder = try await client.readStream(name: "Order-direct", from: .start, resolveLinks: true)
-        #expect(viaCoordinator.count == events.count)
-        #expect(viaEncoder.count == events.count)
-        for (expected, actual) in zip(viaCoordinator, viaEncoder) {
-            #expect(actual.eventType == expected.eventType)
-            #expect(actual.id == expected.id)
-            #expect(try actual.decode(to: JSONValue.self) == expected.decode(to: JSONValue.self))
-            let expectedMetadata = try #require(try jsonObject(expected.customMetadata))
-            #expect(try jsonObject(actual.customMetadata) == expectedMetadata)
-        }
-        #expect(encoded.metadataBytes != nil)
-        #expect(encoded.events.allSatisfy { $0.customMetadata == encoded.metadataBytes })
-    }
-
-    @Test("encodeForKurrent without metadata carries no metadata bytes")
-    func encodeForKurrentWithoutMetadataCarriesNoBytes() throws {
-        let events = [Placed(aggregateRootId: "1", amount: 3)]
-
-        let encoded = try encodeForKurrent(events: events, metadata: nil as CustomMetadata?)
-
-        #expect(encoded.metadataBytes == nil)
-        #expect(encoded.events.map(\.customMetadata) == [nil])
         #expect(encoded.events.map(\.id) == events.map(\.id))
-        #expect(encoded.events.map(\.eventType) == ["Placed"])
+        #expect(encoded.events.map(\.eventType) == events.map(\.eventType))
+        for (eventData, event) in zip(encoded.events, events) {
+            #expect(try JSONDecoder().decode(Placed.self, from: eventData.payload.data) == event)
+            #expect(try jsonStringObject(eventData.customMetadata) == ["operatorId": "operator-7"])
+        }
+        #expect(try jsonStringObject(encoded.metadataBytes) == ["operatorId": "operator-7"])
+
+        let withoutMetadata = try encodeForKurrent(events: events, metadata: nil as CustomMetadata?)
+
+        #expect(withoutMetadata.metadataBytes == nil)
+        #expect(withoutMetadata.events.map(\.customMetadata) == [nil, nil])
+        #expect(withoutMetadata.events.map(\.id) == events.map(\.id))
     }
 }
