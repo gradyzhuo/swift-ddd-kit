@@ -44,12 +44,19 @@ public func withUnitOfWork<R>(_ body: (UnitOfWork) async throws -> R) async thro
         )
     }
     let work = UnitOfWork()
+    var ending: UnitOfWork.Ending?
     let result = try await _UnitOfWorkStorage.$current.withValue(work) {
-        defer { work.close() }
+        // Closes the scope whether `body` returned or threw. `close()` also takes the
+        // backend and the hooks out of `work`, so a hook that captures `work` keeps
+        // neither alive; when `body` threw, they are dropped with `ending`.
+        defer { ending = work.close() }
         return try await body(work)
     }
+    guard let ending else {
+        preconditionFailure("unit of work \(work.id) did not close when its body returned")
+    }
     // Outside the TaskLocal from here on: hooks see `UnitOfWork.current == nil`.
-    try await work.commitAndRunHooks()
+    try await ending.commitAndRunHooks()
     return result
 }
 
@@ -171,26 +178,39 @@ public final class UnitOfWork: Sendable {
         }
     }
 
-    fileprivate func close() {
-        state.withLock { $0.closed = true }
+    /// What is left to do once the scope closed: throw for `failure` if the scope was
+    /// failed, otherwise commit through `backend` and run `hooks`.
+    fileprivate struct Ending {
+        let backend: (any UnitOfWorkBackend)?
+        let failure: (any Error)?
+        let hooks: [@Sendable () async throws -> Void]
+
+        /// Steps 3–5 of ``withUnitOfWork(_:)``.
+        func commitAndRunHooks() async throws {
+            if let failure {
+                throw DDDError.operationNotAllow(
+                    operation: "commit",
+                    reason: "unit of work failed",
+                    userInfos: ["cause": failure]
+                )
+            }
+            try await backend?.commit()
+            for hook in hooks {
+                try await hook()
+            }
+        }
     }
 
-    /// Steps 3–5 of ``withUnitOfWork(_:)``; runs after `close()`, so the state no
-    /// longer changes.
-    fileprivate func commitAndRunHooks() async throws {
-        let (backend, failure, hooks) = state.withLock { state in
-            (state.backend, state.failure, state.hooks)
-        }
-        if let failure {
-            throw DDDError.operationNotAllow(
-                operation: "commit",
-                reason: "unit of work failed",
-                userInfos: ["cause": failure]
-            )
-        }
-        try await backend?.commit()
-        for hook in hooks {
-            try await hook()
+    /// Closes the scope and moves the backend and the hooks out of it, in one lock.
+    /// The scope keeps only `failure`, so ``isFailed`` still answers once it ended.
+    fileprivate func close() -> Ending {
+        state.withLock { state in
+            state.closed = true
+            let ending = Ending(backend: state.backend, failure: state.failure, hooks: state.hooks)
+            state.backend = nil
+            state.backendIdentity = nil
+            state.hooks = []
+            return ending
         }
     }
 
