@@ -24,6 +24,33 @@ struct DDDErrorStoreCodesTests {
         #expect(DDDError.streamPurged(id: "o-1").commitConflict == nil)
     }
 
+    @Test("commitConflict(conflicts:) exposes all conflicts and the first as commitConflict")
+    func multiConflict() {
+        let a = DDDError.CommitConflict(id: "q-1", expected: nil, actual: 0)
+        let b = DDDError.CommitConflict(id: "b-1", expected: 3, actual: 4)
+        let error = DDDError.commitConflict(conflicts: [a, b])
+        #expect(error.code == .commitConflict)
+        #expect(error.commitConflicts == [a, b])
+        #expect(error.commitConflict == a)
+    }
+
+    @Test("commitConflict(conflicts:) names every conflicting id in its message")
+    func multiConflictMessage() {
+        let error = DDDError.commitConflict(conflicts: [
+            DDDError.CommitConflict(id: "q-1", expected: nil, actual: 0),
+            DDDError.CommitConflict(id: "b-1", expected: 3, actual: 4),
+        ])
+        #expect(error.message == "[commitConflict] Append to q-1, b-1 found other revisions.")
+    }
+
+    @Test("single commitConflict reports itself in commitConflicts; other codes report none")
+    func singleAndOthers() {
+        #expect(DDDError.commitConflict(id: "o-1", expected: nil, actual: 3).commitConflicts.count == 1)
+        #expect(DDDError.commitConflict(id: "o-1", expected: nil, actual: 3).commitConflicts
+            == [DDDError.CommitConflict(id: "o-1", expected: nil, actual: 3)])
+        #expect(DDDError.streamPurged(id: "o-1").commitConflicts.isEmpty)
+    }
+
     @Test("streamPurged carries the id")
     func streamPurgedPayload() {
         let error = DDDError.streamPurged(id: "o-1")
