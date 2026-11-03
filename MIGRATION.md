@@ -540,8 +540,9 @@ direct requirement below 2.6.1.
   together only through the same `KurrentDBClient` instance. Two instances connected to the same
   cluster (two `KurrentDBPool.borrow()` results, say) count as different clients: the first write
   through the second one throws `DDDError.operationNotAllow`. A read through another instance
-  neither binds nor fails the unit of work, but it sees only what the server has: only
-  coordinators whose client has the unit of work's identity see its staged events. A usecase that
+  neither binds the unit of work nor sees its staged events, only what the server has: only
+  coordinators whose client has the unit of work's identity see them. A read error through it
+  still fails the unit of work, as any store error in the default `find` does. A usecase that
   reads what an earlier usecase in the same block saved needs a repository over the same
   `KurrentDBClient` instance.
 - **BC4 — The unit-of-work check lives in `EventSourcingRepository`'s default implementations.**

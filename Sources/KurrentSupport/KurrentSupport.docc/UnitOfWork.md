@@ -19,9 +19,12 @@ usecases with a unit of work".
   updates the aggregate's version with it, as it does after a real append.
 - A second save of the same stream must expect the tail the first one predicted; its events join
   the same batch, which keeps the first expected revision. Any other expected revision throws
-  `DDDError.commitConflict` at once. So two concurrent `find` + `save` of one aggregate inside a
-  scope fail deterministically, and so do two aggregate types whose stream names collide.
+  `DDDError.commitConflict` at once. So when two concurrent tasks in a scope both find one
+  aggregate before either saves it, the second save fails, and so does the second save of two
+  aggregate types whose stream names collide.
 - Empty `append`s and expected revisions beyond `Int64.max` behave as outside a scope.
+- An event whose payload cannot be encoded makes `save` throw its `EncodingError` at once; nothing
+  is staged, and the repository fails the unit of work.
 - Every save checks that AppendRecords can carry its metadata; see
   <doc:UnitOfWork#Metadata-inside-a-scope>.
 - `purge` throws `DDDError.operationNotAllow(operation: "purge", reason: "not allowed inside a
@@ -139,7 +142,8 @@ An implementation of `appendAtomically(_:)` receives at least two ``StreamBatch`
 distinct streams. It checks every expected revision before writing anything. When a stream is
 tombstoned it throws `KurrentError.resourceDeleted` naming the first such stream in batch order,
 even when other streams conflict too; otherwise, when any expected revision does not hold, it
-throws ``EventStoreClientError/consistencyViolations(_:)`` with one ``StreamConflict`` per stream
-(`current` is `nil` for a stream that does not exist) and writes nothing. It returns each
+throws ``EventStoreClientError/consistencyViolations(_:)`` with one ``StreamConflict`` per such
+stream, in any order (`current` is `nil` for a stream that does not exist), and writes nothing;
+the unit-of-work backend reports the conflicts in its own batch order. It returns each
 stream's new revision as a ``StreamBatchResult``, in no particular order. Resending a whole
 request with the same event ids returns the original revisions and writes nothing.

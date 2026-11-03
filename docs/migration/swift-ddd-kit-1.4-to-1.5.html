@@ -228,7 +228,7 @@
     <p class="lead">
       If you are an AI agent upgrading a project that depends on <code>swift-ddd-kit</code> from 1.4 to 1.5, consume the JSON
       below. Each rule has a <code>kind</code>, <code>mechanical</code> (whether plain text replacement is enough),
-      <code>before</code>/<code>after</code> and <code>action</code>. Apply order: <code>source-breaking</code> first so the
+      <code>before</code>/<code>after</code> (<code>new</code> rules give only <code>after</code>) and <code>action</code>. Apply order: <code>source-breaking</code> first so the
       project compiles, then check every <code>behaviour-change</code> (the compiler will not point these out).
       <code>scope-rule</code> entries apply to code that runs inside <code>withUnitOfWork</code>. <code>scope</code> says
       where to look.
@@ -293,7 +293,7 @@
       "scope": "composition roots that give repositories different KurrentDBClient instances (e.g. one KurrentDBPool.borrow() each)",
       "before": "any KurrentDBClient of the cluster",
       "after": "every repository that writes in one unit of work, or reads what the block saved, wraps the same KurrentDBClient instance",
-      "action": "Identity is the client instance, not the cluster. The first write through a second instance throws DDDError.operationNotAllow. A read through another instance neither binds nor fails the unit of work, but sees only what the server has, not the staged events: a usecase that reads what an earlier usecase in the same block saved needs a repository over the same KurrentDBClient instance."
+      "action": "Identity is the client instance, not the cluster. The first write through a second instance throws DDDError.operationNotAllow. A read through another instance neither binds the unit of work nor sees its staged events, only what the server has; a read error through it still fails the unit of work like any store error. A usecase that reads what an earlier usecase in the same block saved needs a repository over the same KurrentDBClient instance."
     },
     {
       "id": "BC4",
@@ -320,7 +320,7 @@
       "scope": "EventMetadata types saved inside withUnitOfWork",
       "before": "metadata stored as raw JSON bytes",
       "after": "a unit of work of two or more streams sends metadata as protobuf Value (AppendRecords properties)",
-      "action": "Inside a unit of work, metadata must encode to a JSON object, or save throws operationNotAllow. NaN and infinity throw EncodingError at save, in and out of a unit of work, as before 1.5. On the multi-stream path every number travels as the nearest Double: integers beyond ±2^53, including beyond 64 bits (e.g. a large Decimal), are rounded without an error, so store them as strings. On read the server adds $schema.name and $schema.format keys: compare decoded structs, not raw bytes."
+      "action": "Inside a unit of work, metadata must encode to a JSON object, or save throws operationNotAllow. NaN and ±infinity throw EncodingError from JSONEncoder at save (not operationNotAllow), in and out of a unit of work, as before 1.5. Inside a unit of work that writes two or more streams every number travels as the nearest Double: integers beyond ±2^53, including beyond 64 bits (e.g. a large Decimal), are rounded without an error, so store them as strings. On read the server adds $schema.name and $schema.format keys: compare decoded structs, not raw bytes."
     },
     {
       "id": "N1",
@@ -349,32 +349,47 @@
     {
       "id": "R1",
       "kind": "scope-rule",
+      "mechanical": false,
       "scope": "calls of withUnitOfWork",
+      "before": "a usecase's execute(input:) calls withUnitOfWork, or a block calls code that opens another scope",
+      "after": "only the handler calls withUnitOfWork; shared logic is a function that opens no scope",
       "action": "No nesting: withUnitOfWork inside a unit of work throws operationNotAllow. Usecases never call it; handlers do. Shared logic goes in a function that does not open a scope."
     },
     {
       "id": "R2",
       "kind": "scope-rule",
+      "mechanical": false,
       "scope": "do/catch inside the block",
+      "before": "do { try await usecase.execute(input: i) } catch { return .failed(error) }   // inside the block",
+      "after": "try work.fail(error); return .failed(error)   // or let the error leave the block",
       "action": "Do not catch a usecase's error inside the block. To return a normal failure output, call try work.fail(error) and return."
     },
     {
       "id": "R3",
       "kind": "scope-rule",
+      "mechanical": false,
       "scope": "Task { } inside the block",
+      "before": "Task { try await repository.save(aggregateRoot: x) }   // inside the block",
+      "after": "try await repository.save(aggregateRoot: x)   // awaited before the block returns",
       "action": "Do not move a save into Task { }. A save that runs after the block ended throws operationNotAllow. Await everything before returning."
     },
     {
       "id": "R4",
       "kind": "scope-rule",
+      "mechanical": false,
       "scope": "side effects after save",
+      "before": "try await repository.save(aggregateRoot: x); try await eventBus.publish(event: e)",
+      "after": "if let work = UnitOfWork.current { try work.onCommitted { ... } } else { ... }",
       "action": "Publish through work.onCommitted (see BC2)."
     },
     {
       "id": "R5",
       "kind": "scope-rule",
+      "mechanical": false,
       "scope": "async let / TaskGroup inside the block",
-      "action": "Concurrent usecases on different aggregates are fine; concurrent changes to the same aggregate make the second save throw commitConflict."
+      "before": "async let a: Void = change(id: x); async let b: Void = change(id: x)   // the same aggregate",
+      "after": "async let a: Void = change(id: x); async let b: Void = change(id: y)   // different aggregates",
+      "action": "Concurrent usecases on different aggregates are fine. Concurrent changes to the same aggregate are not supported: when both tasks find it before either saves it, the second save throws commitConflict."
     }
   ],
   "downstreamProcedure": [
@@ -425,7 +440,8 @@
     <div class="card">
       <h3><span class="chgid">SB3</span> &nbsp;<span class="tag sig">dependency</span> &nbsp;swift-kurrentdb ≥ 2.6.1</h3>
       <p>swift-kurrentdb 2.6.0 silently dropped custom metadata from events written through <code>AppendRecords</code>, the call a
-         unit of work uses for two or more streams; 2.6.1 carries it, and throws for metadata it cannot carry. If your
+         unit of work uses for two or more streams; 2.6.1 carries it, and throws for metadata that is not a JSON object
+         (<span class="chgid">BC6</span>). If your
          <code>Package.swift</code> depends on swift-kurrentdb directly, raise the requirement too.</p>
       <pre class="diff"><span class="a">- .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0")</span>
 <span class="d">+ .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.1")</span></pre>
@@ -466,10 +482,10 @@
          <code>init(client: KurrentDBClient, eventMapper:)</code> over one instance share the unit of work, so a composition root
          that passes one client everywhere needs no change. Two instances connected to the same cluster (two
          <code>KurrentDBPool.borrow()</code> results, say) count as two: the first write through the second one throws
-         <code>DDDError.operationNotAllow</code>. A read through another instance neither binds nor fails the unit of work, but it
-         sees only what the server has: only coordinators whose client has the unit of work's identity see its staged events. A
-         usecase that reads what an earlier usecase in the same block saved needs a repository over the same
-         <code>KurrentDBClient</code> instance.</p>
+         <code>DDDError.operationNotAllow</code>. A read through another instance neither binds the unit of work nor sees its
+         staged events, only what the server has: only coordinators whose client has the unit of work's identity see them. A read
+         error through it still fails the unit of work like any store error. A usecase that reads what an earlier usecase in the
+         same block saved needs a repository over the same <code>KurrentDBClient</code> instance.</p>
     </div>
 
     <div class="card">
@@ -498,10 +514,11 @@
          is not checked, and outside a unit of work such metadata is still written as before.</p>
       <ul class="tite">
         <li>NaN and ±infinity throw <code>EncodingError</code> from the coordinator's <code>JSONEncoder</code> at <code>save</code>,
-            inside a unit of work and outside it, as before 1.5.</li>
-        <li>Numbers are not checked further: on the multi-stream path each one travels as the nearest <code>Double</code>, so an
-            integer beyond ±2^53, including one beyond 64 bits such as a large <code>Decimal</code>, is stored rounded without an
-            error. <b>Store values whose every digit matters as strings.</b></li>
+            not <code>operationNotAllow</code>, inside a unit of work and outside it, as before 1.5. Inside a unit of work the error
+            also fails it.</li>
+        <li>Numbers are not checked further: inside a unit of work that writes two or more streams each one travels as the
+            nearest <code>Double</code>, so an integer beyond ±2^53, including one beyond 64 bits such as a large
+            <code>Decimal</code>, is stored rounded without an error. <b>Store values whose every digit matters as strings.</b></li>
       </ul>
       <p>Read back, the custom metadata also holds the server's <code>$schema.name</code> and <code>$schema.format</code> keys;
          decoding into a struct is unaffected, so compare decoded values, not raw bytes or dictionaries.</p>
@@ -553,8 +570,9 @@
             <code>PersistentEventStore</code> is not refused: it purges at once and permanently, even when the block then throws.</li>
         <li>Reads through a coordinator whose client has the scope's identity see the events the scope has staged, after the
             server's (read-your-writes). A read never creates, binds or fails on the scope's backend, so a usecase may read through a
-            repository over another <code>KurrentDBClient</code>, but that read sees only what the server has. A usecase that reads
-            what an earlier usecase in the same block saved needs a repository over the same <code>KurrentDBClient</code> instance.</li>
+            repository over another <code>KurrentDBClient</code>, but that read sees only what the server has (a read error through
+            it still fails the unit of work, <span class="chgid">BC3</span>). A usecase that reads what an earlier usecase in the
+            same block saved needs a repository over the same <code>KurrentDBClient</code> instance.</li>
         <li>A second <code>save</code> of the same stream must expect the revision the first one predicted, or it throws
             <code>commitConflict</code> at once; so do two aggregate types whose stream names collide.</li>
         <li>Each usecase's <code>EventMetadataContext&lt;M&gt;.withValue</code> value travels with that usecase's events; repositories with
@@ -572,7 +590,8 @@
           extract a function that does not open a scope and let each handler wrap it.</li>
       <li><b>Do not <code>do/catch</code> a usecase's error inside the block.</b> To return a normal failure output, call
           <code>try work.fail(error)</code> and return. What goes wrong otherwise is a usecase that saves, then throws, and is
-          caught: errors that pass through a repository fail the scope automatically, and this rule covers the rest.</li>
+          caught: store errors in the default repository methods fail the scope automatically (<span class="chgid">BC4</span>),
+          and this rule covers the rest.</li>
       <li><b>Do not move a <code>save</code> into <code>Task { … }</code>.</b> A task that is not detached inherits the scope; a
           <code>save</code> it reaches after the block ended throws <code>operationNotAllow</code>, never writes directly and never
           joins a batch that was already committed. Await everything before returning.</li>
@@ -580,8 +599,8 @@
           before the commit inside a scope; use <code>if let work = UnitOfWork.current { try work.onCommitted { … } } else { … }</code>
           (<span class="chgid">BC2</span>).</li>
       <li><b>Different aggregates may run concurrently, the same one may not.</b> <code>async let</code> and <code>TaskGroup</code> over
-          <b>different</b> aggregates are fine; changing the same aggregate concurrently makes the second <code>save</code> throw
-          <code>commitConflict</code>.</li>
+          <b>different</b> aggregates are fine; when two tasks both find the same aggregate before either saves it, the second
+          <code>save</code> throws <code>commitConflict</code>.</li>
     </ol>
 <pre><span class="kw">let</span> quoting = <span class="kw">try await</span> withUnitOfWork { work <span class="kw">in</span>
     <span class="kw">let</span> quoting = <span class="kw">try await</span> createQuotingCaseService.execute(
@@ -596,8 +615,8 @@
   <section id="projections">
     <h2>Projections run on subscription runners, not inside a scope</h2>
     <div class="callout warn"><b>Do not run a projector synchronously inside <code>withUnitOfWork</code></b>
-      Every read through a <code>KurrentStorageCoordinator</code> inside a scope sees the staged events, including an
-      <code>EventSourcingProjector</code> called from the block. Read model snapshots go to another store and are not part of the
+      Every read inside a scope through a <code>KurrentStorageCoordinator</code> over the same client instance as the scope's
+      writes sees the staged events, including an <code>EventSourcingProjector</code> called from the block. Read model snapshots go to another store and are not part of the
       unit of work, so such a projector folds events that a failed commit never writes, and its snapshot runs ahead of the
       event store. Run projections on the <code>KurrentProjection</code> subscription runners: they run in their own task,
       outside any scope, and see only committed events.</div>

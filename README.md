@@ -78,7 +78,8 @@ Command Handler
   │       └─ compose usecases with withUnitOfWork { … } to commit their saves together
   │
   └─ 4. eventBus.postAllEvent()
-          └─ publishes saved domain events to DomainEventBus subscribers
+          ├─ publishes saved domain events to DomainEventBus subscribers
+          └─ in withUnitOfWork: publish in work.onCommitted { … } or after the block, not right after save
 ```
 
 ### Read Side (Query)
@@ -322,9 +323,10 @@ Both services are the instances built at startup, with repositories over the sam
 finds the QuotingCase that was just created and is not written yet, and its `save` joins the same
 stream's batch. One stream is written with the same single-stream append as a plain `save`; two
 or more streams go through one atomic KurrentDB `AppendRecords` call (KurrentDB 26.1+). If any
-stream is not at its expected revision, nothing is written and the block throws `commitConflict`,
-with every conflicting stream in `error.commitConflicts`. Tests need no server: build the
-repositories over one `InMemoryEventStoreClient`.
+stream is not at its expected revision, nothing is written and `withUnitOfWork` throws
+`commitConflict` (the commit runs after the block returned), with every conflicting stream in
+`error.commitConflicts`. Tests need no server: build the repositories over one
+`InMemoryEventStoreClient`.
 
 The block's `work` parameter registers side effects that must wait for the commit
 (`try work.onCommitted { … }`) and fails the unit of work without throwing (`try work.fail(error)`):
@@ -352,8 +354,11 @@ Rules inside the block:
   function that does not open a scope and let each handler wrap it.
 - **Do not `do/catch` a usecase's error inside the block.** To return a normal failure output,
   call `try work.fail(error)` and return; `withUnitOfWork` then commits nothing and throws
-  `operationNotAllow` with the cause in `userInfos["cause"]`. Errors that pass through a repository
-  fail the unit of work automatically, even when caught.
+  `operationNotAllow` with the cause in `userInfos["cause"]`. Store errors from
+  `EventSourcingRepository`'s default `find`, `save` and `purge` (also when `delete` calls them),
+  and the refusal of a store that cannot take part, fail the unit of work automatically, even
+  when caught. The `aggregateNotFound` that `delete` throws, `markDelete` errors, and the errors
+  of a custom repository that overrides these methods do not.
 - **Do not move a `save` into `Task { … }`.** The task inherits the scope; a `save` it reaches
   after the block ended throws `operationNotAllow` instead of writing. Await everything before
   returning.
@@ -361,8 +366,8 @@ Rules inside the block:
   publishes before the commit inside a scope. Write
   `if let work = UnitOfWork.current { try work.onCommitted { … } } else { … }`.
 - **Different aggregates may run concurrently, the same one may not.** `async let` and `TaskGroup`
-  over different aggregates are fine; a second concurrent `save` of the same aggregate throws
-  `commitConflict`.
+  over different aggregates are fine; when two tasks both find the same aggregate before either
+  saves it, the second `save` throws `commitConflict`.
 
 Only `KurrentStorageCoordinator` takes part: inside the block, `save` and `purge` through a
 repository over `InMemoryEventStore` or `PersistentEventStore` throw `operationNotAllow`. Every
