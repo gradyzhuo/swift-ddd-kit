@@ -523,6 +523,50 @@ struct KurrentUnitOfWorkBackendTests {
         await expectNotWritten(store, "Order-c")
     }
 
+    @Test(
+        "stagedEventsIfUncommitted gives what stagedEvents gives until the commit starts, then nil without throwing: while the write is in flight and after it succeeded or failed",
+        arguments: [false, true]
+    )
+    func stagedEventsIfUncommittedIsNilOnceCommitStarted(commitFails: Bool) async throws {
+        let store = InMemoryEventStoreClient()
+        let (parked, park) = AsyncStream.makeStream(of: CheckedContinuation<Void, Never>.self)
+        let client = CountingClient(
+            wrapping: store,
+            errorToThrow: commitFails ? EventStoreClientError.atomicAppendUnsupported : nil,
+            gate: park
+        )
+        let backend = KurrentUnitOfWorkBackend(client: client)
+        let events = samples("a1", "a2")
+        try stage(backend, "a", .noStream, events)
+
+        let staged = try #require(try backend.stagedEvents(stream: "Order-a"))
+        let looked = try #require(backend.stagedEventsIfUncommitted(stream: "Order-a"))
+        #expect(looked.firstRevision == staged.firstRevision)
+        #expect(looked.events.map(\.id) == events.map(\.id))
+        #expect(backend.stagedEventsIfUncommitted(stream: "Order-unknown") == nil)
+
+        let committing = Task {
+            // Ends the wait below even if commit never reaches the client, so a regression fails instead of hanging.
+            defer { park.finish() }
+            try await backend.commit()
+        }
+        var parkedAppends = parked.makeAsyncIterator()
+        let inFlight = await parkedAppends.next()
+        park.finish()
+        let append = try #require(inFlight, "commit returned without calling the client")
+
+        // The commit has started: a read that got this backend just before sees nothing staged.
+        #expect(backend.stagedEventsIfUncommitted(stream: "Order-a") == nil)
+
+        append.resume()
+        if commitFails {
+            await #expect(throws: EventStoreClientError.atomicAppendUnsupported) { try await committing.value }
+        } else {
+            try await committing.value
+        }
+        #expect(backend.stagedEventsIfUncommitted(stream: "Order-a") == nil)
+    }
+
     // MARK: encodeForKurrent
 
     @Test("encodeForKurrent keeps each event's id, type and payload and carries the metadata as a JSON object; nil metadata carries no bytes")
