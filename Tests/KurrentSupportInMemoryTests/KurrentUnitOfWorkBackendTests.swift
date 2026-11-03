@@ -309,7 +309,7 @@ struct KurrentUnitOfWorkBackendTests {
 
     @Test(
         "commitConflicts follow the order the streams were first staged, whatever order the client lists the violations in",
-        arguments: [["Order-m", "Order-a", "Order-z"], ["Order-m", "Order-z"]]
+        arguments: [["Order-a", "Order-z", "Order-m"], ["Order-m", "Order-z"]]
     )
     func conflictsFollowStagingOrderWhateverTheClientOrder(listedStreams: [String]) async throws {
         // What the client reports for each stream it lists.
@@ -324,7 +324,9 @@ struct KurrentUnitOfWorkBackendTests {
             errorToThrow: EventStoreClientError.consistencyViolations(violations)
         )
         let backend = KurrentUnitOfWorkBackend(client: client)
-        // Staged z, a, m: neither sorted nor the reverse of the client's order.
+        // Staged z, a, m. The three-stream client order a, z, m is neither that order, nor
+        // sorted, nor its reverse, so a backend that keeps, sorts or reverses the client's
+        // order fails; the two-stream case checks a subset of the staged streams.
         try stage(backend, "z", .noStream, samples("z1"))
         try stage(backend, "a", .at(3), samples("a4"))
         try stage(backend, "m", .at(7), samples("m8"))
