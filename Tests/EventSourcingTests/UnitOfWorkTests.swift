@@ -1,0 +1,419 @@
+// Tests/EventSourcingTests/UnitOfWorkTests.swift
+import DDDCore
+import Foundation
+import Synchronization
+import Testing
+@testable import EventSourcing
+
+private enum TestError: Error, Equatable {
+    case first
+    case second
+    case commit
+    case hook
+}
+
+/// Backend double: counts `commit()` calls and optionally throws from them.
+private final class RecordingBackend: UnitOfWorkBackend {
+    private let commits = Mutex(0)
+    private let commitError: TestError?
+
+    init(commitError: TestError? = nil) {
+        self.commitError = commitError
+    }
+
+    var commitCount: Int { commits.withLock { $0 } }
+
+    /// True once `commit()` was called; hooks read it to prove the commit ran first.
+    var committed: Bool { commitCount > 0 }
+
+    func commit() async throws {
+        commits.withLock { $0 += 1 }
+        if let commitError { throw commitError }
+    }
+}
+
+private final class OtherBackend: UnitOfWorkBackend {
+    func commit() async throws {}
+}
+
+/// Thread-safe append-only log the hooks and escaped tasks write into.
+private final class Recorder<Value: Sendable>: Sendable {
+    private let values = Mutex<[Value]>([])
+
+    func append(_ value: Value) { values.withLock { $0.append(value) } }
+
+    var all: [Value] { values.withLock { $0 } }
+}
+
+/// Stand-ins for two different clients' `identity`.
+private enum ClientA {}
+private enum ClientB {}
+private let clientA = ObjectIdentifier(ClientA.self)
+private let clientB = ObjectIdentifier(ClientB.self)
+
+/// Registers `backend` as the scope's backend under `identity`.
+@discardableResult
+private func register(
+    _ backend: RecordingBackend,
+    in work: UnitOfWork,
+    identity: ObjectIdentifier = clientA
+) throws -> RecordingBackend {
+    try work.backend(RecordingBackend.self, identity: identity) { backend }
+}
+
+/// The `operationNotAllow` error `body` throws for `operation`; records an issue and
+/// returns nil when `body` throws something else or nothing.
+private func captureOperationNotAllow(
+    _ operation: String,
+    sourceLocation: SourceLocation = #_sourceLocation,
+    _ body: () async throws -> Void
+) async -> DDDError? {
+    do {
+        try await body()
+        Issue.record("expected `\(operation)` to throw operationNotAllow", sourceLocation: sourceLocation)
+        return nil
+    } catch let error as DDDError {
+        #expect(error.code == .aggregateOperationNotAllowed, sourceLocation: sourceLocation)
+        #expect(error.userInfos["operation"] as? String == operation, sourceLocation: sourceLocation)
+        return error
+    } catch {
+        Issue.record("expected operationNotAllow, got \(error)", sourceLocation: sourceLocation)
+        return nil
+    }
+}
+
+private func reason(of error: DDDError?) -> String? {
+    error?.userInfos["reason"] as? String
+}
+
+/// How a scope ends without committing (or with a failed commit).
+enum ScopeEnding: CaseIterable, Sendable {
+    case bodyThrows
+    case scopeFailed
+    case commitFails
+}
+
+@Suite("UnitOfWork")
+struct UnitOfWorkTests {
+
+    @Test("current is nil outside a scope and the scope inside it")
+    func currentIsNilOutsideAndSetInside() async throws {
+        #expect(UnitOfWork.current == nil)
+        try await withUnitOfWork { work in
+            #expect(UnitOfWork.current === work)
+        }
+        #expect(UnitOfWork.current == nil)
+    }
+
+    @Test("A nested withUnitOfWork throws without running its body; the outer scope still commits")
+    func nestedCallThrowsAndOuterStillCommits() async throws {
+        let backend = RecordingBackend()
+        try await withUnitOfWork { outer in
+            try register(backend, in: outer)
+            let error = await captureOperationNotAllow("withUnitOfWork") {
+                try await withUnitOfWork { _ in
+                    Issue.record("the nested body must not run")
+                }
+            }
+            #expect(reason(of: error) == "already inside unit of work \(outer.id)")
+            #expect(UnitOfWork.current === outer)
+            #expect(!outer.isFailed)
+        }
+        #expect(backend.commitCount == 1)
+    }
+
+    @Test("A body that throws is rethrown and nothing is committed")
+    func bodyThrowDoesNotCommit() async throws {
+        let backend = RecordingBackend()
+        await #expect(throws: TestError.first) {
+            try await withUnitOfWork { work in
+                try register(backend, in: work)
+                throw TestError.first
+            }
+        }
+        #expect(backend.commitCount == 0)
+    }
+
+    @Test("fail then a normal return throws operationNotAllow with the cause and commits nothing")
+    func failThenNormalReturnThrowsWithCause() async throws {
+        let backend = RecordingBackend()
+        let error = await captureOperationNotAllow("commit") {
+            let output = try await withUnitOfWork { work in
+                try register(backend, in: work)
+                try work.fail(TestError.first)
+                return "failed output"
+            }
+            Issue.record("withUnitOfWork returned \(output)")
+        }
+        #expect(reason(of: error) == "unit of work failed")
+        #expect(error?.userInfos["cause"] as? TestError == .first)
+        #expect(backend.commitCount == 0)
+    }
+
+    @Test("A second fail keeps the first cause")
+    func secondFailKeepsFirstCause() async throws {
+        let error = await captureOperationNotAllow("commit") {
+            try await withUnitOfWork { work in
+                try work.fail(TestError.first)
+                try work.fail(TestError.second)
+                #expect(work.failure as? TestError == .first)
+            }
+        }
+        #expect(error?.userInfos["cause"] as? TestError == .first)
+    }
+
+    @Test("isFailed flips on fail, and on an error passing through failingCurrentOnError")
+    func isFailedFlipsOnFail() async throws {
+        _ = await captureOperationNotAllow("commit") {
+            try await withUnitOfWork { work in
+                #expect(!work.isFailed)
+                try work.fail(TestError.first)
+                #expect(work.isFailed)
+            }
+        }
+        _ = await captureOperationNotAllow("commit") {
+            try await withUnitOfWork { work in
+                #expect(!work.isFailed)
+                await #expect(throws: TestError.second) {
+                    try await UnitOfWork.failingCurrentOnError { throw TestError.second }
+                }
+                #expect(work.isFailed)
+                #expect(work.failure as? TestError == .second)
+            }
+        }
+    }
+
+    @Test("failingCurrentOnError is a pass-through outside a scope")
+    func failingCurrentOnErrorPassesThroughOutsideScope() async throws {
+        let value = await UnitOfWork.failingCurrentOnError { 42 }
+        #expect(value == 42)
+        await #expect(throws: TestError.first) {
+            try await UnitOfWork.failingCurrentOnError { throw TestError.first }
+        }
+    }
+
+    @Test("The backend is created once and shared by the same type and identity; another identity is rejected")
+    func backendRegisteredOnceAndSharedByIdentity() async throws {
+        let registered = RecordingBackend()
+        try await withUnitOfWork { work in
+            let first = try register(registered, in: work)
+            let second = try work.backend(RecordingBackend.self, identity: clientA) {
+                Issue.record("make must not run once a backend is stored")
+                return RecordingBackend()
+            }
+            #expect(first === second)
+            let error = await captureOperationNotAllow("backend") {
+                _ = try work.backend(RecordingBackend.self, identity: clientB) { RecordingBackend() }
+            }
+            #expect(reason(of: error) == "a unit of work commits through exactly one backend")
+        }
+        #expect(registered.commitCount == 1)
+    }
+
+    @Test("A backend of another type under the same identity is rejected")
+    func backendOfAnotherTypeIsRejected() async throws {
+        try await withUnitOfWork { work in
+            try register(RecordingBackend(), in: work)
+            let error = await captureOperationNotAllow("backend") {
+                _ = try work.backend(OtherBackend.self, identity: clientA) { OtherBackend() }
+            }
+            #expect(reason(of: error) == "a unit of work commits through exactly one backend")
+        }
+    }
+
+    @Test("Two child tasks registering at once create a single backend")
+    func concurrentFirstRegistrationMakesOneBackend() async throws {
+        let makes = Recorder<Int>()
+        try await withUnitOfWork { work in
+            async let first = try work.backend(RecordingBackend.self, identity: clientA) {
+                makes.append(1)
+                return RecordingBackend()
+            }
+            async let second = try work.backend(RecordingBackend.self, identity: clientA) {
+                makes.append(2)
+                return RecordingBackend()
+            }
+            let (a, b) = try await (first, second)
+            #expect(a === b)
+        }
+        #expect(makes.all.count == 1)
+    }
+
+    @Test("Hooks run in registration order, after the commit, before withUnitOfWork returns")
+    func hooksRunInOrderAfterCommitBeforeReturn() async throws {
+        let backend = RecordingBackend()
+        let order = Recorder<Int>()
+        let output = try await withUnitOfWork { work in
+            try register(backend, in: work)
+            try work.onCommitted {
+                #expect(backend.committed)
+                order.append(1)
+            }
+            try work.onCommitted {
+                #expect(backend.committed)
+                order.append(2)
+            }
+            #expect(order.all.isEmpty)
+            return "output"
+        }
+        #expect(output == "output")
+        #expect(order.all == [1, 2])
+        #expect(backend.commitCount == 1)
+    }
+
+    @Test("Hooks run outside the scope: UnitOfWork.current is nil inside a hook")
+    func hooksRunOutsideScope() async throws {
+        let currentWasNil = Recorder<Bool>()
+        try await withUnitOfWork { work in
+            try work.onCommitted { currentWasNil.append(UnitOfWork.current == nil) }
+        }
+        #expect(currentWasNil.all == [true])
+    }
+
+    @Test("Hooks run when no backend was registered")
+    func hooksRunWhenNoBackend() async throws {
+        let runs = Recorder<Int>()
+        try await withUnitOfWork { work in
+            try work.onCommitted { runs.append(1) }
+        }
+        #expect(runs.all == [1])
+    }
+
+    @Test("No hook runs when the body throws, the scope failed or the commit throws", arguments: ScopeEnding.allCases)
+    func hooksSkippedOnBodyThrowFailOrCommitError(ending: ScopeEnding) async throws {
+        let backend = RecordingBackend(commitError: ending == .commitFails ? .commit : nil)
+        let runs = Recorder<Int>()
+        do {
+            try await withUnitOfWork { work in
+                try register(backend, in: work)
+                try work.onCommitted { runs.append(1) }
+                switch ending {
+                case .bodyThrows: throw TestError.first
+                case .scopeFailed: try work.fail(TestError.first)
+                case .commitFails: break
+                }
+            }
+            Issue.record("withUnitOfWork should have thrown")
+        } catch {
+            switch ending {
+            case .bodyThrows:
+                #expect(error as? TestError == .first)
+            case .scopeFailed:
+                #expect((error as? DDDError)?.userInfos["operation"] as? String == "commit")
+            case .commitFails:
+                #expect(error as? TestError == .commit)
+            }
+        }
+        #expect(runs.all.isEmpty)
+        #expect(backend.commitCount == (ending == .commitFails ? 1 : 0))
+    }
+
+    @Test("A throwing hook stops the later hooks and its error propagates after the commit")
+    func hookErrorStopsLaterHooksAndPropagates() async throws {
+        let backend = RecordingBackend()
+        let runs = Recorder<Int>()
+        await #expect(throws: TestError.hook) {
+            try await withUnitOfWork { work in
+                try register(backend, in: work)
+                try work.onCommitted {
+                    runs.append(1)
+                    throw TestError.hook
+                }
+                try work.onCommitted { runs.append(2) }
+            }
+        }
+        #expect(runs.all == [1])
+        #expect(backend.commitCount == 1)
+    }
+
+    @Test("A hook registered after fail never runs")
+    func hookAfterFailNeverRuns() async throws {
+        let runs = Recorder<Int>()
+        _ = await captureOperationNotAllow("commit") {
+            try await withUnitOfWork { work in
+                try work.fail(TestError.first)
+                try work.onCommitted { runs.append(1) }
+            }
+        }
+        #expect(runs.all.isEmpty)
+    }
+
+    @Test("An escaped task still sees the closed scope, and backend, fail and onCommitted throw")
+    func closedScopeRejectsBackendFailAndHooks() async throws {
+        let backend = RecordingBackend()
+        let hookRuns = Recorder<Int>()
+        let (scopeEnded, endScope) = AsyncStream.makeStream(of: Void.self)
+        let (closedWork, escaped) = try await withUnitOfWork { work in
+            try register(backend, in: work)
+            return (work, Task {
+                for await _ in scopeEnded { break }
+                #expect(UnitOfWork.current === work)
+                let endedReason = "unit of work \(work.id) already ended"
+
+                let backendError = await captureOperationNotAllow("backend") {
+                    _ = try work.backend(RecordingBackend.self, identity: clientA) {
+                        Issue.record("make must not run on a closed scope")
+                        return RecordingBackend()
+                    }
+                }
+                #expect(reason(of: backendError) == endedReason)
+
+                let failError = await captureOperationNotAllow("fail") {
+                    try work.fail(TestError.first)
+                }
+                #expect(reason(of: failError) == endedReason)
+
+                let hookError = await captureOperationNotAllow("onCommitted") {
+                    try work.onCommitted { hookRuns.append(1) }
+                }
+                #expect(reason(of: hookError) == endedReason)
+
+                // The framework path swallows the closed-scope error and rethrows the original.
+                await #expect(throws: TestError.second) {
+                    try await UnitOfWork.failingCurrentOnError { throw TestError.second }
+                }
+            })
+        }
+        #expect(backend.commitCount == 1)
+        endScope.yield()
+        endScope.finish()
+        await escaped.value
+        #expect(!closedWork.isFailed)
+        #expect(hookRuns.all.isEmpty)
+        #expect(backend.commitCount == 1)
+    }
+
+    @Test("A body cancelled while it waits throws CancellationError, commits nothing and runs no hook")
+    func cancelledBodyCommitsNothing() async throws {
+        let backend = RecordingBackend()
+        let hookRuns = Recorder<Int>()
+        let (parked, park) = AsyncStream.makeStream(of: CheckedContinuation<Void, Never>.self)
+        let scope = Task {
+            // Ends the wait below even if the body never parks, so a regression fails instead of hanging.
+            defer { park.finish() }
+            try await withUnitOfWork { work in
+                try register(backend, in: work)
+                try work.onCommitted { hookRuns.append(1) }
+                await withCheckedContinuation { park.yield($0) }
+                try Task.checkCancellation()
+            }
+        }
+        for await gate in parked {
+            // The body is parked on `gate`: cancel first, then let it continue.
+            scope.cancel()
+            gate.resume()
+            break
+        }
+        let result = await scope.result
+        #expect(throws: CancellationError.self) { try result.get() }
+        #expect(backend.commitCount == 0)
+        #expect(hookRuns.all.isEmpty)
+    }
+
+    @Test("Each scope has its own id")
+    func idsDifferBetweenScopes() async throws {
+        let first = try await withUnitOfWork { $0.id }
+        let second = try await withUnitOfWork { $0.id }
+        #expect(first != second)
+    }
+}
