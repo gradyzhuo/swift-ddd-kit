@@ -22,8 +22,9 @@ public struct ForwardedRecord: Sendable {
     /// `EventMetadata` struct JSON-encoded to (see
     /// `docs/superpowers/specs/2026-05-15-ambient-context-and-pluggable-metadata-design.md`).
     /// `nil` when the write carried no metadata; swift-kurrentdb hands that back
-    /// as an empty `Data`, which `init(from:)` normalises so "absent" has exactly
-    /// one spelling. Raw rather than typed on purpose: this record is
+    /// as an empty `Data`, or, for an event written through `AppendRecords`, as a
+    /// JSON object holding only KurrentDB's `$schema.*` keys, which `init(from:)`
+    /// normalises so "absent" has exactly one spelling. Raw rather than typed on purpose: this record is
     /// kit-agnostic and each rule picks its own schema via `decodeMetadata(_:)`.
     public let metadata: Data?
 
@@ -91,9 +92,24 @@ public struct ForwardedRecord: Sendable {
 
     /// `RecordedEvent.customMetadata` is a non-optional `Data` that is empty
     /// when nothing was written. Collapse that to `nil` so callers never have
-    /// to ask "nil or empty?". Kept `static` and side-effect free so it is
-    /// testable without constructing a `ReadEvent`.
+    /// to ask "nil or empty?".
+    ///
+    /// A JSON object whose every key starts with `$schema.` is collapsed too:
+    /// KurrentDB adds `$schema.name` and `$schema.format` to the custom metadata
+    /// of every event an `AppendRecords` call wrote, also when the writer attached
+    /// none (DDDKit's `withUnitOfWork` writing two or more streams without an
+    /// `EventMetadataContext`). Bytes with any other key, an empty object and
+    /// anything that is not a JSON object pass through untouched.
+    ///
+    /// Kept `static` and side-effect free so it is testable without
+    /// constructing a `ReadEvent`.
     static func normalizedMetadata(_ bytes: Data) -> Data? {
-        bytes.isEmpty ? nil : bytes
+        if bytes.isEmpty { return nil }
+        if let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+           !object.isEmpty,
+           object.keys.allSatisfy({ $0.hasPrefix("$schema.") }) {
+            return nil
+        }
+        return bytes
     }
 }
