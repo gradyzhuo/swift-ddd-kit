@@ -472,6 +472,38 @@ struct UnitOfWorkLiveTests {
         }
     }
 
+    @Test("a unit of work over two streams with no ambient metadata: each record reads back with custom metadata holding only the server's $schema.name and $schema.format keys, and the generated-style mapper leaves event.metadata nil")
+    func nilMetadataCommitReadsBackSchemaKeysOnly() async throws {
+        try await KurrentDBClient.withPooledIntegrationTestClient { client in
+            let live = LiveEventStoreClient(client: client)
+            let quotes = quoteRepository(client, streams: LiveQuoteStream.self)
+            let invoices = invoiceRepository(client, streams: LiveInvoiceStream.self)
+            let quote = try LiveQuote(id: newId(), line: "desk")
+            let invoice = try LiveInvoice(id: newId(), amount: 100)
+
+            try await withUnitOfWork { _ in
+                try await quotes.save(aggregateRoot: quote)
+                try await invoices.save(aggregateRoot: invoice)
+            }
+
+            // Not empty, as a v1 append with nil metadata leaves it: AppendRecords sends
+            // no properties, and the server still adds its two schema keys on read.
+            let records = try await storedRecords(live, LiveQuoteStream.getStreamName(id: quote.id))
+                + storedRecords(live, LiveInvoiceStream.getStreamName(id: invoice.id))
+            #expect(records.map(\.eventType) == ["LiveQuoteOpened", "LiveInvoiceIssued"])
+            for record in records {
+                let keys = try JSONDecoder().decode([String: String].self, from: record.customMetadata)
+                #expect(keys == ["$schema.name": record.eventType, "$schema.format": "Json"])
+            }
+
+            // SpikeMetadata has required fields, so the mapper's `try?` gives nil.
+            let opened = try #require(try await quotes.store.fetchEvents(byId: quote.id)?.events.first as? LiveQuoteOpened)
+            #expect(opened.metadata == nil)
+            let issued = try #require(try await invoices.store.fetchEvents(byId: invoice.id)?.events.first as? LiveInvoiceIssued)
+            #expect(issued.metadata == nil)
+        }
+    }
+
     @Test("a stream soft-deleted at revisions 0–2 and created again inside a scope: the block returns normally, the hook runs, and find gives version 3, the old tail + 1")
     func softDeletedStreamRecreatedInScopeCommits() async throws {
         try await KurrentDBClient.withPooledIntegrationTestClient { client in
