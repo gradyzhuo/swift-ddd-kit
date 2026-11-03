@@ -74,7 +74,8 @@ Command Handler
   │       └─ queues uncommitted events in AggregateRootMetadata
   │
   ├─ 3. repository.save(aggregateRoot:)
-  │       └─ appends uncommitted events to KurrentDB (optimistic concurrency)
+  │       ├─ appends uncommitted events to KurrentDB (optimistic concurrency)
+  │       └─ compose usecases with withUnitOfWork { … } to commit their saves together
   │
   └─ 4. eventBus.postAllEvent()
           └─ publishes saved domain events to DomainEventBus subscribers
@@ -295,6 +296,81 @@ try await repository.purge(byId: "order-001")
 `purge` makes the id permanently unwritable: a later `append` throws `streamPurged` (502), so never
 purge an id that will be reused. KurrentDB keeps the data until a scavenge; `PersistentEventStore`
 removes the payload from the stream file.
+
+### 6. Compose Usecases with `withUnitOfWork`
+
+Some operations change two aggregates that must succeed or fail together. Call the usecases inside
+one `withUnitOfWork` block: every `repository.save` in it is collected, and when the block returns
+they are written together; when the block throws, nothing is written. Usecases, repositories and
+the composition root stay as they are, and a usecase does not know it runs inside a unit of work.
+
+```swift
+func createQuotingCaseWithContact(_ input: Input) async throws -> Output {
+    let quoting = try await withUnitOfWork { _ in
+        let quoting = try await createQuotingCaseService.execute(
+            input: .init(operatorId: input.operatorId, name: input.name))
+        try await addContactService.execute(
+            input: .init(operatorId: input.operatorId, quotingCaseId: quoting.id, contact: input.contact))
+        return quoting
+    }
+    return .created(quoting)
+}
+```
+
+Both services are the instances built at startup. The `repository.find(byId: quoting.id)` inside
+`addContactService` finds the QuotingCase that was just created and is not written yet, and its
+`save` joins the same stream's batch. One stream is written with the same single-stream append as
+a plain `save`; two or more streams go through one atomic KurrentDB `AppendRecords` call
+(KurrentDB 26.1+). If any stream is not at its expected revision, nothing is written and the block
+throws `commitConflict`, with every conflicting stream in `error.commitConflicts`. Tests need no
+server: build the repositories over one `InMemoryEventStoreClient`.
+
+The block's `work` parameter registers side effects that must wait for the commit
+(`try work.onCommitted { … }`) and fails the unit of work without throwing (`try work.fail(error)`):
+
+```swift
+let quoting = try await withUnitOfWork { work in
+    let quoting = try await createQuotingCaseService.execute(
+        input: .init(operatorId: input.operatorId, name: input.name))
+    try await openBillingAccountService.execute(input: .init(for: quoting.id))
+    try work.onCommitted { try await notifier.send(.quotingCreated(quoting.id)) }   // after the commit
+    return quoting
+}
+```
+
+Hooks run in order before `withUnitOfWork` returns, and never when the block throws, the unit of
+work was failed or the commit failed. They run outside the unit of work (`UnitOfWork.current` is
+`nil`), so a `save` inside a hook writes directly. A hook that throws stops the later ones and its
+error is rethrown, but the commit has already landed, so catch inside the hook what must not fail
+the call.
+
+Rules inside the block:
+
+- **No nesting.** `withUnitOfWork` inside a unit of work throws `operationNotAllow`. A usecase does
+  not call `withUnitOfWork`; it belongs to the handler. When two handlers share logic, extract a
+  function that does not open a scope and let each handler wrap it.
+- **Do not `do/catch` a usecase's error inside the block.** To return a normal failure output,
+  call `try work.fail(error)` and return; `withUnitOfWork` then commits nothing and throws
+  `operationNotAllow` with the cause in `userInfos["cause"]`. Errors that pass through a repository
+  fail the unit of work automatically, even when caught.
+- **Do not move a `save` into `Task { … }`.** The task inherits the scope; a `save` it reaches
+  after the block ended throws `operationNotAllow` instead of writing. Await everything before
+  returning.
+- **Publish after the commit.** A usecase that calls `EventBus.publish` right after `save`
+  publishes before the commit inside a scope. Write
+  `if let work = UnitOfWork.current { try work.onCommitted { … } } else { … }`.
+- **Different aggregates may run concurrently, the same one may not.** `async let` and `TaskGroup`
+  over different aggregates are fine; a second concurrent `save` of the same aggregate throws
+  `commitConflict`.
+
+Only `KurrentStorageCoordinator` takes part: inside the block, `save` and `purge` through a
+repository over `InMemoryEventStore` or `PersistentEventStore` throw `operationNotAllow`. Every
+write in one block must go through the same `KurrentDBClient` instance. After the block, find
+aggregates again instead of reusing the instances from inside it. Run projectors on the
+subscription runners, not inside a block. The details (commit errors, metadata limits, writing
+an `EventStoreClient`) are in the DocC articles
+[Composing usecases with a unit of work](https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/eventsourcing/composingusecases)
+and [Unit of work on KurrentDB](https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/kurrentsupport/unitofwork).
 
 ### Event Metadata Pattern (Ambient Context)
 
@@ -1123,7 +1199,7 @@ docker run --rm --network host -v "$PWD":/src -w /src \
   bash -c 'swift test --filter ContextReceiverIntegrationTests'
 ```
 
-This suite needs a live broker, so it deliberately stays out of CI. `.github/workflows/swift-build-testing.yml` runs the offline suites, builds the `DDDCore`, `EventSourcing` and `LocalEventStore` products for iOS (`build-ios`), and runs `KurrentLiveContractTests` against `kurrentplatform/kurrentdb:26.1.3` (`kurrent-live-contract`); the Pulsar broker is not part of it.
+This suite needs a live broker, so it deliberately stays out of CI. `.github/workflows/swift-build-testing.yml` runs the offline suites, builds the `DDDCore`, `EventSourcing` and `LocalEventStore` products for iOS (`build-ios`), and runs `KurrentLiveContractTests` against `kurrentplatform/kurrentdb:26.1.3` (`kurrent-live-contract`), started with standard projections (`KURRENTDB_RUN_PROJECTIONS=All`, `KURRENTDB_START_STANDARD_PROJECTIONS=true`) because the unit-of-work `$ce-` subscription test reads a stream only `$by_category` writes; the Pulsar broker is not part of it.
 
 ## Modules
 
@@ -1131,7 +1207,7 @@ This suite needs a live broker, so it deliberately stays out of CI. `.github/wor
 |--------|---------|
 | `DDDKit` | Umbrella import |
 | `DDDCore` | Core protocols: `Entity`, `AggregateRoot`, `DomainEvent`, `DomainEventBus` |
-| `EventSourcing` | Abstract patterns: `EventStore`, `EventSourcingRepository`, `EventSourcingProjector`, `InMemoryEventStore`, `RecordedEventLike`, `EventTypeMapper`, `CustomMetadata` |
+| `EventSourcing` | Abstract patterns: `EventStore`, `EventSourcingRepository`, `withUnitOfWork`, `EventSourcingProjector`, `InMemoryEventStore`, `RecordedEventLike`, `EventTypeMapper`, `CustomMetadata` |
 | `LocalEventStore` | `PersistentEventStore`: a file-backed `EventStore` for apps, one JSON file per stream |
 | `KurrentSupport` | KurrentDB adapter: `KurrentStorageCoordinator` |
 | `EventBus` | In-memory event bus for local event distribution |
