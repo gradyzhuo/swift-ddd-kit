@@ -54,6 +54,7 @@ public final class KurrentStorageCoordinator<
     ///     stream and `version` is not the revision the last of them is predicted to get. A
     ///     `version` the server's stream does not match is reported when the unit of work
     ///     commits, as is a save to a purged id.
+    ///   - The `EncodingError` of an event whose payload cannot be encoded; nothing is staged.
     ///   - `DDDError.operationNotAllow` when AppendRecords cannot carry `metadata`, when the
     ///     unit of work already commits through a client with another identity, or when it
     ///     has ended.
@@ -104,8 +105,9 @@ public final class KurrentStorageCoordinator<
     /// Stages `events` in `work`'s backend instead of writing them, and returns the revision
     /// the last of them is predicted to get.
     ///
-    /// - Throws: `DDDError.operationNotAllow(operation: "save", …)` when AppendRecords cannot
-    ///   carry the events' metadata; the backend's errors otherwise.
+    /// - Throws: The `EncodingError` of a payload that cannot be encoded;
+    ///   `DDDError.operationNotAllow(operation: "save", …)` when AppendRecords cannot carry
+    ///   the events' metadata; the backend's errors otherwise.
     private func stage(
         _ events: [EventData],
         metadataBytes: Data?,
@@ -114,6 +116,12 @@ public final class KurrentStorageCoordinator<
         expectedRevision: StreamRevision,
         in work: UnitOfWork
     ) throws -> UInt64 {
+        // `EventData` encodes a model payload only when it is sent. Encode it now, so a
+        // payload that cannot be encoded fails this save as itself rather than the commit,
+        // and the check below concerns the metadata alone.
+        for event in events {
+            _ = try event.payload.data
+        }
         // A unit of work of more than one stream commits through AppendRecords, whose records
         // carry metadata as properties, not raw bytes. How many streams it writes is not
         // known yet, so every save checks, and fails now instead of at the commit.

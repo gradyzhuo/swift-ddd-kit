@@ -164,8 +164,9 @@ package final class KurrentUnitOfWorkBackend: UnitOfWorkBackend {
     /// A returned revision that differs from the predicted tail is logged, not thrown: the
     /// events are stored, and the server's revision is the true one.
     ///
-    /// - Throws: `DDDError.commitConflict` when an expected revision did not hold and
-    ///   `DDDError.streamPurged` for a tombstoned stream (nothing was written for either);
+    /// - Throws: `DDDError.commitConflict` when an expected revision did not hold (one
+    ///   conflict per stream, in batch order) and `DDDError.streamPurged` for a tombstoned
+    ///   stream (nothing was written for either);
     ///   `DDDError.operationNotAllow` when the server does not support `AppendRecords`;
     ///   any other client error unchanged, `EventStoreClientError.atomicAppendUnsupported`
     ///   included.
@@ -220,17 +221,19 @@ package final class KurrentUnitOfWorkBackend: UnitOfWorkBackend {
     }
 
     /// Maps an `appendAtomically` error to the `EventStore` contract's errors, naming each
-    /// stream by its batch's id. An error that names a stream no batch writes, or an empty
-    /// violation list, is returned unchanged.
+    /// stream by its batch's id. Conflicts come in batch order, whatever order the client
+    /// listed them in. An error that names a stream no batch writes, or an empty violation
+    /// list, is returned unchanged.
     private static func mapAtomicAppendError(_ error: any Error, batches: [Batch]) -> any Error {
         switch error {
         case let EventStoreClientError.consistencyViolations(violations):
-            let conflicts = violations.compactMap { violation in
-                batches.first { $0.stream == violation.stream }.map {
-                    DDDError.CommitConflict(id: $0.id, expected: $0.expectedVersion, actual: violation.current)
+            let batchStreams = Set(batches.map(\.stream))
+            guard !violations.isEmpty, violations.allSatisfy({ batchStreams.contains($0.stream) }) else { return error }
+            let conflicts = batches.compactMap { batch in
+                violations.first { $0.stream == batch.stream }.map {
+                    DDDError.CommitConflict(id: batch.id, expected: batch.expectedVersion, actual: $0.current)
                 }
             }
-            guard !conflicts.isEmpty, conflicts.count == violations.count else { return error }
             return DDDError.commitConflict(conflicts: conflicts)
         case let KurrentError.resourceDeleted(resource):
             guard let batch = batches.first(where: { $0.stream == resource }) else { return error }
