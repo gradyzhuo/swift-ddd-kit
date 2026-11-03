@@ -49,6 +49,29 @@ struct LiveEventStoreClientAtomicAppendTests {
         #expect(error == .resourceDeleted(resource: "Order-A"))
     }
 
+    @Test("the first tombstoned batch wins even when an earlier batch only conflicts")
+    func tombstonedStreamWinsWhenNotFirst() throws {
+        let mapped = LiveEventStoreClient.mapConsistencyViolations(
+            [(stream: "Order-A", actualState: 0), (stream: "Order-B", actualState: -6)],
+            in: [batch("Order-A", .noStream), batch("Order-B", .noStream)]
+        )
+        let error = try #require(mapped as? KurrentError)
+        #expect(error == .resourceDeleted(resource: "Order-B"))
+    }
+
+    @Test("conflicts are listed in batch order whatever order the server used; revision 0 is a current revision")
+    func conflictsFollowBatchOrder() throws {
+        let mapped = LiveEventStoreClient.mapConsistencyViolations(
+            [(stream: "Order-C", actualState: 0), (stream: "Order-A", actualState: -1)],
+            in: [batch("Order-A", .at(5)), batch("Order-B", .noStream), batch("Order-C", .noStream)]
+        )
+        let error = try #require(mapped as? EventStoreClientError)
+        #expect(error == .consistencyViolations([
+            StreamConflict(stream: "Order-A", expected: .at(5), current: nil),
+            StreamConflict(stream: "Order-C", expected: .noStream, current: 0),
+        ]))
+    }
+
     @Test("violations become conflicts carrying the batch's expected revision; a negative state means no current revision")
     func violationsBecomeConflicts() throws {
         let mapped = LiveEventStoreClient.mapConsistencyViolations(

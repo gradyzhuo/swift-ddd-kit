@@ -115,8 +115,10 @@ public struct LiveEventStoreClient: EventStoreClient {
     ///   together with no precedence, so the first batch in `batches` order whose stream is
     ///   tombstoned gives `KurrentError.resourceDeleted(resource:)`.
     /// - Otherwise every violation becomes a `StreamConflict` carrying its batch's own
-    ///   `expectedRevision`. Any negative `actualState` (missing, soft-deleted) means the
-    ///   stream has no current revision, so `current` is `nil`.
+    ///   `expectedRevision`, listed in `batches` order whatever order the server used (the
+    ///   same order `InMemoryEventStoreClient` reports). Any negative `actualState`
+    ///   (missing, soft-deleted) means the stream has no current revision, so `current`
+    ///   is `nil`.
     /// - `nil` for an empty list, because `consistencyViolations` is never empty (the
     ///   unit-of-work backend turns it into `DDDError.commitConflict(conflicts:)`, which
     ///   requires at least one conflict), and for a violation on a stream no batch writes,
@@ -130,14 +132,19 @@ public struct LiveEventStoreClient: EventStoreClient {
         if let tombstoned = batches.first(where: { tombstonedStreams.contains($0.stream) }) {
             return KurrentError.resourceDeleted(resource: tombstoned.stream)
         }
-        var conflicts: [StreamConflict] = []
-        for violation in violations {
-            guard let batch = batches.first(where: { $0.stream == violation.stream }) else { return nil }
-            conflicts.append(StreamConflict(
-                stream: violation.stream,
+        let batchStreams = Set(batches.map(\.stream))
+        guard violations.allSatisfy({ batchStreams.contains($0.stream) }) else { return nil }
+        let actualStates = Dictionary(
+            violations.map { ($0.stream, $0.actualState) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let conflicts = batches.compactMap { batch -> StreamConflict? in
+            guard let actualState = actualStates[batch.stream] else { return nil }
+            return StreamConflict(
+                stream: batch.stream,
                 expected: batch.expectedRevision,
-                current: violation.actualState < 0 ? nil : UInt64(violation.actualState)
-            ))
+                current: actualState < 0 ? nil : UInt64(actualState)
+            )
         }
         return EventStoreClientError.consistencyViolations(conflicts)
     }
