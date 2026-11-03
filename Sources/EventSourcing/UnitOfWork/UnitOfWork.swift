@@ -27,7 +27,11 @@ private enum _UnitOfWorkStorage {
 ///    runs, and `DDDError.operationNotAllow(operation: "commit", ...)` is thrown with
 ///    the first cause in `userInfos["cause"]`.
 /// 4. Otherwise the backend, if any store registered one, commits. A commit error is
-///    rethrown and no hook runs.
+///    rethrown and no hook runs. After `commitConflict` or `streamPurged` nothing was
+///    written. After any other commit error (transport, `atomicAppendUnsupported`, a
+///    server without AppendRecords) the writes may have landed, for example when the
+///    response was lost after the server committed: read the streams before running
+///    the block again.
 /// 5. The ``UnitOfWork/onCommitted(_:)`` hooks run in registration order, each
 ///    awaited, with ``UnitOfWork/current`` `nil`. A hook error stops the later hooks
 ///    and is rethrown, but the commit has already happened.
@@ -134,7 +138,8 @@ public final class UnitOfWork: Sendable {
     ///   - type: The backend type the store commits through.
     ///   - identity: What the backend writes to, e.g. the client's identity. Stores
     ///     that pass the same type and identity share one backend.
-    ///   - make: Creates the backend when the scope has none yet.
+    ///   - make: Creates the backend when the scope has none yet. It runs while the
+    ///     scope's lock is held, so it must not call back into this scope.
     /// - Throws: `DDDError.operationNotAllow` when the scope already has a backend of
     ///   another type or identity (a unit of work commits through exactly one), or
     ///   once the scope has ended.
@@ -222,7 +227,9 @@ public final class UnitOfWork: Sendable {
 /// Collects a unit of work's writes and sends them when the scope ends. Provided by
 /// store implementations; a scope has at most one.
 public protocol UnitOfWorkBackend: AnyObject, Sendable {
-    /// Sends everything collected. Called once, after `body` returned normally.
+    /// Sends everything collected. Called at most once, after `body` returned
+    /// normally on a scope that was not failed; never called when `body` threw or the
+    /// scope was failed, in which case the backend is dropped with what it collected.
     func commit() async throws
 }
 
