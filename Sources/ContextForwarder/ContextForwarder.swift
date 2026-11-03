@@ -292,7 +292,8 @@ extension ForwardedRecord {
             eventId: record.id.uuidString,
             data: record.data,
             // `customMetadata` is a non-optional Data that is empty when the
-            // writer attached nothing; normalise so rules see nil, not Data().
+            // writer attached nothing (or holds only KurrentDB's `$schema.*` keys
+            // for an `AppendRecords` write); normalise so rules see nil.
             metadata: Self.normalizedMetadata(record.customMetadata))
     }
 }

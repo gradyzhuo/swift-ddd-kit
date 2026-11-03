@@ -59,6 +59,31 @@ struct ForwardedRecordTests {
         #expect(ForwardedRecord.normalizedMetadata(bytes) == bytes)
     }
 
+    /// `customMetadata` exactly as KurrentDB 26.1 returns it for an event that one
+    /// `AppendRecords` call wrote with no metadata, which is what DDDKit's `withUnitOfWork`
+    /// does when it commits two or more streams without an `EventMetadataContext`
+    /// (pinned live by `UnitOfWorkLiveTests.nilMetadataCommitReadsBackSchemaKeysOnly`).
+    private let schemaKeysOnly = Data(#"{ "$schema.name": "LiveQuoteOpened", "$schema.format": "Json" }"#.utf8)
+
+    @Test("normalizedMetadata turns custom metadata holding only the server's $schema.* keys into nil")
+    func schemaKeysOnlyNormaliseToNil() {
+        #expect(ForwardedRecord.normalizedMetadata(schemaKeysOnly) == nil)
+    }
+
+    @Test("normalizedMetadata passes metadata with fields next to the $schema.* keys through untouched")
+    func fieldsNextToSchemaKeysPassThrough() {
+        let bytes = Data(#"{ "operatorId": "u-1", "$schema.name": "X", "$schema.format": "Json" }"#.utf8)
+        #expect(ForwardedRecord.normalizedMetadata(bytes) == bytes)
+    }
+
+    @Test("normalizedMetadata passes an empty object, other $-prefixed keys and non-object bytes through untouched")
+    func otherShapesPassThrough() {
+        for text in ["{}", #"{"$correlationId":"c-1"}"#, #""$schema.name""#, "not json"] {
+            let bytes = Data(text.utf8)
+            #expect(ForwardedRecord.normalizedMetadata(bytes) == bytes, "\(text)")
+        }
+    }
+
     // MARK: - decodeMetadata
 
     /// What a consuming context would declare: its own schema, nothing from the kit.
