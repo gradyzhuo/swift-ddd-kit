@@ -86,11 +86,63 @@ private func reason(of error: DDDError?) -> String? {
     error?.userInfos["reason"] as? String
 }
 
-/// How a scope ends without committing (or with a failed commit).
+/// How a scope ends.
 enum ScopeEnding: CaseIterable, Sendable {
+    /// `body` returns and the commit succeeds.
+    case returns
+    /// `body` throws `TestError.first`.
     case bodyThrows
+    /// `body` calls `fail(TestError.first)`, then returns.
     case scopeFailed
+    /// `body` returns and the backend's commit throws `TestError.commit`.
     case commitFails
+}
+
+/// A backend whose commit throws when the scope ends as `.commitFails`.
+private func makeBackend(endingAs ending: ScopeEnding) -> RecordingBackend {
+    RecordingBackend(commitError: ending == .commitFails ? .commit : nil)
+}
+
+/// Runs a scope whose body runs `prepare`, then ends the way `ending` says. Returns what
+/// `withUnitOfWork` threw, or nil when it returned. For `.commitFails`, `prepare` must
+/// register a backend from ``makeBackend(endingAs:)``.
+private func runScope(
+    endingAs ending: ScopeEnding,
+    _ prepare: (UnitOfWork) throws -> Void
+) async -> (any Error)? {
+    do {
+        try await withUnitOfWork { work in
+            try prepare(work)
+            switch ending {
+            case .returns, .commitFails: break
+            case .bodyThrows: throw TestError.first
+            case .scopeFailed: try work.fail(TestError.first)
+            }
+        }
+        return nil
+    } catch {
+        return error
+    }
+}
+
+/// Checks that `error` is what `withUnitOfWork` throws for a scope that ended as `ending`.
+private func expectError(
+    _ error: (any Error)?,
+    endingAs ending: ScopeEnding,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    switch ending {
+    case .returns:
+        #expect(error == nil, sourceLocation: sourceLocation)
+    case .bodyThrows:
+        #expect(error as? TestError == .first, sourceLocation: sourceLocation)
+    case .scopeFailed:
+        let dddError = error as? DDDError
+        #expect(dddError?.userInfos["operation"] as? String == "commit", sourceLocation: sourceLocation)
+        #expect(dddError?.userInfos["cause"] as? TestError == .first, sourceLocation: sourceLocation)
+    case .commitFails:
+        #expect(error as? TestError == .commit, sourceLocation: sourceLocation)
+    }
 }
 
 @Suite("UnitOfWork")
@@ -279,31 +331,18 @@ struct UnitOfWorkTests {
         #expect(runs.all == [1])
     }
 
-    @Test("No hook runs when the body throws, the scope failed or the commit throws", arguments: ScopeEnding.allCases)
+    @Test(
+        "No hook runs when the body throws, the scope failed or the commit throws",
+        arguments: [ScopeEnding.bodyThrows, .scopeFailed, .commitFails]
+    )
     func hooksSkippedOnBodyThrowFailOrCommitError(ending: ScopeEnding) async throws {
-        let backend = RecordingBackend(commitError: ending == .commitFails ? .commit : nil)
+        let backend = makeBackend(endingAs: ending)
         let runs = Recorder<Int>()
-        do {
-            try await withUnitOfWork { work in
-                try register(backend, in: work)
-                try work.onCommitted { runs.append(1) }
-                switch ending {
-                case .bodyThrows: throw TestError.first
-                case .scopeFailed: try work.fail(TestError.first)
-                case .commitFails: break
-                }
-            }
-            Issue.record("withUnitOfWork should have thrown")
-        } catch {
-            switch ending {
-            case .bodyThrows:
-                #expect(error as? TestError == .first)
-            case .scopeFailed:
-                #expect((error as? DDDError)?.userInfos["operation"] as? String == "commit")
-            case .commitFails:
-                #expect(error as? TestError == .commit)
-            }
+        let error = await runScope(endingAs: ending) { work in
+            try register(backend, in: work)
+            try work.onCommitted { runs.append(1) }
         }
+        expectError(error, endingAs: ending)
         #expect(runs.all.isEmpty)
         #expect(backend.commitCount == (ending == .commitFails ? 1 : 0))
     }
@@ -338,14 +377,18 @@ struct UnitOfWorkTests {
         #expect(runs.all.isEmpty)
     }
 
-    @Test("An escaped task still sees the closed scope, and backend, fail and onCommitted throw")
-    func closedScopeRejectsBackendFailAndHooks() async throws {
-        let backend = RecordingBackend()
+    @Test(
+        "An escaped task still sees the closed scope, and backend, fail and onCommitted throw, however the scope ended",
+        arguments: ScopeEnding.allCases
+    )
+    func closedScopeRejectsBackendFailAndHooks(ending: ScopeEnding) async throws {
+        let backend = makeBackend(endingAs: ending)
         let hookRuns = Recorder<Int>()
         let (scopeEnded, endScope) = AsyncStream.makeStream(of: Void.self)
-        let (closedWork, escaped) = try await withUnitOfWork { work in
+        var escapedScope: (work: UnitOfWork, task: Task<Void, Never>)?
+        let error = await runScope(endingAs: ending) { work in
             try register(backend, in: work)
-            return (work, Task {
+            escapedScope = (work, Task {
                 for await _ in scopeEnded { break }
                 #expect(UnitOfWork.current === work)
                 let endedReason = "unit of work \(work.id) already ended"
@@ -359,7 +402,7 @@ struct UnitOfWorkTests {
                 #expect(reason(of: backendError) == endedReason)
 
                 let failError = await captureOperationNotAllow("fail") {
-                    try work.fail(TestError.first)
+                    try work.fail(TestError.second)
                 }
                 #expect(reason(of: failError) == endedReason)
 
@@ -374,13 +417,41 @@ struct UnitOfWorkTests {
                 }
             })
         }
-        #expect(backend.commitCount == 1)
+        // `withUnitOfWork` has returned or thrown; only now does the escaped task go on.
+        expectError(error, endingAs: ending)
+        let commits = ending == .returns || ending == .commitFails ? 1 : 0
+        #expect(backend.commitCount == commits)
+        let (closedWork, escaped) = try #require(escapedScope)
         endScope.yield()
         endScope.finish()
         await escaped.value
-        #expect(!closedWork.isFailed)
+        let cause: TestError? = ending == .scopeFailed ? .first : nil
+        #expect(closedWork.isFailed == (cause != nil))
+        #expect(closedWork.failure as? TestError == cause)
         #expect(hookRuns.all.isEmpty)
-        #expect(backend.commitCount == 1)
+        #expect(backend.commitCount == commits)
+    }
+
+    @Test(
+        "An ended scope lets go of its backend and hooks, so a hook that captures the scope does not keep it alive",
+        arguments: ScopeEnding.allCases
+    )
+    func endedScopeReleasesBackendAndHooks(ending: ScopeEnding) async throws {
+        weak var weakWork: UnitOfWork?
+        weak var weakBackend: RecordingBackend?
+        let hookRuns = Recorder<UUID>()
+        let error = await runScope(endingAs: ending) { work in
+            weakWork = work
+            weakBackend = try work.backend(RecordingBackend.self, identity: clientA) {
+                makeBackend(endingAs: ending)
+            }
+            // Captures `work`, as a hook that logs `work.id` would.
+            try work.onCommitted { hookRuns.append(work.id) }
+        }
+        expectError(error, endingAs: ending)
+        #expect(hookRuns.all.count == (ending == .returns ? 1 : 0))
+        #expect(weakWork == nil, "the ended scope is still alive")
+        #expect(weakBackend == nil, "the ended scope's backend is still alive")
     }
 
     @Test("A body cancelled while it waits throws CancellationError, commits nothing and runs no hook")
