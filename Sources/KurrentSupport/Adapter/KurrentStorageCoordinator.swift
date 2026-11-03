@@ -41,13 +41,19 @@ public final class KurrentStorageCoordinator<
     /// instead of written, and the returned revision is the one the last of them is predicted
     /// to get when the unit of work commits.
     ///
-    /// - Throws: Inside `withUnitOfWork(_:)`:
-    ///   - `DDDError.commitConflict` when `version` is beyond `Int64.max`, or when the unit of
-    ///     work has already staged events for the stream and `version` is not the revision the
-    ///     last of them is predicted to get. A `version` the server's stream does not match is
-    ///     reported when the unit of work commits.
-    ///   - `DDDError.streamPurged` when `version` is beyond `Int64.max` and the stream was
-    ///     purged. Any other save to a purged id is reported when the unit of work commits.
+    /// - Throws: In and out of a unit of work, when `version` is beyond `Int64.max` (no event
+    ///   is sent or staged; the stream is read to report its revision):
+    ///   - `DDDError.commitConflict`, or `DDDError.streamPurged` when the stream was purged;
+    ///     a client error from that read is rethrown.
+    ///
+    ///   Outside `withUnitOfWork(_:)`: `DDDError.commitConflict` when the stream is not at
+    ///   `version`, `DDDError.streamPurged` for a purged id, and other client errors as thrown.
+    ///
+    ///   Inside `withUnitOfWork(_:)`:
+    ///   - `DDDError.commitConflict` when the unit of work has already staged events for the
+    ///     stream and `version` is not the revision the last of them is predicted to get. A
+    ///     `version` the server's stream does not match is reported when the unit of work
+    ///     commits, as is a save to a purged id.
     ///   - `DDDError.operationNotAllow` when AppendRecords cannot carry `metadata`, when the
     ///     unit of work already commits through a client with another identity, or when it
     ///     has ended.

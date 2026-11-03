@@ -307,11 +307,6 @@ private final class RunCount: Sendable {
     }
 }
 
-/// The `KurrentError` swift-kurrentdb throws before sending a call the server lacks.
-private let appendRecordsUnsupported = KurrentError.unsupportedFeature(
-    .init(fullyQualifiedService: "kurrentdb.protocol.v2.streams.StreamsService", method: "AppendSession")
-)
-
 // MARK: - Helpers
 
 private let quoteStream = "Quoting-q-1"
@@ -651,17 +646,45 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         #expect(quoteClient.appendAtomicallyCount == 0)
     }
 
+    @Test("a find through another client never sees what the scope staged for the same stream name on its own client")
+    func findThroughOtherClientIgnoresStagedEventsOfSameStreamName() async throws {
+        let first = InMemoryEventStoreClient()
+        let second = InMemoryEventStoreClient()
+        try await quotingRepository(first).save(aggregateRoot: try Quoting(id: "q-1", line: "chair"))
+        let onFirst = quotingRepository(first)
+        let onSecond = quotingRepository(second)
+
+        try await withUnitOfWork { work in
+            // Stages Quoting-q-1 on the second client's backend.
+            try await saveNewQuote(id: "q-1", to: onSecond)
+            let fromFirst = try #require(try await onFirst.find(byId: "q-1"))
+            #expect(fromFirst.lines == ["chair"])
+            #expect(fromFirst.version == 0)
+            let fromSecond = try #require(try await onSecond.find(byId: "q-1"))
+            #expect(fromSecond.lines == ["desk"])
+            #expect(fromSecond.version == 0)
+            #expect(!work.isFailed)
+        }
+
+        #expect(try await storedRevisions(first, quoteStream) == [0])
+        #expect(try await storedRevisions(second, quoteStream) == [0])
+    }
+
     @Test("a scope that only reads creates no backend, and the client gets no write")
     func findWithoutAnySaveCreatesNoBackend() async throws {
         let store = InMemoryEventStoreClient()
         try await quotingRepository(store).save(aggregateRoot: try Quoting(id: "q-1", line: "desk"))
         let client = CountingClient(wrapping: store)
-        let quotes = quotingRepository(client)
+        let recorder = LogRecorder()
+        let quotes = QuotingRepository(
+            store: QuotingCoordinator(client: client, eventMapper: QuotingEventMapper(), logger: recorder.logger)
+        )
 
         try await withUnitOfWork { work in
             let found = try #require(try await quotes.find(byId: "q-1"))
             #expect(found.lines == ["desk"])
             #expect(try await quotes.find(byId: "q-2") == nil)
+            #expect(recorder.warnings == [streamNotFoundWarning("Quoting-q-2")])
             let afterFirst = try #require(try await quotes.store.fetchEvents(byId: "q-1", afterRevision: 0))
             #expect(afterFirst.events.isEmpty)
             #expect(work.existingBackend(KurrentUnitOfWorkBackend.self, identity: client.identity) == nil)
@@ -1110,8 +1133,11 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
     @Test("metadata AppendRecords cannot carry → operationNotAllow at save inside a scope; outside a scope it is written")
     func uncarriableMetadataInsideScopeThrows() async throws {
         let store = InMemoryEventStoreClient()
+        let recorder = LogRecorder()
         let quotes = QuotingRepository(
-            store: KurrentStorageCoordinator<QuotingStream, Channel>(client: store, eventMapper: QuotingEventMapper())
+            store: KurrentStorageCoordinator<QuotingStream, Channel>(
+                client: store, eventMapper: QuotingEventMapper(), logger: recorder.logger
+            )
         )
         let quote = try Quoting(id: "q-1", line: "desk")
 
@@ -1127,6 +1153,7 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
                 // The check runs before staging, so the refused save staged nothing to read back.
                 let readBack = try await quotes.find(byId: "q-1")
                 #expect(readBack == nil)
+                #expect(recorder.warnings == [streamNotFoundWarning(quoteStream)])
             }
         }
 
