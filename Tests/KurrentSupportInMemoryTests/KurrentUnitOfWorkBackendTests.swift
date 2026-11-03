@@ -74,11 +74,6 @@ private func captureOperationNotAllow(
     return error
 }
 
-/// The `KurrentError` swift-kurrentdb throws before sending a call the server lacks.
-private let appendRecordsUnsupported = KurrentError.unsupportedFeature(
-    .init(fullyQualifiedService: "kurrentdb.protocol.v2.streams.StreamsService", method: "AppendSession")
-)
-
 /// The warning `commit()` logs when the client reports `returned` for `stream` instead of
 /// the predicted tail.
 private func revisionWarning(_ stream: String, predicted: UInt64, returned: String) -> LogRecorder.Entry {

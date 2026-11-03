@@ -108,3 +108,9 @@ final class CountingClient: EventStoreClient {
         try await wrapped.deletePersistentSubscription(stream: stream, group: group)
     }
 }
+
+/// The `KurrentError` swift-kurrentdb throws before sending a call the server lacks
+/// (here: AppendRecords on a server older than KurrentDB 26.1).
+let appendRecordsUnsupported = KurrentError.unsupportedFeature(
+    .init(fullyQualifiedService: "kurrentdb.protocol.v2.streams.StreamsService", method: "AppendSession")
+)
