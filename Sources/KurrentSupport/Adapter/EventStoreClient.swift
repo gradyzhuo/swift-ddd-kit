@@ -57,7 +57,8 @@ public struct PersistentSubscriptionSettings: Sendable, Equatable {
 }
 
 /// Seam over the KurrentDB operations `KurrentStorageCoordinator`/`KurrentProjection`
-/// actually call. `LiveEventStoreClient` wraps a real `KurrentDBClient`;
+/// actually call, plus `appendAtomically`, which the unit-of-work backend uses to commit
+/// several streams at once. `LiveEventStoreClient` wraps a real `KurrentDBClient`;
 /// `InMemoryEventStoreClient` (KurrentSupportInMemory) needs no server at all.
 public protocol EventStoreClient: Sendable {
     /// The identity of the underlying connection. Inside one unit of work, only clients
