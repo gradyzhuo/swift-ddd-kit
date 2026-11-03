@@ -127,10 +127,38 @@ extension DDDError {
         return .init(code: errorCode, message: message, userInfos: ["commitConflict": conflict])
     }
 
+    /// An append covering several streams found one or more of them somewhere
+    /// other than expected. Nothing was written to any of them.
+    ///
+    /// - Parameter conflicts: One entry per conflicting stream, kept in the given
+    ///   order. Must not be empty.
+    public static func commitConflict(conflicts: [CommitConflict]) -> Self {
+        precondition(!conflicts.isEmpty, "commitConflict(conflicts:) needs at least one conflict")
+        let errorCode = DDDError.Code.commitConflict
+        let ids = conflicts.map(\.id).joined(separator: ", ")
+        let message = "[\(errorCode)] Append to \(ids) found other revisions."
+        return .init(code: errorCode, message: message, userInfos: [
+            "commitConflict": conflicts[0],
+            "commitConflicts": conflicts,
+        ])
+    }
+
     /// The conflict details when `code == .commitConflict`, otherwise `nil`.
+    /// For `commitConflict(conflicts:)`, the first conflict.
     public var commitConflict: CommitConflict? {
         guard code == .commitConflict else { return nil }
         return userInfos["commitConflict"] as? CommitConflict
+    }
+
+    /// Every conflicting stream when `code == .commitConflict`, in the order the
+    /// error was built with (one entry for `commitConflict(id:expected:actual:)`),
+    /// otherwise empty.
+    public var commitConflicts: [CommitConflict] {
+        guard code == .commitConflict else { return [] }
+        if let conflicts = userInfos["commitConflicts"] as? [CommitConflict] {
+            return conflicts
+        }
+        return commitConflict.map { [$0] } ?? []
     }
 
     /// `EventStore.append` targeted an id that was purged. Nothing was written,
