@@ -77,8 +77,15 @@ jobs:
         with:
           swift-version: "6.4"
       # Reference server for the EventStore contract; when bumping it, rerun this job and review (spec C §3, 1.4.0 changelog).
+      # Projections on: the unit-of-work live tests subscribe to a $ce- stream, which only the $by_category standard projection writes.
       - name: Start KurrentDB
-        run: docker run -d --name kurrentdb -p 2113:2113 -e KURRENTDB_CLUSTER_SIZE=1 -e KURRENTDB_INSECURE=true kurrentplatform/kurrentdb:26.1.3
+        run: |
+          docker run -d --name kurrentdb -p 2113:2113 \
+            -e KURRENTDB_CLUSTER_SIZE=1 \
+            -e KURRENTDB_INSECURE=true \
+            -e KURRENTDB_RUN_PROJECTIONS=All \
+            -e KURRENTDB_START_STANDARD_PROJECTIONS=true \
+            kurrentplatform/kurrentdb:26.1.3
       - name: Wait for KurrentDB
         run: for i in $(seq 1 60); do curl -fsS http://localhost:2113/health/live && exit 0; sleep 1; done; echo "KurrentDB not live after 60s"; docker logs kurrentdb; exit 1
       - name: Live contract tests
