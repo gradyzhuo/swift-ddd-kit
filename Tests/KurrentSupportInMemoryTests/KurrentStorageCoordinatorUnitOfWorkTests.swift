@@ -1397,6 +1397,35 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         await expectNotWritten(store, quoteStream)
     }
 
+    @Test("a Task.detached awaited inside the block does not see the scope: its save writes at once and stays written when the block then throws")
+    func detachedTaskSaveInsideBlockWritesDirectly() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let quotes = quotingRepository(client)
+        let bills = billingRepository(client)
+
+        let error = await thrownError {
+            try await withUnitOfWork { _ in
+                try await quotes.save(aggregateRoot: try Quoting(id: "q-1", line: "desk"))
+                let sawScope = try await Task.detached {
+                    let sawScope = UnitOfWork.current != nil
+                    try await bills.save(aggregateRoot: try Billing(id: "b-1", amount: 100))
+                    return sawScope
+                }.value
+                #expect(!sawScope)
+                // Written before the block ends, by a plain append.
+                #expect(try await storedRevisions(store, billStream) == [0])
+                throw BodyFailure.thrown
+            }
+        }
+
+        #expect(error as? BodyFailure == .thrown)
+        await expectNotWritten(store, quoteStream)
+        #expect(try await storedRevisions(store, billStream) == [0])
+        #expect(client.appendCount == 1)
+        #expect(client.appendAtomicallyCount == 0)
+    }
+
     @Test("a save inside an onCommitted hook writes straight to the client after the atomic commit")
     func saveInsideHookWritesDirectly() async throws {
         let store = InMemoryEventStoreClient()

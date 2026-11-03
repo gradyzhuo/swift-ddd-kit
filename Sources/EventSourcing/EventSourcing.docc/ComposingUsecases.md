@@ -125,6 +125,11 @@ scope has ended, which is why both are called with `try`.
   it reaches `save` after the block ended, it hits the closed scope and throws `operationNotAllow`;
   it never writes directly and never joins a batch that was already committed. Await everything
   the scope must do before returning.
+- **Do not move a `save` out of the task tree either.** `Task.detached`, and code that does not
+  run in the block's task tree (a NIO future callback, a `DispatchQueue` block, a timer), do not
+  see the scope at all: ``UnitOfWork/current`` is `nil` there, so a `save` writes to the store at
+  once, is not part of the commit, and stays written when the block throws or the commit fails.
+  Use `async let` or a `TaskGroup` to run usecases in parallel inside the block.
 - **Publish after the commit.** A usecase that calls `EventBus.publish` right after `save`
   publishes before the commit inside a scope. To be right in and out of a scope, write
   `if let work = UnitOfWork.current { try work.onCommitted { … } } else { … }`.
