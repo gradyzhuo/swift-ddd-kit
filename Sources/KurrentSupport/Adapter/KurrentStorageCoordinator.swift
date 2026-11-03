@@ -49,16 +49,7 @@ public final class KurrentStorageCoordinator<
             }
             throw DDDError.commitConflict(id: id, expected: version, actual: actual)
         }
-        let encoder = JSONEncoder()
-        let metadataBytes: Data? = try metadata.map { try encoder.encode($0) }
-        let eventDataList = try events.map { event in
-            try EventData(
-                id: event.id,
-                eventType: event.eventType,
-                model: event,
-                customMetadata: metadataBytes
-            )
-        }
+        let eventDataList = try encodeForKurrent(events: events, metadata: metadata).events
         // A `nil` version means the aggregate has never been persisted —
         // expect `.noStream` so a concurrent/duplicate create collides
         // with the existing stream instead of silently succeeding under
@@ -66,21 +57,8 @@ public final class KurrentStorageCoordinator<
         let expectedRevision: StreamRevision = version.map { .at($0) } ?? .noStream
         do {
             return try await client.append(events: eventDataList, toStream: streamName, category: StreamNaming.category, expectedRevision: expectedRevision)
-        } catch let error as KurrentError {
-            switch error {
-            case let .wrongExpectedVersion(_, current):
-                let actual: UInt64? = switch current {
-                    case .noStream: nil
-                    case let .revision(revision): revision
-                }
-                throw DDDError.commitConflict(id: id, expected: version, actual: actual)
-            case .resourceDeleted:
-                throw DDDError.streamPurged(id: id)
-            default:
-                throw error
-            }
-        } catch EventStoreClientError.wrongExpectedRevision(let current) {
-            throw DDDError.commitConflict(id: id, expected: version, actual: current)
+        } catch {
+            throw mapSingleStreamAppendError(error, id: id, expected: version)
         }
     }
 
