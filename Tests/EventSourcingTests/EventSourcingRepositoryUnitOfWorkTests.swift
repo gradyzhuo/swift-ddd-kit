@@ -252,6 +252,38 @@ struct EventSourcingRepositoryUnitOfWorkTests {
         #expect(saveError?.reason == cause.reason)
     }
 
+    @Test("A purge refusal caught inside the block still fails the scope, with that error as the cause")
+    func errorThrownByPurgeInsideScopeFailsTheScope() async throws {
+        let store = NonParticipantStore()
+        let repository = TicketRepository(store: store)
+        try await repository.save(aggregateRoot: try Ticket(id: "t-1", title: "first"))
+        var purgeError: DDDError?
+
+        let error = await thrownError {
+            try await withUnitOfWork { work in
+                do {
+                    try await repository.purge(byId: "t-1")
+                    Issue.record("purge must throw inside a scope for a store that cannot take part")
+                } catch let refused as DDDError {
+                    purgeError = refused
+                }
+                #expect(work.isFailed)
+            }
+        }
+
+        let commitError = try #require(error as? DDDError)
+        #expect(commitError.code == .aggregateOperationNotAllowed)
+        #expect(commitError.operation == "commit")
+        #expect(commitError.reason == "unit of work failed")
+        let cause = try #require(commitError.userInfos["cause"] as? DDDError)
+        #expect(cause.code == .aggregateOperationNotAllowed)
+        #expect(cause.operation == "purge")
+        #expect(cause.reason == nonParticipantReason)
+        #expect(purgeError?.operation == cause.operation)
+        #expect(purgeError?.reason == cause.reason)
+        #expect(try await store.fetchEvents(byId: "t-1")?.latestRevision == 0)
+    }
+
     @Test("A store error from find caught inside the block still fails the scope")
     func errorThrownByFindInsideScopeFailsTheScope() async throws {
         let repository = TicketRepository(store: UnavailableStore())
