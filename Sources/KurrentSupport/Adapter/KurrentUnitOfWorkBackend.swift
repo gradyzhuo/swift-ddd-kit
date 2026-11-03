@@ -48,11 +48,20 @@ package final class KurrentUnitOfWorkBackend: UnitOfWorkBackend {
 
     private let client: any EventStoreClient
     private let state = Mutex(State())
-    private let logger = Logger(label: "KurrentUnitOfWorkBackend")
+    private let logger: Logger
 
     /// - Parameter client: The client `commit()` writes through.
-    package init(client: any EventStoreClient) {
+    package convenience init(client: any EventStoreClient) {
+        self.init(client: client, logger: Logger(label: "KurrentUnitOfWorkBackend"))
+    }
+
+    /// - Parameters:
+    ///   - client: The client `commit()` writes through.
+    ///   - logger: Where `commit()` warns about a returned revision that differs from the
+    ///     predicted one.
+    package init(client: any EventStoreClient, logger: Logger) {
         self.client = client
+        self.logger = logger
     }
 
     /// Stages `events` for `stream` and returns the predicted tail revision: the revision
@@ -126,10 +135,11 @@ package final class KurrentUnitOfWorkBackend: UnitOfWorkBackend {
     /// The events staged for `stream` and the revision the first of them will get
     /// (`.noStream` → 0, `.at(n)` → `n + 1`), or `nil` when nothing is staged for it.
     ///
-    /// - Throws: `DDDError.operationNotAllow` once `commit()` has started.
+    /// - Throws: `DDDError.operationNotAllow(operation: "stage", …)` once `commit()` has
+    ///   started, the same error `stage` throws then.
     package func stagedEvents(stream: String) throws -> (firstRevision: UInt64, events: [EventData])? {
         try state.withLock { state in
-            guard !state.committed else { throw Self.alreadyCommitted(operation: "stagedEvents") }
+            guard !state.committed else { throw Self.alreadyCommitted(operation: "stage") }
             return state.batches[stream].map { (firstRevision: $0.firstRevision, events: $0.events) }
         }
     }

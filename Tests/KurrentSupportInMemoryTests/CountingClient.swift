@@ -5,16 +5,22 @@ import KurrentSupportInMemory
 import Synchronization
 
 /// Forwards every call to a wrapped `InMemoryEventStoreClient`, counting `append` and
-/// `appendAtomically` calls. Optionally adds `revisionOffset` to the revisions both append
-/// methods return, makes both throw `errorToThrow` without forwarding, or parks both on
-/// `gate` until the test lets them go on.
+/// `appendAtomically` calls and recording the streams each `appendAtomically` call receives.
+/// Optionally adds `revisionOffset` to the revisions both append methods return, withholds
+/// one stream's revision, makes both throw `errorToThrow` without forwarding, or parks both
+/// on `gate` until the test lets them go on.
 final class CountingClient: EventStoreClient {
     let wrapped: InMemoryEventStoreClient
     private let revisionOffset: UInt64
+    private let withheldRevisionStream: String?
     private let errorToThrow: (any Error)?
     private let gate: AsyncStream<CheckedContinuation<Void, Never>>.Continuation?
     private let calls = Mutex<[String: Int]>([:])
+    private let atomicBatchStreams = Mutex<[[String]]>([])
 
+    /// - Parameter withholdingRevisionOf: A stream whose events are still written but whose
+    ///   revision is not reported: `append` returns nil for it and `appendAtomically` leaves
+    ///   it out of its results.
     /// - Parameter gate: When set, each `append` / `appendAtomically` call, once counted,
     ///   yields a continuation to `gate` and waits until the test resumes it, so the test
     ///   knows the call is in flight and controls when it goes on. Once the test finishes
@@ -22,11 +28,13 @@ final class CountingClient: EventStoreClient {
     init(
         wrapping wrapped: InMemoryEventStoreClient,
         revisionOffset: UInt64 = 0,
+        withholdingRevisionOf withheldRevisionStream: String? = nil,
         errorToThrow: (any Error)? = nil,
         gate: AsyncStream<CheckedContinuation<Void, Never>>.Continuation? = nil
     ) {
         self.wrapped = wrapped
         self.revisionOffset = revisionOffset
+        self.withheldRevisionStream = withheldRevisionStream
         self.errorToThrow = errorToThrow
         self.gate = gate
     }
@@ -36,6 +44,9 @@ final class CountingClient: EventStoreClient {
 
     /// How many times `appendAtomically(_:)` was called.
     var appendAtomicallyCount: Int { calls.withLock { $0["appendAtomically", default: 0] } }
+
+    /// The streams of each `appendAtomically(_:)` call's batches, in the order the call received them.
+    var appendAtomicallyStreams: [[String]] { atomicBatchStreams.withLock { $0 } }
 
     private func record(_ method: String) {
         calls.withLock { $0[method, default: 0] += 1 }
@@ -58,15 +69,19 @@ final class CountingClient: EventStoreClient {
         await passGate()
         if let errorToThrow { throw errorToThrow }
         let revision = try await wrapped.append(events: events, toStream: name, category: category, expectedRevision: expectedRevision)
+        guard name != withheldRevisionStream else { return nil }
         return revision.map { $0 + revisionOffset }
     }
 
     func appendAtomically(_ batches: [StreamBatch]) async throws -> [StreamBatchResult] {
         record("appendAtomically")
+        atomicBatchStreams.withLock { $0.append(batches.map(\.stream)) }
         await passGate()
         if let errorToThrow { throw errorToThrow }
         let results = try await wrapped.appendAtomically(batches)
-        return results.map { StreamBatchResult(stream: $0.stream, revision: $0.revision + revisionOffset) }
+        return results
+            .filter { $0.stream != withheldRevisionStream }
+            .map { StreamBatchResult(stream: $0.stream, revision: $0.revision + revisionOffset) }
     }
 
     func readStream(name: String, from revision: RevisionCursor, resolveLinks: Bool) async throws -> [any RecordedEventLike] {
