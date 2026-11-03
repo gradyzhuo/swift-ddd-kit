@@ -404,6 +404,50 @@ struct KurrentUnitOfWorkBackendTests {
         _ = await captureOperationNotAllow("stagedEvents") { _ = try backend.stagedEvents(stream: "Order-a") }
     }
 
+    @Test(
+        "commit ends the backend before it awaits the client: stage, stagedEvents and commit throw while the write is in flight",
+        arguments: [1, 2]
+    )
+    func stageWhileCommitAwaitsClientThrows(streamCount: Int) async throws {
+        let store = InMemoryEventStoreClient()
+        let (parked, park) = AsyncStream.makeStream(of: CheckedContinuation<Void, Never>.self)
+        let client = CountingClient(wrapping: store, gate: park)
+        let backend = KurrentUnitOfWorkBackend(client: client)
+        let batches = ["a", "b"].prefix(streamCount).map { (id: $0, events: samples("\($0)1")) }
+        for batch in batches {
+            try stage(backend, batch.id, .noStream, batch.events)
+        }
+
+        let committing = Task {
+            // Ends the wait below even if commit never reaches the client, so a regression fails instead of hanging.
+            defer { park.finish() }
+            try await backend.commit()
+        }
+        var parkedAppends = parked.makeAsyncIterator()
+        let inFlight = await parkedAppends.next()
+        // Any later append goes straight on, so a regression that writes again fails instead of hanging.
+        park.finish()
+        let append = try #require(inFlight, "commit returned without calling the client")
+
+        // The client append is in flight: the backend must already be ended.
+        let staging = await captureOperationNotAllow("stage") { try stage(backend, "c", .noStream, samples("c1")) }
+        #expect((staging?.userInfos["reason"] as? String)?.contains("already committed") == true)
+        let reading = await captureOperationNotAllow("stagedEvents") { _ = try backend.stagedEvents(stream: "Order-a") }
+        #expect((reading?.userInfos["reason"] as? String)?.contains("already committed") == true)
+        let recommitting = await captureOperationNotAllow("commit") { try await backend.commit() }
+        #expect((recommitting?.userInfos["reason"] as? String)?.contains("already committed") == true)
+
+        append.resume()
+        try await committing.value
+
+        #expect(client.appendCount == (streamCount == 1 ? 1 : 0))
+        #expect(client.appendAtomicallyCount == (streamCount == 1 ? 0 : 1))
+        for batch in batches {
+            #expect(try await storedIds(store, "Order-\(batch.id)") == batch.events.map(\.id))
+        }
+        await expectNotWritten(store, "Order-c")
+    }
+
     // MARK: encodeForKurrent
 
     @Test("encodeForKurrent + client.append stores what KurrentStorageCoordinator.append stores")

@@ -6,17 +6,29 @@ import Synchronization
 
 /// Forwards every call to a wrapped `InMemoryEventStoreClient`, counting `append` and
 /// `appendAtomically` calls. Optionally adds `revisionOffset` to the revisions both append
-/// methods return, or makes both throw `errorToThrow` without forwarding.
+/// methods return, makes both throw `errorToThrow` without forwarding, or parks both on
+/// `gate` until the test lets them go on.
 final class CountingClient: EventStoreClient {
     let wrapped: InMemoryEventStoreClient
     private let revisionOffset: UInt64
     private let errorToThrow: (any Error)?
+    private let gate: AsyncStream<CheckedContinuation<Void, Never>>.Continuation?
     private let calls = Mutex<[String: Int]>([:])
 
-    init(wrapping wrapped: InMemoryEventStoreClient, revisionOffset: UInt64 = 0, errorToThrow: (any Error)? = nil) {
+    /// - Parameter gate: When set, each `append` / `appendAtomically` call, once counted,
+    ///   yields a continuation to `gate` and waits until the test resumes it, so the test
+    ///   knows the call is in flight and controls when it goes on. Once the test finishes
+    ///   `gate`, later calls go straight on.
+    init(
+        wrapping wrapped: InMemoryEventStoreClient,
+        revisionOffset: UInt64 = 0,
+        errorToThrow: (any Error)? = nil,
+        gate: AsyncStream<CheckedContinuation<Void, Never>>.Continuation? = nil
+    ) {
         self.wrapped = wrapped
         self.revisionOffset = revisionOffset
         self.errorToThrow = errorToThrow
+        self.gate = gate
     }
 
     /// How many times `append(events:toStream:category:expectedRevision:)` was called.
@@ -29,10 +41,21 @@ final class CountingClient: EventStoreClient {
         calls.withLock { $0[method, default: 0] += 1 }
     }
 
+    /// Waits on `gate`, if any, until the test resumes the yielded continuation.
+    private func passGate() async {
+        guard let gate else { return }
+        await withCheckedContinuation { continuation in
+            if case .terminated = gate.yield(continuation) {
+                continuation.resume()
+            }
+        }
+    }
+
     var identity: ObjectIdentifier { wrapped.identity }
 
     func append(events: [EventData], toStream name: String, category: String, expectedRevision: StreamRevision) async throws -> UInt64? {
         record("append")
+        await passGate()
         if let errorToThrow { throw errorToThrow }
         let revision = try await wrapped.append(events: events, toStream: name, category: category, expectedRevision: expectedRevision)
         return revision.map { $0 + revisionOffset }
@@ -40,6 +63,7 @@ final class CountingClient: EventStoreClient {
 
     func appendAtomically(_ batches: [StreamBatch]) async throws -> [StreamBatchResult] {
         record("appendAtomically")
+        await passGate()
         if let errorToThrow { throw errorToThrow }
         let results = try await wrapped.appendAtomically(batches)
         return results.map { StreamBatchResult(stream: $0.stream, revision: $0.revision + revisionOffset) }
