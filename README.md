@@ -317,13 +317,14 @@ func createQuotingCaseWithContact(_ input: Input) async throws -> Output {
 }
 ```
 
-Both services are the instances built at startup. The `repository.find(byId: quoting.id)` inside
-`addContactService` finds the QuotingCase that was just created and is not written yet, and its
-`save` joins the same stream's batch. One stream is written with the same single-stream append as
-a plain `save`; two or more streams go through one atomic KurrentDB `AppendRecords` call
-(KurrentDB 26.1+). If any stream is not at its expected revision, nothing is written and the block
-throws `commitConflict`, with every conflicting stream in `error.commitConflicts`. Tests need no
-server: build the repositories over one `InMemoryEventStoreClient`.
+Both services are the instances built at startup, with repositories over the same
+`KurrentDBClient` instance. The `repository.find(byId: quoting.id)` inside `addContactService`
+finds the QuotingCase that was just created and is not written yet, and its `save` joins the same
+stream's batch. One stream is written with the same single-stream append as a plain `save`; two
+or more streams go through one atomic KurrentDB `AppendRecords` call (KurrentDB 26.1+). If any
+stream is not at its expected revision, nothing is written and the block throws `commitConflict`,
+with every conflicting stream in `error.commitConflicts`. Tests need no server: build the
+repositories over one `InMemoryEventStoreClient`.
 
 The block's `work` parameter registers side effects that must wait for the commit
 (`try work.onCommitted { … }`) and fails the unit of work without throwing (`try work.fail(error)`):
@@ -365,10 +366,11 @@ Rules inside the block:
 
 Only `KurrentStorageCoordinator` takes part: inside the block, `save` and `purge` through a
 repository over `InMemoryEventStore` or `PersistentEventStore` throw `operationNotAllow`. Every
-write in one block must go through the same `KurrentDBClient` instance. After the block, find
-aggregates again instead of reusing the instances from inside it. Run projectors on the
-subscription runners, not inside a block. The details (commit errors, metadata limits, writing
-an `EventStoreClient`) are in the DocC articles
+write in one block, and every read that must see the block's earlier saves, must go through the
+same `KurrentDBClient` instance; a read through another instance sees only what the server has.
+After the block, find aggregates again instead of reusing the instances from inside it. Run
+projectors on the subscription runners, not inside a block. The details (commit errors, metadata
+limits, writing an `EventStoreClient`) are in the DocC articles
 [Composing usecases with a unit of work](https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/eventsourcing/composingusecases)
 and [Unit of work on KurrentDB](https://gradyzhuo.github.io/swift-ddd-kit/main/documentation/kurrentsupport/unitofwork).
 

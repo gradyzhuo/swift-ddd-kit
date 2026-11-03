@@ -539,30 +539,41 @@ direct requirement below 2.6.1.
 - **BC3 — One `KurrentDBClient` instance per unit of work.** Writes in one unit of work commit
   together only through the same `KurrentDBClient` instance. Two instances connected to the same
   cluster (two `KurrentDBPool.borrow()` results, say) count as different clients: the first write
-  through the second one throws `DDDError.operationNotAllow`. Reads may go through any client.
+  through the second one throws `DDDError.operationNotAllow`. A read through another instance
+  neither binds nor fails the unit of work, but it sees only what the server has: only
+  coordinators whose client has the unit of work's identity see its staged events. A usecase that
+  reads what an earlier usecase in the same block saved needs a repository over the same
+  `KurrentDBClient` instance.
 - **BC4 — The unit-of-work check lives in `EventSourcingRepository`'s default implementations.**
   Inside a unit of work, the default `save` and `purge` refuse a store that cannot take part
   (`InMemoryEventStore`, `PersistentEventStore`) with `operationNotAllow`, `save` even when the
   aggregate has no new events; outside one, a `save` without new events still does not call the
-  store. Code that calls `store.append` directly still writes straight to a non-participating
-  store inside a unit of work, and a repository that overrides `find`, `save`, `delete` or
-  `purge` neither refuses such stores nor fails the unit of work on store errors.
+  store. Code that calls `store.append` or `store.purge` directly on a non-participating store
+  still writes or purges at once inside a unit of work, and a repository that overrides `find`,
+  `save`, `delete` or `purge` neither refuses such stores nor fails the unit of work on store
+  errors.
 - **BC5 — Do not reuse aggregate instances after a unit of work.** Inside a unit of work an
   aggregate's version after `save` is the revision the commit is predicted to give it. When the
   server returns another one (a soft-deleted stream that is recreated continues from its old
   tail + 1), the commit only logs a warning, and the instance's version is behind the server's;
   after a block that threw, it still reflects the discarded save. Find the aggregate again.
 - **BC6 — Metadata inside a unit of work.** A unit of work that writes two or more streams sends
-  metadata as protobuf `Value` (`AppendRecords` properties), and every `save` inside one checks it
-  can: it must encode to a JSON object, and NaN, ±infinity or integers beyond 64 bits fail at
-  `save` with `operationNotAllow`. Integers beyond ±2^53 are not rejected but rounded to the
-  nearest `Double`, so store values whose every digit matters as strings. Read back, the custom
-  metadata also holds the server's `$schema.name` and `$schema.format` keys; compare decoded
-  structs, not raw bytes or dictionaries.
+  metadata as protobuf `Value` (`AppendRecords` properties), so every `save` inside one checks
+  that the metadata encodes to a JSON object; one that does not (a `String`-backed enum, say)
+  fails at `save` with `operationNotAllow`. Outside a unit of work it is still written as before.
+  NaN and ±infinity throw `EncodingError` at `save`, as before 1.5, inside a unit of work and
+  outside it. Numbers are not checked further: on the multi-stream path each one travels as the
+  nearest `Double`, so an integer beyond ±2^53, including one beyond 64 bits such as a large
+  `Decimal`, is stored rounded without an error. Store values whose every digit matters as
+  strings. Read back, the custom metadata also holds the server's `$schema.name` and
+  `$schema.format` keys; compare decoded structs, not raw bytes or dictionaries.
 
-Also inside a unit of work: `purge` is refused by every store in this package; after a `commitConflict` or
-`streamPurged` from the commit nothing was written, but after any other commit error the writes
-may have landed, so read before running the block again; a `save` from a `Task` that outlives the
-block throws, while a `save` inside an `onCommitted` hook writes directly; run projectors on the
-subscription runners, never synchronously inside a block. KurrentDB 26.1 or later is needed for a
-unit of work that writes two or more streams.
+Also inside a unit of work: `EventSourcingRepository`'s default `purge` is refused for every store
+in this package (`KurrentStorageCoordinator.purge` refuses even when called directly), but a
+direct `store.purge` on `InMemoryEventStore` or `PersistentEventStore` still purges at once and
+permanently, even when the block then throws; after a `commitConflict` or `streamPurged` from the
+commit nothing was written, but after any other commit error the writes may have landed, so read
+before running the block again; a `save` from a `Task` that outlives the block throws, while a
+`save` inside an `onCommitted` hook writes directly; run projectors on the subscription runners,
+never synchronously inside a block. KurrentDB 26.1 or later is needed for a unit of work that
+writes two or more streams.
