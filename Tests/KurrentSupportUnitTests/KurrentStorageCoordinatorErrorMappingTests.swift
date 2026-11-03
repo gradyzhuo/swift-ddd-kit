@@ -31,6 +31,7 @@ private enum Naming: EventStreamNaming {
 private struct ThrowingClient: EventStoreClient {
     let error: any Error
 
+    var identity: ObjectIdentifier { ObjectIdentifier(Self.self) }
     func append(events: [EventData], toStream name: String, category: String, expectedRevision: StreamRevision) async throws -> UInt64? { throw error }
     func readStream(name: String, from revision: RevisionCursor, resolveLinks: Bool) async throws -> [any RecordedEventLike] { throw error }
     func deleteStream(name: String, expectedRevision: StreamRevision) async throws { throw error }
@@ -38,6 +39,7 @@ private struct ThrowingClient: EventStoreClient {
     func subscribePersistent(stream: String, group: String) async throws -> any PersistentSubscriptionSession { throw error }
     func ensurePersistentSubscription(stream: String, group: String, settings: PersistentSubscriptionSettings) async throws {}
     func deletePersistentSubscription(stream: String, group: String) async throws {}
+    func appendAtomically(_ batches: [StreamBatch]) async throws -> [StreamBatchResult] { throw error }
 }
 
 private func makeCoordinator(throwing error: any Error) -> KurrentStorageCoordinator<Naming, CustomMetadata> {

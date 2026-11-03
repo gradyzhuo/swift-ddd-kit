@@ -60,6 +60,12 @@ public struct PersistentSubscriptionSettings: Sendable, Equatable {
 /// actually call. `LiveEventStoreClient` wraps a real `KurrentDBClient`;
 /// `InMemoryEventStoreClient` (KurrentSupportInMemory) needs no server at all.
 public protocol EventStoreClient: Sendable {
+    /// The identity of the underlying connection. Inside one unit of work, only clients
+    /// with the same identity commit together. There is no default: two clusters taken
+    /// for one would send events to the wrong cluster. A wrapper forwards the identity of
+    /// the client it wraps.
+    var identity: ObjectIdentifier { get }
+
     /// - Parameter category: The stream's category, as declared by the caller's
     ///   `EventStreamNaming.category` — e.g. `"Order"` for stream `"Order-42"`. Both
     ///   conformances currently ignore this for `$ce-<category>` routing: real KurrentDB's
@@ -86,6 +92,18 @@ public protocol EventStoreClient: Sendable {
     func ensurePersistentSubscription(stream: String, group: String, settings: PersistentSubscriptionSettings) async throws
     /// Deletes the persistent subscription group. A missing group is tolerated.
     func deletePersistentSubscription(stream: String, group: String) async throws
+    /// Appends to several streams in one atomic write. Every batch's `expectedRevision`
+    /// is checked before anything is written; when any does not hold, nothing is written.
+    ///
+    /// - Throws: `KurrentError.resourceDeleted(resource:)` naming the first tombstoned
+    ///   stream in batch order, even when other batches conflict too; otherwise
+    ///   `EventStoreClientError.consistencyViolations` listing every stream whose
+    ///   expected revision did not hold.
+    /// - Parameter batches: At least two, with distinct streams (the caller's job).
+    /// - Returns: Each stream's new revision, in no particular order. Resending a whole
+    ///   request (every batch with the same event ids) returns the original revisions and
+    ///   writes nothing.
+    func appendAtomically(_ batches: [StreamBatch]) async throws -> [StreamBatchResult]
 }
 
 extension EventStoreClient {
@@ -95,6 +113,14 @@ extension EventStoreClient {
     @available(*, deprecated, message: "Implement or forward tombstoneStream(name:); KurrentStorageCoordinator.purge calls it.")
     public func tombstoneStream(name: String) async throws {
         throw EventStoreClientError.tombstoneUnsupported
+    }
+
+    /// Conformers written before 1.5 keep compiling, but a unit of work that writes more
+    /// than one stream through them fails at commit until they implement or forward this.
+    /// Deprecated so the compiler warns at every conformance that silently relies on it.
+    @available(*, deprecated, message: "Implement or forward appendAtomically(_:); withUnitOfWork needs it for more than one stream.")
+    public func appendAtomically(_ batches: [StreamBatch]) async throws -> [StreamBatchResult] {
+        throw EventStoreClientError.atomicAppendUnsupported
     }
 }
 
@@ -124,6 +150,13 @@ public enum EventStoreClientError: Error, Sendable, Equatable {
     /// The conformance does not implement `tombstoneStream(name:)`. Wrappers around
     /// `LiveEventStoreClient` must forward it for `purge` to work.
     case tombstoneUnsupported
+    /// `appendAtomically`'s expected revisions did not hold for these streams; nothing was
+    /// written. Never empty.
+    case consistencyViolations([StreamConflict])
+    /// The conformance does not implement `appendAtomically(_:)`. Wrappers around
+    /// `LiveEventStoreClient` must forward it for a unit of work that writes more than
+    /// one stream.
+    case atomicAppendUnsupported
 }
 
 /// Shared by both `EventStoreClient` conformances so `$ce-<category>` handling stays

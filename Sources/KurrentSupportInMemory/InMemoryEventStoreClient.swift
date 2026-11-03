@@ -76,6 +76,9 @@ public actor InMemoryEventStoreClient: EventStoreClient {
 
     // MARK: - EventStoreClient
 
+    /// This instance's identity: every `InMemoryEventStoreClient` is a store of its own.
+    nonisolated public var identity: ObjectIdentifier { ObjectIdentifier(self) }
+
     @discardableResult
     public func append(
         events: [EventData],
@@ -88,9 +91,7 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         // doc comment. `$ce-<Category>` routing must match what real KurrentDB derives
         // from the stream name itself.
         if tombstoned.contains(name) { throw KurrentError.resourceDeleted(resource: name) }
-        let systemCategory = Self.systemCategory(forStreamName: name)
-        var existing = streams[name] ?? []
-        let lastRevision = existing.last?.revision
+        let existing = streams[name] ?? []
 
         // KurrentDB de-duplicates by event id: resending a batch that is already
         // stored right after the expected position succeeds without writing.
@@ -98,46 +99,12 @@ public actor InMemoryEventStoreClient: EventStoreClient {
             return replayed
         }
 
-        switch expectedRevision {
-        case .any:
-            break
-        case .noStream:
-            guard existing.isEmpty else {
-                throw EventStoreClientError.wrongExpectedRevision(current: lastRevision)
-            }
-        case .streamExists:
-            guard !existing.isEmpty else {
-                throw EventStoreClientError.wrongExpectedRevision(current: nil)
-            }
-        case let .at(expected):
-            guard lastRevision == expected else {
-                throw EventStoreClientError.wrongExpectedRevision(current: lastRevision)
-            }
-        }
+        try Self.checkExpectedRevision(expectedRevision, of: existing)
 
-        var nextRevision = lastRevision.map { $0 + 1 } ?? 0
-        var stored: [StoredEvent] = []
-        for event in events {
-            globalSequenceCounter += 1
-            stored.append(StoredEvent(
-                id: event.id,
-                eventType: event.eventType,
-                revision: nextRevision,
-                customMetadata: event.customMetadata ?? Data(),
-                streamName: name,
-                category: systemCategory,
-                payloadData: try event.payload.data,
-                globalSequence: globalSequenceCounter
-            ))
-            nextRevision += 1
-        }
+        let stored = store(try Self.encodePayloads(of: events), inStream: name)
+        deliverToSubscriptions(stored, streamName: name, category: Self.systemCategory(forStreamName: name))
 
-        existing.append(contentsOf: stored)
-        streams[name] = existing
-
-        deliverToSubscriptions(stored, streamName: name, category: systemCategory)
-
-        return existing.last?.revision
+        return streams[name]?.last?.revision
     }
 
     public func readStream(
@@ -190,6 +157,47 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         guard !tombstoned.contains(name) else { throw KurrentError.resourceDeleted(resource: name) }
         tombstoned.insert(name)
         streams.removeValue(forKey: name)
+    }
+
+    /// Checks every batch before writing any, with the live seam's precedence: the first
+    /// tombstoned stream in batch order throws `resourceDeleted` before any conflict is
+    /// reported. Then writes the batches in order, each stream continuing from its own tail
+    /// and the global sequence continuing across batches, and delivers to subscriptions
+    /// only once every batch is stored.
+    public func appendAtomically(_ batches: [StreamBatch]) async throws -> [StreamBatchResult] {
+        // KurrentDB answers a resent `appendRecords` (same record ids) with the original
+        // revisions and writes nothing. Only a request in which every batch is a resend is
+        // modelled: the server's answer to a partial resend is unverified, so that falls
+        // through to the ordinary checks below and conflicts.
+        let replayed = batches.compactMap { batch in
+            Self.idempotentRevision(of: batch.events, in: streams[batch.stream] ?? [], expected: batch.expectedRevision)
+                .map { StreamBatchResult(stream: batch.stream, revision: $0) }
+        }
+        if replayed.count == batches.count { return replayed }
+
+        if let tombstonedBatch = batches.first(where: { tombstoned.contains($0.stream) }) {
+            throw KurrentError.resourceDeleted(resource: tombstonedBatch.stream)
+        }
+        var conflicts: [StreamConflict] = []
+        for batch in batches {
+            do {
+                try Self.checkExpectedRevision(batch.expectedRevision, of: streams[batch.stream] ?? [])
+            } catch EventStoreClientError.wrongExpectedRevision(let current) {
+                conflicts.append(StreamConflict(stream: batch.stream, expected: batch.expectedRevision, current: current))
+            }
+        }
+        guard conflicts.isEmpty else { throw EventStoreClientError.consistencyViolations(conflicts) }
+
+        // Encode every batch before storing any, so a payload that fails to encode leaves
+        // every stream untouched.
+        let encodedBatches = try batches.map { (stream: $0.stream, events: try Self.encodePayloads(of: $0.events)) }
+        let storedBatches = encodedBatches.map { (stream: $0.stream, events: store($0.events, inStream: $0.stream)) }
+        for batch in storedBatches {
+            deliverToSubscriptions(batch.events, streamName: batch.stream, category: Self.systemCategory(forStreamName: batch.stream))
+        }
+        return storedBatches.compactMap { batch in
+            batch.events.last.map { StreamBatchResult(stream: batch.stream, revision: $0.revision) }
+        }
     }
 
     public func subscribePersistent(stream target: String, group: String) async throws -> any PersistentSubscriptionSession {
@@ -255,6 +263,62 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         guard !category.contains("-") else {
             throw EventStoreClientError.unroutableCategory(stream: target)
         }
+    }
+
+    // MARK: - Storage
+
+    /// The expected-revision check `append` and `appendAtomically` share. Throws
+    /// `wrongExpectedRevision` with the stream's current revision (`nil`: no stream).
+    private static func checkExpectedRevision(_ expected: StreamRevision, of stored: [StoredEvent]) throws {
+        let lastRevision = stored.last?.revision
+        switch expected {
+        case .any:
+            break
+        case .noStream:
+            guard stored.isEmpty else {
+                throw EventStoreClientError.wrongExpectedRevision(current: lastRevision)
+            }
+        case .streamExists:
+            guard !stored.isEmpty else {
+                throw EventStoreClientError.wrongExpectedRevision(current: nil)
+            }
+        case let .at(expected):
+            guard lastRevision == expected else {
+                throw EventStoreClientError.wrongExpectedRevision(current: lastRevision)
+            }
+        }
+    }
+
+    /// Encodes every payload up front, so storing the events cannot fail part way through.
+    private static func encodePayloads(of events: [EventData]) throws -> [(event: EventData, payload: Data)] {
+        try events.map { (event: $0, payload: try $0.payload.data) }
+    }
+
+    /// Stores `events` after `name`'s tail, numbering their revisions on from it and their
+    /// global sequence on from every earlier write, and returns what it stored.
+    private func store(_ events: [(event: EventData, payload: Data)], inStream name: String) -> [StoredEvent] {
+        let systemCategory = Self.systemCategory(forStreamName: name)
+        var existing = streams[name] ?? []
+        var nextRevision = existing.last.map { $0.revision + 1 } ?? 0
+        var stored: [StoredEvent] = []
+        for (event, payload) in events {
+            globalSequenceCounter += 1
+            stored.append(StoredEvent(
+                id: event.id,
+                eventType: event.eventType,
+                revision: nextRevision,
+                customMetadata: event.customMetadata ?? Data(),
+                streamName: name,
+                category: systemCategory,
+                payloadData: payload,
+                globalSequence: globalSequenceCounter
+            ))
+            nextRevision += 1
+        }
+
+        existing.append(contentsOf: stored)
+        streams[name] = existing
+        return stored
     }
 
     // MARK: - Category / subscription routing
