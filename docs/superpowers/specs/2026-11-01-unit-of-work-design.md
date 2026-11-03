@@ -359,7 +359,7 @@ Source-breaking（migration 文件各給一個 SB 編號，格式同 1.3→1.4�
 1. 同一個 `appendRecords` 內 tombstoned + revision 衝突：一個 `consistencyViolation` 同時列出兩筆，沒有優先序；分辨靠各 violation 的 `actualState`（-6 = tombstoned、-5 = soft-deleted、-1 = 不存在）。DDDKit 的優先序是自己定的，見 §6.5。
 2. v1 soft delete（revision 0–2）後以 `.noStream` 透過 v2 重建：成功，revision = 3（舊尾端 +1，不是 0）。所以 §6.4 的「預測不符只 log」在這個正常情況下會觸發。
 3. 同一組 record id 重送同一個 `appendRecords`（即使帶 `.noStream`）：冪等，回同樣的 revision 與 position，資料不重複。
-4. metadata round-trip（v2 寫、v1 讀）：整數讀回是 `3` 不是 `3.0`（`JSONDecoder` 解 `Int` 沒問題）；`Date`（`JSONEncoder` 預設 double）數字完全一致。server 會另外塞 `"$schema.name"`、`"$schema.format"` 兩個鍵進 custom metadata：解成 Decodable struct 不受影響，但比對原始 bytes 或字典時要排除它們。
+4. metadata round-trip（v2 寫、v1 讀）：整數讀回是 `3` 不是 `3.0`（`JSONDecoder` 解 `Int` 沒問題）；`Date`（`JSONEncoder` 預設 double）數字完全一致。server 會另外塞 `"$schema.name"`、`"$schema.format"` 兩個鍵進 custom metadata：解成 Decodable struct 不受影響，但比對原始 bytes 或字典時要排除它們。（2026-11-04 補，最終審查實測於 26.1.1：metadata 為 `nil`（沒有 properties）的事件 server 一樣塞這兩個鍵，讀回不是空 bytes，而是 `{ "$schema.name": "<eventType>", "$schema.format": "Json" }`；live test `nilMetadataCommitReadsBackSchemaKeysOnly` 釘住。生成的 mapper 用 `try?` 不受影響；`ContextForwarder` 的 `ForwardedRecord.normalizedMetadata` 把只含 `$schema.*` 鍵的物件視為沒有 metadata，否則 `decodeMetadata` 會丟 `permanent` 讓事件 park；自己讀 `customMetadata` 的程式要寬鬆解碼，文件已寫明。）
 
 DDDKit 不再需要自己的 spike（實作計畫 Task 2 取消）；§7 的 live test 以上述事實為斷言。另 2.6.1（#186）：對被 tombstone 的 stream 的 catch-up subscription 以 `resourceDeleted` 結束，不再先送 `$streamDeleted` 再丟 raw RPCError；與本設計無關，記在這裡供 projection runner 參考。
 

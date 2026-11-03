@@ -320,7 +320,7 @@
       "scope": "EventMetadata types saved inside withUnitOfWork",
       "before": "metadata stored as raw JSON bytes",
       "after": "a unit of work of two or more streams sends metadata as protobuf Value (AppendRecords properties)",
-      "action": "Inside a unit of work, metadata must encode to a JSON object, or save throws operationNotAllow. NaN and ±infinity throw EncodingError from JSONEncoder at save (not operationNotAllow), in and out of a unit of work, as before 1.5. Inside a unit of work that writes two or more streams every number travels as the nearest Double: integers beyond ±2^53, including beyond 64 bits (e.g. a large Decimal), are rounded without an error, so store them as strings. On read the server adds $schema.name and $schema.format keys: compare decoded structs, not raw bytes."
+      "action": "Inside a unit of work, metadata must encode to a JSON object, or save throws operationNotAllow. NaN and ±infinity throw EncodingError from JSONEncoder at save (not operationNotAllow), in and out of a unit of work, as before 1.5. Inside a unit of work that writes two or more streams every number travels as the nearest Double: integers beyond ±2^53, including beyond 64 bits (e.g. a large Decimal), are rounded without an error, so store them as strings. On read the server adds $schema.name and $schema.format keys to every event of a commit of two or more streams, also to one saved with nil metadata, which then reads back as a JSON object of only those keys instead of empty bytes: compare decoded structs, not raw bytes, and decode metadata with try? or optional fields, treating a failure as no metadata."
     },
     {
       "id": "N1",
@@ -520,8 +520,20 @@
             nearest <code>Double</code>, so an integer beyond ±2^53, including one beyond 64 bits such as a large
             <code>Decimal</code>, is stored rounded without an error. <b>Store values whose every digit matters as strings.</b></li>
       </ul>
-      <p>Read back, the custom metadata also holds the server's <code>$schema.name</code> and <code>$schema.format</code> keys;
-         decoding into a struct is unaffected, so compare decoded values, not raw bytes or dictionaries.</p>
+      <p>Read back, the custom metadata of an event that a unit of work wrote to two or more streams also holds the server's
+         <code>$schema.name</code> and <code>$schema.format</code> keys; a struct decodes as before, so compare decoded values,
+         not raw bytes or dictionaries.</p>
+      <p>The keys are there also when the event was saved with <code>nil</code> metadata (no <code>EventMetadataContext</code>):
+         it reads back as <code>{"$schema.name": "&lt;event type&gt;", "$schema.format": "Json"}</code>, not empty bytes.</p>
+      <ul class="tite">
+        <li>The generated mapper decodes metadata with <code>try?</code>: <code>nil</code> for a type with a required field (such
+            as <code>CustomMetadata</code>), a value with every field <code>nil</code> for a type whose fields are all optional.</li>
+        <li><b>Code that reads <code>customMetadata</code> itself must not take non-empty bytes to mean metadata was written.</b>
+            Decode with <code>try?</code> or optional fields and treat a failure as no metadata: a hand-written mapper that throws
+            makes the coordinator skip the event, so <code>find</code> rebuilds the aggregate without it.</li>
+        <li><code>ContextForwarder</code> treats metadata that holds only <code>$schema.*</code> keys as absent
+            (<code>decodeMetadata</code> returns <code>nil</code>). <code>InMemoryEventStoreClient</code> adds no such keys.</li>
+      </ul>
     </div>
   </section>
 

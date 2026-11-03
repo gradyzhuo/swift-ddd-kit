@@ -566,8 +566,17 @@ direct requirement below 2.6.1.
   outside it. Numbers are not checked further: on the multi-stream path each one travels as the
   nearest `Double`, so an integer beyond ±2^53, including one beyond 64 bits such as a large
   `Decimal`, is stored rounded without an error. Store values whose every digit matters as
-  strings. Read back, the custom metadata also holds the server's `$schema.name` and
-  `$schema.format` keys; compare decoded structs, not raw bytes or dictionaries.
+  strings. Read back, the custom metadata of an event that a unit of work wrote to two or more
+  streams also holds the server's `$schema.name` and `$schema.format` keys; compare decoded
+  structs, not raw bytes or dictionaries. The keys are there also when the event was saved with
+  `nil` metadata (no `EventMetadataContext`): it reads back as
+  `{"$schema.name": "<event type>", "$schema.format": "Json"}`, not empty bytes. The generated
+  mapper decodes it with `try?` (`nil` for a type with a required field, every field `nil` for a
+  type whose fields are all optional); code that reads `customMetadata` itself must decode with
+  `try?` or optional fields and treat a failure as no metadata, because a hand-written mapper that
+  throws makes the coordinator skip the event. `ContextForwarder` treats metadata that holds only
+  `$schema.*` keys as absent (`decodeMetadata` returns `nil`). `InMemoryEventStoreClient` adds no
+  such keys.
 
 Also inside a unit of work: `EventSourcingRepository`'s default `purge` is refused for every store
 in this package (`KurrentStorageCoordinator.purge` refuses even when called directly), but a
