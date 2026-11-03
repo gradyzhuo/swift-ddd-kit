@@ -18,10 +18,10 @@
 - Locks: `Mutex`/actor only, never `NSLock`. No `@unchecked Sendable` in `Sources/`. Test fixtures may keep the repo's existing style; tests that use `async let`/`TaskGroup` construct the aggregate inside the child task instead of passing a non-`Sendable` aggregate across the boundary.
 - Never run bare `swift test`; always `--filter`. Offline suites: `EventSourcingTests`, `DDDKitUnitTests`, `KurrentSupportUnitTests`, `KurrentSupportInMemoryTests`, `LocalEventStoreTests`. `KurrentSupportUnitTests` is missing from CI's offline filter today; Task 6 adds it.
 - A filter that names a suite is quoted and puts a dot between target and suite: `swift test --filter 'EventSourcingTests\.UnitOfWorkTests'`. Swift Testing names a test `Target.Suite/test()`, so `Target/Suite` matches nothing: `swift test` prints `warning: No matching test cases were run` and exits 0. A step that expects tests to run (every GREEN step, and a RED step that expects a runtime failure) checks the output for `Test run with N tests` (one line per test target) with N > 0; for a single suite, N equals `swift test list | grep -c 'Target\.Suite/'`. A run without that line has tested nothing, whatever its exit code. Only a RED step that expects a compile error is exempt.
-- Live suite `KurrentLiveContractTests` needs a local single-node insecure KurrentDB 26.1.3 **and** the pool URL, otherwise `withPooledIntegrationTestClient` dials a TLS three-node cluster on 2111–2113:
+- Live suite `KurrentLiveContractTests` needs a local single-node insecure KurrentDB 26.1.3 with standard projections running (the `$ce-` subscription test reads a stream only `$by_category` writes; CI's `kurrent-live-contract` job starts it the same way) **and** the pool URL, otherwise `withPooledIntegrationTestClient` dials a TLS three-node cluster on 2111–2113:
 
 ```bash
-docker run -d --name kurrentdb -p 2113:2113 -e KURRENTDB_CLUSTER_SIZE=1 -e KURRENTDB_INSECURE=true kurrentplatform/kurrentdb:26.1.3
+docker run -d --name kurrentdb -p 2113:2113 -e KURRENTDB_CLUSTER_SIZE=1 -e KURRENTDB_INSECURE=true -e KURRENTDB_RUN_PROJECTIONS=All -e KURRENTDB_START_STANDARD_PROJECTIONS=true kurrentplatform/kurrentdb:26.1.3
 export KURRENTDB_POOL_URLS='["esdb://admin:changeit@localhost:2113?tls=false"]'
 ```
 

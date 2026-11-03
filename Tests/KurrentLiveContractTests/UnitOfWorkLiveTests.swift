@@ -285,6 +285,20 @@ private func firstDeliveredIds(
     }
 }
 
+/// Why the server writes no `$ce-` streams, or nil when it does. Only the `$by_category`
+/// standard projection writes them, and KurrentDB runs it only when started with
+/// `KURRENTDB_RUN_PROJECTIONS=All` and `KURRENTDB_START_STANDARD_PROJECTIONS=true`.
+private func byCategoryProjectionProblem(_ client: KurrentDBClient) async -> String? {
+    do {
+        guard let detail = try await client.projections(system: .byCategory).detail() else {
+            return "the server reports no $by_category projection"
+        }
+        return detail.status.names.contains(.running) ? nil : "$by_category is \(detail.status.rawValue)"
+    } catch {
+        return "reading $by_category failed: \(error)"
+    }
+}
+
 // MARK: - withUnitOfWork
 
 @Suite("withUnitOfWork on a live KurrentDB")
@@ -496,6 +510,11 @@ struct UnitOfWorkLiveTests {
     @Test("a persistent subscription on $ce-<category> receives both events a unit of work wrote to two streams of that category")
     func categorySubscriptionReceivesUnitOfWorkEvents() async throws {
         try await KurrentDBClient.withPooledIntegrationTestClient { client in
+            // Fail at once, naming the setup, instead of waiting out the 10 s below.
+            if let problem = await byCategoryProjectionProblem(client) {
+                Issue.record("\(problem). Only the $by_category standard projection writes $ce- streams: start KurrentDB with KURRENTDB_RUN_PROJECTIONS=All and KURRENTDB_START_STANDARD_PROJECTIONS=true.")
+                return
+            }
             let live = LiveEventStoreClient(client: client)
             let stream = "$ce-\(RunCategoryStream.category)"
             let group = "uow-live-\(UUID().uuidString.prefix(8))"
