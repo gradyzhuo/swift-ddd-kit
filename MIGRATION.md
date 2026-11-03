@@ -575,6 +575,9 @@ direct `store.purge` on `InMemoryEventStore` or `PersistentEventStore` still pur
 permanently, even when the block then throws; after a `commitConflict` or `streamPurged` from the
 commit nothing was written, but after any other commit error the writes may have landed, so read
 before running the block again; a `save` from a `Task` that outlives the block throws, while a
-`save` inside an `onCommitted` hook writes directly; run projectors on the subscription runners,
+`save` inside an `onCommitted` hook writes directly, and so does a `save` inside the block from a
+`Task.detached` or from code that does not run in the block's task tree (a NIO future callback, a
+`DispatchQueue` block, a timer): it does not see the scope, is not part of the commit, and stays
+written when the block throws or the commit fails; run projectors on the subscription runners,
 never synchronously inside a block. KurrentDB 26.1 or later is needed for a unit of work that
 writes two or more streams.

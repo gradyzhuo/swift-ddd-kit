@@ -87,7 +87,9 @@ public final class UnitOfWork: Sendable {
     /// The scope the running task is in, or `nil` outside any scope.
     ///
     /// A `Task` started inside the scope keeps seeing it after the scope ended; the
-    /// scope then rejects every change.
+    /// scope then rejects every change. `Task.detached`, and code that does not run in
+    /// the scope's task tree (a NIO future callback, a `DispatchQueue` block), see `nil`:
+    /// a `save` there writes at once and is not part of the commit.
     public static var current: UnitOfWork? {
         _UnitOfWorkStorage.current
     }

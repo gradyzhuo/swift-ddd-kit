@@ -362,6 +362,11 @@ Rules inside the block:
 - **Do not move a `save` into `Task { … }`.** The task inherits the scope; a `save` it reaches
   after the block ended throws `operationNotAllow` instead of writing. Await everything before
   returning.
+- **Do not move a `save` out of the task tree either.** `Task.detached`, and code that does not
+  run in the block's task tree (a NIO future callback, a `DispatchQueue` block, a timer), do not
+  see the scope at all (`UnitOfWork.current` is `nil`): a `save` there writes to the store at once,
+  is not part of the commit, and stays written when the block throws or the commit fails. Use
+  `async let` or a `TaskGroup` to run usecases in parallel inside the block.
 - **Publish after the commit.** A usecase that calls `EventBus.publish` right after `save`
   publishes before the commit inside a scope. Write
   `if let work = UnitOfWork.current { try work.onCommitted { … } } else { … }`.

@@ -595,6 +595,11 @@
       <li><b>Do not move a <code>save</code> into <code>Task { … }</code>.</b> A task that is not detached inherits the scope; a
           <code>save</code> it reaches after the block ended throws <code>operationNotAllow</code>, never writes directly and never
           joins a batch that was already committed. Await everything before returning.</li>
+      <li><b>Do not move a <code>save</code> out of the task tree either.</b> <code>Task.detached</code>, and code that does not run
+          in the block's task tree (a NIO future callback, a <code>DispatchQueue</code> block, a timer), do not see the scope at all
+          (<code>UnitOfWork.current</code> is <code>nil</code>): a <code>save</code> there writes to the store at once, is not part of
+          the commit, and stays written when the block throws or the commit fails. Use <code>async let</code> or a
+          <code>TaskGroup</code> to run usecases in parallel inside the block.</li>
       <li><b>Publish after the commit.</b> A usecase that calls <code>EventBus.publish</code> right after <code>save</code> publishes
           before the commit inside a scope; use <code>if let work = UnitOfWork.current { try work.onCommitted { … } } else { … }</code>
           (<span class="chgid">BC2</span>).</li>
