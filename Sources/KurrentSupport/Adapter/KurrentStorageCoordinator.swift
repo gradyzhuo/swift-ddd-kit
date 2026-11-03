@@ -13,13 +13,22 @@ public final class KurrentStorageCoordinator<
     StreamNaming: EventStreamNaming,
     Metadata: EventMetadata
 >: EventStore {
-    let logger = Logger(label: "KurrentStorageCoordinator")
+    let logger: Logger
     let eventMapper: any EventTypeMapper
     let client: any EventStoreClient
 
     public init(client: any EventStoreClient, eventMapper: any EventTypeMapper) {
         self.eventMapper = eventMapper
         self.client = client
+        self.logger = Logger(label: "KurrentStorageCoordinator")
+    }
+
+    /// Like `init(client:eventMapper:)`, logging to `logger` instead of a logger labelled
+    /// `KurrentStorageCoordinator`.
+    package init(client: any EventStoreClient, eventMapper: any EventTypeMapper, logger: Logger) {
+        self.eventMapper = eventMapper
+        self.client = client
+        self.logger = logger
     }
 
     /// Convenience initializer for the common case of a real KurrentDB connection.
@@ -31,6 +40,17 @@ public final class KurrentStorageCoordinator<
     /// Inside `withUnitOfWork(_:)` the events are staged in the unit of work's backend
     /// instead of written, and the returned revision is the one the last of them is predicted
     /// to get when the unit of work commits.
+    ///
+    /// - Throws: Inside `withUnitOfWork(_:)`:
+    ///   - `DDDError.commitConflict` when `version` is beyond `Int64.max`, or when the unit of
+    ///     work has already staged events for the stream and `version` is not the revision the
+    ///     last of them is predicted to get. A `version` the server's stream does not match is
+    ///     reported when the unit of work commits.
+    ///   - `DDDError.streamPurged` when `version` is beyond `Int64.max` and the stream was
+    ///     purged. Any other save to a purged id is reported when the unit of work commits.
+    ///   - `DDDError.operationNotAllow` when AppendRecords cannot carry `metadata`, when the
+    ///     unit of work already commits through a client with another identity, or when it
+    ///     has ended.
     public func append(
         events: [any DDDCore.DomainEvent],
         byId id: String,
@@ -113,6 +133,7 @@ public final class KurrentStorageCoordinator<
     }
 
     /// The backend `work` commits through, created for this coordinator's client on first use.
+    /// Only writes call it: reads look the backend up without creating or binding one.
     ///
     /// - Throws: `DDDError.operationNotAllow` when `work` already commits through the backend
     ///   of a client with another identity, or has ended.
@@ -126,11 +147,16 @@ public final class KurrentStorageCoordinator<
     /// follow the server's, also when the server has no such stream or it was purged. They
     /// are numbered with the revisions they are predicted to get, and `latestRevision` is the
     /// last staged one, even when the mapper leaves that event out.
+    ///
+    /// - Throws: The client's read errors, inside `withUnitOfWork(_:)` as outside it; a
+    ///   missing or purged stream is not one. A read never fails because of the unit of work:
+    ///   when it commits through a client with another identity, or has ended, the read
+    ///   returns the server's events alone. Only a read from a task that outlived the unit of
+    ///   work and races the start of its commit can throw `DDDError.operationNotAllow`.
     public func fetchEvents(byId id: String) async throws
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         let streamName = StreamNaming.getStreamName(id: id)
-        let serverRecords = try await readRecords(of: streamName, from: .start)
-        let staged = try stagedRecords(of: streamName)
+        let (serverRecords, staged) = try await serverAndStagedRecords(of: streamName, from: .start)
 
         let eventWrappers = mapRecords((serverRecords ?? []) + staged)
 
@@ -146,11 +172,12 @@ public final class KurrentStorageCoordinator<
     /// Inside `withUnitOfWork(_:)` the staged events after `revision` follow the server's, as
     /// in `fetchEvents(byId:)`, and `latestRevision` is the last staged one whenever the unit
     /// of work has staged events for the stream.
+    ///
+    /// - Throws: The same errors as `fetchEvents(byId:)`.
     public func fetchEvents(byId id: String, afterRevision revision: UInt64) async throws
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         let streamName = StreamNaming.getStreamName(id: id)
-        let serverRecords = try await readRecords(of: streamName, from: .specified(revision + 1))
-        let staged = try stagedRecords(of: streamName)
+        let (serverRecords, staged) = try await serverAndStagedRecords(of: streamName, from: .specified(revision + 1))
         guard serverRecords != nil || !staged.isEmpty else {
             return nil
         }
@@ -162,33 +189,52 @@ public final class KurrentStorageCoordinator<
         return (events: eventWrappers.map(\.event), latestRevision: latestRevision)
     }
 
-    /// The server's records of `streamName` from `cursor` on, or `nil` when the stream does
-    /// not exist or was purged.
-    private func readRecords(of streamName: String, from cursor: RevisionCursor) async throws -> [any RecordedEventLike]? {
+    /// The server's records of `streamName` from `cursor` on, `nil` when the stream does not
+    /// exist or was purged, and then the records the current unit of work has staged for it.
+    ///
+    /// The server is read first, so a commit that lands between the two reads cannot make an
+    /// event appear twice. A stream the server does not have is logged as a warning only when
+    /// nothing is staged for it either: with staged events it is a stream the unit of work is
+    /// creating.
+    private func serverAndStagedRecords(of streamName: String, from cursor: RevisionCursor) async throws
+        -> (server: [any RecordedEventLike]?, staged: [any RecordedEventLike]) {
+        let serverRecords: [any RecordedEventLike]?
+        var streamNotFound = false
         do {
-            return try await client.readStream(name: streamName, from: cursor, resolveLinks: true)
+            serverRecords = try await client.readStream(name: streamName, from: cursor, resolveLinks: true)
         } catch EventStoreClientError.streamNotFound {
-            logger.warning("Skip an error happened, stream not found: \(streamName)")
-            return nil
+            serverRecords = nil
+            streamNotFound = true
         } catch KurrentError.resourceDeleted {
             // Tombstoned by `purge`.
-            return nil
+            serverRecords = nil
         } catch {
             logger.error("The error happened when fetching events: \(error)")
             throw error
         }
+        let staged = try stagedRecords(of: streamName)
+        if streamNotFound, staged.isEmpty {
+            logger.warning("Skip an error happened, stream not found: \(streamName)")
+        }
+        return (serverRecords, staged)
     }
 
     /// The events the current unit of work has staged for `streamName`, as records numbered
-    /// with the revisions they are predicted to get; empty outside a unit of work or when
-    /// nothing is staged for the stream.
+    /// with the revisions they are predicted to get; empty outside a unit of work, when the
+    /// unit of work has no backend for this coordinator's client, or when nothing is staged
+    /// for the stream.
+    ///
+    /// It only looks the backend up: a read never creates the backend or binds the unit of
+    /// work to this client, and a unit of work that commits through another client or has
+    /// ended reads as one with nothing staged. The backend itself still throws once its
+    /// commit has started, which only a task that outlived the unit of work can run into.
     ///
     /// The numbering starts from the staged batch's own expected revision, never from the
     /// last record read from the server: a record the mapper skips, or an empty
     /// `afterRevision` window, would make that one wrong.
     private func stagedRecords(of streamName: String) throws -> [any RecordedEventLike] {
-        guard let work = UnitOfWork.current,
-              let staged = try backend(of: work).stagedEvents(stream: streamName)
+        guard let backend = UnitOfWork.current?.existingBackend(KurrentUnitOfWorkBackend.self, identity: client.identity),
+              let staged = try backend.stagedEvents(stream: streamName)
         else {
             return []
         }

@@ -169,6 +169,24 @@ public final class UnitOfWork: Sendable {
         }
     }
 
+    /// For store implementations' read paths: the backend this scope commits through, if
+    /// the scope is open and its backend has exactly type `B` and was registered for
+    /// `identity`; `nil` when there is none yet, it has another type or identity, or the
+    /// scope has ended. Never creates a backend and never throws, so a read leaves the
+    /// scope as it found it. Writes use ``backend(_:identity:make:)``.
+    package func existingBackend<B: UnitOfWorkBackend>(_ type: B.Type, identity: ObjectIdentifier) -> B? {
+        state.withLock { state in
+            guard !state.closed,
+                  let stored = state.backend,
+                  Swift.type(of: stored) == B.self,
+                  state.backendIdentity == identity
+            else {
+                return nil
+            }
+            return stored as? B
+        }
+    }
+
     /// Runs `operation`; when it throws, fails the current scope with that error (if
     /// there is one and it is still open) and rethrows the original error. A plain
     /// pass-through outside a scope.
