@@ -36,14 +36,17 @@ staged event's `metadata` is filled the same way as a stored one's. A stream the
 have returns only the staged events; the `afterRevision` filter applies to all of them, and
 `latestRevision` is the last staged revision whenever something is staged.
 
-Every reader through the coordinator sees the staged events, including an
-`EventSourcingProjector` run synchronously inside the scope. Read model snapshots are written to
-another store and are not part of the unit of work, so such a projector would fold events that a
-failed commit never writes. Run projections on the ``KurrentProjection`` subscription runners:
-they run in their own task, outside any scope.
+Every reader through a coordinator whose client has the scope's identity sees the staged events,
+including an `EventSourcingProjector` run synchronously inside the scope. Read model snapshots are
+written to another store and are not part of the unit of work, so such a projector would fold
+events that a failed commit never writes. Run projections on the ``KurrentProjection``
+subscription runners: they run in their own task, outside any scope.
 
-A read never creates, binds or fails on the scope's backend. A usecase may read through a
-repository over another `KurrentDBClient`; only writes bind the scope to a client.
+A read never creates, binds or fails on the scope's backend, so a usecase may read through a
+repository over another `KurrentDBClient`; only writes bind the scope to a client. Such a read
+sees only what the server has, not the events the scope staged through its own client. A usecase
+that reads what an earlier usecase in the same block saved needs a repository over the same
+`KurrentDBClient` instance.
 
 ## One client per unit of work
 
@@ -91,19 +94,20 @@ server, so find them again instead of reusing them.
 
 `AppendRecords` carries custom metadata as protobuf properties instead of raw bytes, and whether
 a scope ends up writing one stream or several is unknown at `save`. So every save inside a scope
-checks that its metadata can be converted:
+checks that its metadata encodes to a JSON object. A type that encodes to a scalar (a
+`String`-backed enum, say) throws `DDDError.operationNotAllow(operation: "save", reason: "Metadata
+cannot be carried by AppendRecords: …")` at `save`, not at commit. `nil` metadata is not checked,
+and outside a scope such metadata is still written as before.
 
-- The metadata must encode to a JSON object. A type that encodes to a scalar (a `String`-backed
-  enum, say) fails.
-- NaN, ±infinity and integers beyond 64 bits fail.
+NaN and ±infinity never reach that check: the coordinator encodes metadata with a default
+`JSONEncoder`, which throws `EncodingError` for them at `save`, inside a scope and outside it, as
+before 1.5. Inside a scope that error fails the unit of work like any other store error.
 
-A failing check throws `DDDError.operationNotAllow(operation: "save", reason: "Metadata cannot be
-carried by AppendRecords: …")` at `save`, not at commit. `nil` metadata is not checked, and
-nothing is checked outside a scope.
-
-Integers beyond ±2^53, up to 64 bits, are not rejected: `AppendRecords` sends numbers as
-doubles, so when the scope writes two or more streams they are rounded to the nearest `Double`.
-Store values whose every digit matters as strings.
+Numbers are not checked further. `AppendRecords` sends every number as the nearest `Double`, so
+when the scope writes two or more streams, an integer that a `Double` cannot hold exactly (beyond
+±2^53, including one beyond 64 bits, such as a large `Decimal`) is stored rounded, without an
+error. A one-stream commit, like every save outside a scope, keeps the exact bytes. Store values
+whose every digit matters as strings.
 
 On read, KurrentDB adds `$schema.name` and `$schema.format` keys to custom metadata written
 through `AppendRecords`. Decoding into a struct is unaffected; compare decoded values, not raw

@@ -30,9 +30,11 @@ func createQuotingCaseWithContact(_ input: Input) async throws -> Output {
 }
 ```
 
-Both services are the instances built at startup. The `repository.find(byId: quoting.id)` inside
+Both services are the instances built at startup, and their repositories share one store client
+(on KurrentDB, one `KurrentDBClient` instance). So the `repository.find(byId: quoting.id)` inside
 `addContactService` finds the QuotingCase that was just created and is not written yet, and its
-`save` joins the same stream's batch.
+`save` joins the same stream's batch. A repository over another `KurrentDBClient` instance would
+read only what the server has and not find it.
 
 ### Change two aggregates
 
@@ -168,17 +170,19 @@ Inside a scope, ``EventSourcingRepository``'s default `save` and `purge` refuse 
 (``InMemoryEventStore``, `PersistentEventStore`) with `operationNotAllow` rather than letting it
 write directly. `save` refuses even when the aggregate has no new events; outside a scope, a save
 without new events still returns without calling the store. `find` is never refused: reads have
-no side effects. `purge` never runs inside a scope: `KurrentStorageCoordinator` refuses it too.
+no side effects. The default `purge` never runs inside a scope: `KurrentStorageCoordinator`
+refuses it too, even when it is called directly.
 
 The check and the automatic failure live in ``EventSourcingRepository``'s default
 implementations only. A repository that overrides `find`, `save`, `delete` or `purge`, or code
-that calls `store.append` directly, gets neither, and a store that does not take part writes
-directly even inside a scope.
+that calls `store.append` or `store.purge` directly, gets neither: a store that does not take part
+writes, or purges for good, at once even inside a scope, and a block that then throws does not
+undo it.
 
-Read models are not part of a unit of work. Reads through a participating store inside a scope see
-the staged events, so an ``EventSourcingProjector`` run synchronously inside a scope folds events
-that may never be committed. Run projections on subscription runners, which run in their own task
-outside any scope.
+Read models are not part of a unit of work. Reads through a participating store inside a scope
+can see the staged events, so an ``EventSourcingProjector`` run synchronously inside a scope folds
+events that may never be committed. Run projections on subscription runners, which run in their
+own task outside any scope.
 
 ## Write a participating store
 
