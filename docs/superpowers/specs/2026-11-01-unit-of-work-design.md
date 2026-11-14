@@ -363,6 +363,8 @@ Source-breaking（migration 文件各給一個 SB 編號，格式同 1.3→1.4�
 
 DDDKit 不再需要自己的 spike（實作計畫 Task 2 取消）；§7 的 live test 以上述事實為斷言。另 2.6.1（#186）：對被 tombstone 的 stream 的 catch-up subscription 以 `resourceDeleted` 結束，不再先送 `$streamDeleted` 再丟 raw RPCError；與本設計無關，記在這裡供 projection runner 參考。
 
+更正（2026-11-14）：使用者決定 unit of work 隨 swift-kurrentdb 3.0 出版，floor 由 2.6.1 改為 3.0.0（2026-11-14 出版）。本設計用到的 `multiStreams.appendRecords`、`EventRecord(eventData:)` 與 v1 單串流 append 在 3.0 行為不變；`EventRecord(eventData:)` 的錯誤改為 `KurrentError.underlyingError`，但 save 時的檢查把任何錯誤都轉成 `operationNotAllow`，payload 則在檢查前先自行編碼，仍丟 `EncodingError`。DDDKit 這邊的調整：`encodeForKurrent` 改把 metadata 位元組包成 `CustomMetadata(data:format: .bytes)`，寫進伺服器的位元組不變；讀取改成延遲讀取，任務被取消時改丟 `CancellationError`（MIGRATION BC7）；3.0 自己的 `CustomMetadata` 讓同時 import `KurrentDB` 的檔案要寫 `EventSourcing.CustomMetadata`（MIGRATION SB4）。
+
 ## 10. 留給實作者
 
 - `UnitOfWork` 內部狀態與 TaskLocal 的放法（`EventMetadataContext` 已有同樣的 TaskLocal 作法可參考）。

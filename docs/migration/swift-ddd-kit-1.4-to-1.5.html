@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>swift-ddd-kit 1.4 → 1.5 Migration Guide</title>
-<meta name="description" content="Migration guide for projects depending on swift-ddd-kit, upgrading from 1.4 to 1.5 — withUnitOfWork, the new EventStoreClient requirements, and the swift-kurrentdb 2.6.1 floor.">
+<meta name="description" content="Migration guide for projects depending on swift-ddd-kit, upgrading from 1.4 to 1.5 — withUnitOfWork, the new EventStoreClient requirements, and the swift-kurrentdb 3.0.0 floor.">
 <meta name="x-migration-target" content="swift-ddd-kit">
 <meta name="x-migration-from" content="1.4">
 <meta name="x-migration-to" content="1.5">
@@ -183,7 +183,7 @@
       written together when the block returns, or not at all when it throws. Existing usecases, repositories, generated code
       and the composition root take part <b>unchanged</b>; code that never calls <code>withUnitOfWork</code> behaves exactly as in 1.4.
       What breaks the build is limited to custom <code>EventStoreClient</code> conformances, exhaustive <code>switch</code>es over
-      <code>EventStoreClientError</code>, and a direct swift-kurrentdb requirement below 2.6.1.
+      <code>EventStoreClientError</code>, and a direct swift-kurrentdb requirement below 3.0.0.
       The public signatures of <code>Usecase</code>, <code>EventStore</code>, <code>EventSourcingRepository</code> and
       <code>KurrentStorageCoordinator</code> do not change.
     </p>
@@ -212,11 +212,13 @@
       <table>
         <thead><tr><th style="width:42%">If your project…</th><th>Read</th></tr></thead>
         <tbody>
-          <tr><td>depends on swift-kurrentdb directly</td><td><span class="chgid">SB3</span> swift-kurrentdb ≥ 2.6.1</td></tr>
+          <tr><td>depends on swift-kurrentdb directly</td><td><span class="chgid">SB3</span> swift-kurrentdb ≥ 3.0.0</td></tr>
+          <tr><td>names <code>CustomMetadata</code> in a file that imports <code>KurrentDB</code></td><td><span class="chgid">SB4</span></td></tr>
+          <tr><td>reads aggregates through <code>KurrentStorageCoordinator</code> from tasks that can be cancelled</td><td><span class="chgid">BC7</span></td></tr>
           <tr><td>implements or wraps <code>EventStoreClient</code></td><td><span class="chgid">SB1</span>, <span class="chgid">BC1</span></td></tr>
           <tr><td>has a <code>switch</code> over <code>EventStoreClientError</code> without <code>default</code></td><td><span class="chgid">SB2</span></td></tr>
           <tr><td>adopts <code>withUnitOfWork</code></td><td><span class="chgid">BC2</span>–<span class="chgid">BC6</span>, <a href="#scope">behaviour inside a scope</a>, <a href="#rules">rules inside the block</a>, <a href="#projections">projections</a></td></tr>
-          <tr><td>only uses <code>AggregateRoot</code> / <code>DomainEvent</code> / <code>Usecase</code> and the built-in stores, without <code>withUnitOfWork</code></td><td>bump the version and run the tests; nothing else changes</td></tr>
+          <tr><td>only uses <code>AggregateRoot</code> / <code>DomainEvent</code> / <code>Usecase</code> and the built-in stores, without <code>withUnitOfWork</code></td><td>bump the version and run the tests; also <span class="chgid">SB4</span> and <span class="chgid">BC7</span> if they apply</td></tr>
         </tbody>
       </table>
     </div>
@@ -265,8 +267,17 @@
       "mechanical": true,
       "scope": "Package.swift of the downstream project, only if it depends on swift-kurrentdb directly",
       "before": ".package(url: \"https://github.com/gradyzhuo/swift-kurrentdb.git\", from: \"2.6.0\")",
-      "after": ".package(url: \"https://github.com/gradyzhuo/swift-kurrentdb.git\", from: \"2.6.1\")",
-      "action": "swift-ddd-kit 1.5 requires swift-kurrentdb 2.6.1 or later (2.6.0 dropped custom metadata on AppendRecords). Raise any direct requirement below 2.6.1."
+      "after": ".package(url: \"https://github.com/gradyzhuo/swift-kurrentdb.git\", from: \"3.0.0\")",
+      "action": "swift-ddd-kit 1.5 requires swift-kurrentdb 3.0.0. Raise any direct requirement to 3.0.0; a 2.x requirement no longer resolves next to it. Code that calls swift-kurrentdb itself follows https://gradyzhuo.github.io/swift-kurrentdb/documentation/kurrentdb/migrating-to-3.0."
+    },
+    {
+      "id": "SB4",
+      "kind": "source-breaking",
+      "mechanical": true,
+      "scope": "Swift files that import KurrentDB and also EventSourcing, KurrentSupport or DDDKit, and name CustomMetadata",
+      "before": "KurrentStorageCoordinator<OrderProjector, CustomMetadata>",
+      "after": "KurrentStorageCoordinator<OrderProjector, EventSourcing.CustomMetadata>",
+      "action": "swift-kurrentdb 3.0 adds its own CustomMetadata type, so a bare CustomMetadata is ambiguous in such a file. Qualify swift-ddd-kit's type as EventSourcing.CustomMetadata. Files that do not import KurrentDB, generated code included, are unchanged."
     },
     {
       "id": "BC1",
@@ -321,6 +332,15 @@
       "before": "metadata stored as raw JSON bytes",
       "after": "a unit of work of two or more streams sends metadata as protobuf Value (AppendRecords properties)",
       "action": "Inside a unit of work, metadata must encode to a JSON object, or save throws operationNotAllow. NaN and ±infinity throw EncodingError from JSONEncoder at save (not operationNotAllow), in and out of a unit of work, as before 1.5. Inside a unit of work that writes two or more streams every number travels as the nearest Double: integers beyond ±2^53, including beyond 64 bits (e.g. a large Decimal), are rounded without an error, so store them as strings. On read the server adds $schema.name and $schema.format keys to every event of a commit of two or more streams, also to one saved with nil metadata, which then reads back as a JSON object of only those keys instead of empty bytes: compare decoded structs, not raw bytes, and decode metadata with try? or optional fields, treating a failure as no metadata."
+    },
+    {
+      "id": "BC7",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "find and fetchEvents through KurrentStorageCoordinator in a task that can be cancelled",
+      "before": "the read fetched every event before returning, so a cancelled task still got the whole stream",
+      "after": "swift-kurrentdb 3.0 reads as it iterates; a cancelled task throws CancellationError from find or fetchEvents",
+      "action": "Catch CancellationError where a cancelled task must not count as a failed read."
     },
     {
       "id": "N1",
@@ -393,7 +413,8 @@
     }
   ],
   "downstreamProcedure": [
-    "Bump swift-ddd-kit to from: \"1.5.0\"; raise any direct swift-kurrentdb requirement to 2.6.1 (SB3).",
+    "Bump swift-ddd-kit to from: \"1.5.0\"; raise any direct swift-kurrentdb requirement to 3.0.0 (SB3).",
+    "In files that import KurrentDB, write EventSourcing.CustomMetadata for swift-ddd-kit's type (SB4).",
     "In custom EventStoreClient conformances, implement or forward identity and appendAtomically (SB1, BC1).",
     "Handle the new EventStoreClientError cases (SB2).",
     "Build; run the test suite.",
@@ -438,13 +459,23 @@
     </div>
 
     <div class="card">
-      <h3><span class="chgid">SB3</span> &nbsp;<span class="tag sig">dependency</span> &nbsp;swift-kurrentdb ≥ 2.6.1</h3>
-      <p>swift-kurrentdb 2.6.0 silently dropped custom metadata from events written through <code>AppendRecords</code>, the call a
-         unit of work uses for two or more streams; 2.6.1 carries it, and throws for metadata that is not a JSON object
-         (<span class="chgid">BC6</span>). If your
-         <code>Package.swift</code> depends on swift-kurrentdb directly, raise the requirement too.</p>
+      <h3><span class="chgid">SB3</span> &nbsp;<span class="tag sig">dependency</span> &nbsp;swift-kurrentdb ≥ 3.0.0</h3>
+      <p>swift-ddd-kit 1.5 requires swift-kurrentdb 3.0.0. If your <code>Package.swift</code> depends on swift-kurrentdb
+         directly, raise the requirement too: a 2.x requirement no longer resolves next to swift-ddd-kit. Code of yours that calls
+         swift-kurrentdb itself (reads, <code>EventData</code>, <code>KurrentDBClient</code>) follows swift-kurrentdb's
+         <a href="https://gradyzhuo.github.io/swift-kurrentdb/documentation/kurrentdb/migrating-to-3.0">Migrating from 2.x to 3.0</a>.</p>
       <pre class="diff"><span class="a">- .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0")</span>
-<span class="d">+ .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.1")</span></pre>
+<span class="d">+ .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "3.0.0")</span></pre>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">SB4</span> &nbsp;<span class="tag sig">type name</span> &nbsp;<code>CustomMetadata</code> is ambiguous next to <code>import KurrentDB</code></h3>
+      <p>swift-kurrentdb 3.0 adds a type named <code>CustomMetadata</code>. In a file that imports <code>KurrentDB</code> and
+         <code>EventSourcing</code>, <code>KurrentSupport</code> or <code>DDDKit</code>, a bare <code>CustomMetadata</code> no longer
+         compiles: <code>'CustomMetadata' is ambiguous for type lookup in this context</code>. Name swift-ddd-kit's type with its
+         module. Files that do not import <code>KurrentDB</code>, generated events and mappers included, are not affected.</p>
+      <pre class="diff"><span class="a">- KurrentStorageCoordinator&lt;OrderProjector, CustomMetadata&gt;(client: client, eventMapper: mapper)</span>
+<span class="d">+ KurrentStorageCoordinator&lt;OrderProjector, EventSourcing.CustomMetadata&gt;(client: client, eventMapper: mapper)</span></pre>
     </div>
   </section>
 
@@ -534,6 +565,14 @@
         <li><code>ContextForwarder</code> treats metadata that holds only <code>$schema.*</code> keys as absent
             (<code>decodeMetadata</code> returns <code>nil</code>). <code>InMemoryEventStoreClient</code> adds no such keys.</li>
       </ul>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC7</span> &nbsp;<span class="tag sig">reads</span> &nbsp;A cancelled read throws</h3>
+      <p>swift-kurrentdb 3.0 reads a stream as it is iterated. A <code>find</code> or <code>fetchEvents</code> through
+         <code>KurrentStorageCoordinator</code> whose task is cancelled midway throws <code>CancellationError</code>; with 2.x the
+         read had already fetched every event and returned normally. Catch <code>CancellationError</code> where a cancelled task
+         must not count as a failed read.</p>
     </div>
   </section>
 
@@ -658,7 +697,8 @@
     <h2>Upgrade checklist</h2>
     <p>Fix what breaks the build first, then check the behaviour changes.</p>
     <ol class="steps">
-      <li><b>Bump dependencies</b> — <code>swift-ddd-kit</code> to <code>from: "1.5.0"</code>; a direct swift-kurrentdb requirement to <code>2.6.1</code> (<span class="chgid">SB3</span>).</li>
+      <li><b>Bump dependencies</b> — <code>swift-ddd-kit</code> to <code>from: "1.5.0"</code>; a direct swift-kurrentdb requirement to <code>3.0.0</code> (<span class="chgid">SB3</span>).</li>
+      <li><b><code>CustomMetadata</code> next to <code>import KurrentDB</code></b> — write <code>EventSourcing.CustomMetadata</code> (<span class="chgid">SB4</span>).</li>
       <li><b>Custom <code>EventStoreClient</code></b> — implement or forward <code>identity</code> and <code>appendAtomically(_:)</code>; check that no <code>appendAtomically</code> deprecation warning is left (<span class="chgid">SB1</span>, <span class="chgid">BC1</span>).</li>
       <li><b>Exhaustive switch</b> — handle <code>consistencyViolations</code> and <code>atomicAppendUnsupported</code> (<span class="chgid">SB2</span>).</li>
       <li><b>Build + test</b> — <code>swift build</code>, then run the test suite.</li>

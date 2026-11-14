@@ -515,16 +515,32 @@ struct LoggingClient: EventStoreClient {
 `EventStoreClientError` gains `consistencyViolations([StreamConflict])` and
 `atomicAppendUnsupported`. An exhaustive `switch` over it without a `default` must handle both.
 
-### SB3 — swift-kurrentdb 2.6.1 minimum
+### SB3 — swift-kurrentdb 3.0.0 minimum
 
 ```diff
 - .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.0")
-+ .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.1")
++ .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "3.0.0")
 ```
 
-swift-kurrentdb 2.6.0 silently dropped custom metadata from events written through
-`AppendRecords`, the call a unit of work uses for two or more streams; 2.6.1 carries it. Raise any
-direct requirement below 2.6.1.
+swift-ddd-kit 1.5 requires swift-kurrentdb 3.0.0. A direct requirement on 2.x no longer resolves
+next to it: raise it to 3.0.0. Code of yours that calls swift-kurrentdb itself (reads, `EventData`,
+`KurrentDBClient`) follows swift-kurrentdb's
+[Migrating from 2.x to 3.0](https://gradyzhuo.github.io/swift-kurrentdb/documentation/kurrentdb/migrating-to-3.0).
+Code that only calls swift-ddd-kit needs nothing beyond SB4.
+
+### SB4 — `CustomMetadata` is ambiguous next to `import KurrentDB`
+
+swift-kurrentdb 3.0 adds a type named `CustomMetadata`. In a file that imports `KurrentDB` and
+`EventSourcing`, `KurrentSupport` or `DDDKit`, a bare `CustomMetadata` no longer compiles
+(`'CustomMetadata' is ambiguous for type lookup in this context`). Name swift-ddd-kit's type with
+its module:
+
+```diff
+- KurrentStorageCoordinator<OrderProjector, CustomMetadata>(client: client, eventMapper: mapper)
++ KurrentStorageCoordinator<OrderProjector, EventSourcing.CustomMetadata>(client: client, eventMapper: mapper)
+```
+
+Files that do not import `KurrentDB`, generated events and mappers included, are not affected.
 
 ### Behaviour changes (the compiler will not point these out)
 
@@ -577,6 +593,10 @@ direct requirement below 2.6.1.
   throws makes the coordinator skip the event. `ContextForwarder` treats metadata that holds only
   `$schema.*` keys as absent (`decodeMetadata` returns `nil`). `InMemoryEventStoreClient` adds no
   such keys.
+- **BC7 — A cancelled read throws.** swift-kurrentdb 3.0 reads a stream as it is iterated, so a
+  `find` or `fetchEvents` through `KurrentStorageCoordinator` whose task is cancelled midway throws
+  `CancellationError`. With 2.x the read had already fetched every event and returned normally.
+  Catch `CancellationError` where a cancelled task must not count as a failed read.
 
 Also inside a unit of work: `EventSourcingRepository`'s default `purge` is refused for every store
 in this package (`KurrentStorageCoordinator.purge` refuses even when called directly), but a
