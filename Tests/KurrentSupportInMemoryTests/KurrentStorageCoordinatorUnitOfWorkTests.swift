@@ -491,6 +491,50 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         #expect(try await storedRevisions(store, billStream) == [0])
     }
 
+    @Test(
+        "a task cancelled while the commit runs: withUnitOfWork throws the client's CancellationError, drops the block's result and runs no hook; the writes land when the client wrote before it noticed",
+        arguments: [1, 2], CountingClient.CancellationCheck.allCases
+    )
+    func cancelledDuringCommitThrowsAndRunsNoHook(streamCount: Int, check: CountingClient.CancellationCheck) async throws {
+        let store = InMemoryEventStoreClient()
+        let (parked, park) = AsyncStream.makeStream(of: CheckedContinuation<Void, Never>.self)
+        let client = CountingClient(wrapping: store, gate: park, cancellationCheck: check)
+        let quotes = quotingRepository(client)
+        let bills = billingRepository(client)
+        let hookRuns = RunCount()
+
+        let scope = Task {
+            // Ends the wait below even if the commit never reaches the client, so a regression fails instead of hanging.
+            defer { park.finish() }
+            return try await withUnitOfWork { work in
+                try await saveNewQuote(id: "q-1", to: quotes)
+                if streamCount == 2 { try await saveNewInvoice(id: "b-1", to: bills) }
+                try work.onCommitted { hookRuns.increment() }
+                return "returned"
+            }
+        }
+        var parkedCommits = parked.makeAsyncIterator()
+        let inFlight = await parkedCommits.next()
+        park.finish()
+        let commit = try #require(inFlight, "withUnitOfWork returned without calling the client")
+        // The commit is in flight: cancel, then let the client go on.
+        scope.cancel()
+        commit.resume()
+
+        let result = await scope.result
+        #expect(throws: CancellationError.self) { try result.get() }
+        #expect(hookRuns.value == 0)
+        #expect(client.appendCount + client.appendAtomicallyCount == 1)
+        let streams = [quoteStream, billStream].prefix(streamCount)
+        for stream in streams {
+            if check == .afterWrite {
+                #expect(try await storedRevisions(store, stream) == [0], "\(stream) should have landed")
+            } else {
+                await expectNotWritten(store, stream)
+            }
+        }
+    }
+
     // MARK: delete inside a scope
 
     @Test("delete(byId:) of an aggregate the server has: staged, written by the commit as the next revision, and find gives nil afterwards")
