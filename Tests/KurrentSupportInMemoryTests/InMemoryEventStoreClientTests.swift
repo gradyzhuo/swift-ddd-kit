@@ -8,6 +8,10 @@ private struct SampleEvent: Codable, Sendable, Equatable {
     let text: String
 }
 
+private func sampleEvents(_ count: Int) -> [EventData] {
+    (0..<count).map { EventData(eventType: "SampleEvent", model: SampleEvent(text: "\($0)")) }
+}
+
 @Suite("InMemoryEventStoreClient — storage")
 struct InMemoryEventStoreClientTests {
 
@@ -124,6 +128,88 @@ struct InMemoryEventStoreClientTests {
         await #expect(throws: EventStoreClientError.streamNotFound) {
             _ = try await client.readStream(name: "Order-1", from: .start, resolveLinks: true)
         }
+    }
+
+    // The soft-delete tests below pin what KurrentDB 26.1.3 does (checked live): a deleted
+    // stream reads as not found, keeps its tail, and a write recreates it from tail + 1.
+
+    @Test("a stream deleted at revisions 0–2 and written again continues at 3, whether the write expects no stream, the old tail or any")
+    func recreatedStreamContinuesFromOldTail() async throws {
+        for expected in [StreamRevision.noStream, .at(2), .any] {
+            let client = InMemoryEventStoreClient()
+            _ = try await client.append(events: sampleEvents(3), toStream: "Order-1", category: "Order", expectedRevision: .noStream)
+            try await client.deleteStream(name: "Order-1", expectedRevision: .any)
+
+            let revision = try await client.append(events: sampleEvents(1), toStream: "Order-1", category: "Order", expectedRevision: expected)
+
+            #expect(revision == 3, "expected \(expected)")
+            #expect(try await client.readStream(name: "Order-1", from: .start, resolveLinks: true).map(\.revision) == [3])
+        }
+    }
+
+    @Test("a write to a deleted stream expecting another revision conflicts with the old tail; expecting the stream to exist throws resourceDeleted")
+    func deletedStreamRejectsOtherExpectations() async throws {
+        let client = InMemoryEventStoreClient()
+        _ = try await client.append(events: sampleEvents(3), toStream: "Order-1", category: "Order", expectedRevision: .noStream)
+        try await client.deleteStream(name: "Order-1", expectedRevision: .at(2))
+
+        for wrong in [UInt64(0), 5] {
+            await #expect(throws: EventStoreClientError.wrongExpectedRevision(current: 2)) {
+                _ = try await client.append(events: sampleEvents(1), toStream: "Order-1", category: "Order", expectedRevision: .at(wrong))
+            }
+        }
+        await #expect(throws: KurrentError.self) {
+            _ = try await client.append(events: sampleEvents(1), toStream: "Order-1", category: "Order", expectedRevision: .streamExists)
+        }
+        await #expect(throws: EventStoreClientError.streamNotFound) {
+            _ = try await client.readStream(name: "Order-1", from: .start, resolveLinks: true)
+        }
+    }
+
+    @Test("deleting a deleted stream again succeeds expecting any, the old tail or no stream, and throws resourceDeleted expecting it to exist")
+    func deletingADeletedStream() async throws {
+        let client = InMemoryEventStoreClient()
+        _ = try await client.append(events: sampleEvents(2), toStream: "Order-1", category: "Order", expectedRevision: .noStream)
+        try await client.deleteStream(name: "Order-1", expectedRevision: .at(1))
+
+        try await client.deleteStream(name: "Order-1", expectedRevision: .any)
+        try await client.deleteStream(name: "Order-1", expectedRevision: .at(1))
+        try await client.deleteStream(name: "Order-1", expectedRevision: .noStream)
+        await #expect(throws: KurrentError.self) {
+            try await client.deleteStream(name: "Order-1", expectedRevision: .streamExists)
+        }
+        // Still recreated from the old tail.
+        #expect(try await client.append(events: sampleEvents(1), toStream: "Order-1", category: "Order", expectedRevision: .noStream) == 2)
+    }
+
+    @Test("a resend of the batch that recreated a deleted stream returns its revision without writing again")
+    func resendAfterRecreationIsIdempotent() async throws {
+        let client = InMemoryEventStoreClient()
+        _ = try await client.append(events: sampleEvents(3), toStream: "Order-1", category: "Order", expectedRevision: .noStream)
+        try await client.deleteStream(name: "Order-1", expectedRevision: .any)
+        let recreating = sampleEvents(2)
+        #expect(try await client.append(events: recreating, toStream: "Order-1", category: "Order", expectedRevision: .at(2)) == 4)
+
+        #expect(try await client.append(events: recreating, toStream: "Order-1", category: "Order", expectedRevision: .at(2)) == 4)
+        #expect(try await client.readStream(name: "Order-1", from: .start, resolveLinks: true).map(\.revision) == [3, 4])
+    }
+
+    @Test("a stream name without a dash belongs to no category: $ce- subscriptions never get its events, as on a real cluster")
+    func dashlessStreamIsNotCategorized() async throws {
+        let client = InMemoryEventStoreClient()
+        _ = try await client.append(events: sampleEvents(1), toStream: "Sales", category: "Sales", expectedRevision: .noStream)
+        _ = try await client.append(events: sampleEvents(1), toStream: "Sales-1", category: "Sales", expectedRevision: .noStream)
+
+        let session = try await client.subscribePersistent(stream: "$ce-Sales", group: "g")
+        var iterator = session.events.makeAsyncIterator()
+        let first = try await iterator.next()
+        #expect(first?.event.streamName == "Sales-1")
+
+        // A live append to the dashless stream is not delivered either.
+        _ = try await client.append(events: sampleEvents(1), toStream: "Sales", category: "Sales", expectedRevision: .at(0))
+        _ = try await client.append(events: sampleEvents(1), toStream: "Sales-2", category: "Sales", expectedRevision: .noStream)
+        let next = try await iterator.next()
+        #expect(next?.event.streamName == "Sales-2")
     }
 
     @Test("a category with its own dash still routes by the stream name's first dash, matching real KurrentDB")

@@ -25,13 +25,14 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         let customMetadata: Data
         let streamName: String
         /// The category as KurrentDB's own `$by_category` standard projection would
-        /// derive it: the segment of `streamName` up to (not including) its first `-`.
+        /// derive it: the segment of `streamName` up to (not including) its first `-`,
+        /// or `nil` for a name without one, which that projection leaves uncategorized.
         /// Deliberately *not* the caller-declared `EventStreamNaming.category` — a
         /// custom category with its own dash (e.g. `.custom("Sales-Order")`, stream
         /// `"Sales-Order-1"`) still only contributes `"Sales"` to the real `$ce-Sales`
         /// stream server-side. Routing here must reproduce that, or tests against
         /// this fake would pass for a `$ce-` subscription that never fires for real.
-        let category: String
+        let category: String?
         let payloadData: Data
         /// Global append order across all streams — the only way to interleave
         /// events from different aggregate streams in commit order when replaying
@@ -49,6 +50,10 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     }
 
     private var streams: [String: [StoredEvent]] = [:]
+    /// The tail revision of each soft-deleted stream that has not been written since.
+    /// Like a real cluster, such a stream reads as not found, accepts a write expecting
+    /// no stream, its old tail or any revision, and numbers that write from tail + 1.
+    private var deletedTails: [String: UInt64] = [:]
     /// Names tombstoned via `tombstoneStream`. Like a real cluster, every later
     /// read/append/delete/tombstone of them throws `KurrentError.resourceDeleted`.
     private var tombstoned: Set<String> = []
@@ -99,7 +104,7 @@ public actor InMemoryEventStoreClient: EventStoreClient {
             return replayed
         }
 
-        try Self.checkExpectedRevision(expectedRevision, of: existing)
+        try checkExpectedRevision(expectedRevision, ofStream: name)
 
         let stored = store(try Self.encodePayloads(of: events), inStream: name)
         deliverToSubscriptions(stored, streamName: name, category: Self.systemCategory(forStreamName: name))
@@ -131,32 +136,34 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     public func deleteStream(name: String, expectedRevision: StreamRevision) async throws {
         if tombstoned.contains(name) { throw KurrentError.resourceDeleted(resource: name) }
         let existing = streams[name]
-        let lastRevision = existing?.last?.revision
+        let tail = existing?.last?.revision ?? deletedTails[name]
 
         switch expectedRevision {
         case .any:
             break
         case .noStream:
             guard existing == nil else {
-                throw EventStoreClientError.wrongExpectedRevision(current: lastRevision)
+                throw EventStoreClientError.wrongExpectedRevision(current: tail)
             }
         case .streamExists:
-            guard existing != nil else {
-                throw EventStoreClientError.streamNotFound
-            }
+            guard existing == nil else { break }
+            guard deletedTails[name] == nil else { throw KurrentError.resourceDeleted(resource: name) }
+            throw EventStoreClientError.streamNotFound
         case let .at(expected):
-            guard lastRevision == expected else {
-                throw EventStoreClientError.wrongExpectedRevision(current: lastRevision)
+            guard tail == expected else {
+                throw EventStoreClientError.wrongExpectedRevision(current: tail)
             }
         }
 
         streams.removeValue(forKey: name)
+        if let tail { deletedTails[name] = tail }
     }
 
     public func tombstoneStream(name: String) async throws {
         guard !tombstoned.contains(name) else { throw KurrentError.resourceDeleted(resource: name) }
         tombstoned.insert(name)
         streams.removeValue(forKey: name)
+        deletedTails.removeValue(forKey: name)
     }
 
     /// Checks every batch before writing any, with the live seam's precedence: the first
@@ -181,7 +188,7 @@ public actor InMemoryEventStoreClient: EventStoreClient {
         var conflicts: [StreamConflict] = []
         for batch in batches {
             do {
-                try Self.checkExpectedRevision(batch.expectedRevision, of: streams[batch.stream] ?? [])
+                try checkExpectedRevision(batch.expectedRevision, ofStream: batch.stream)
             } catch EventStoreClientError.wrongExpectedRevision(let current) {
                 conflicts.append(StreamConflict(stream: batch.stream, expected: batch.expectedRevision, current: current))
             }
@@ -268,23 +275,26 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     // MARK: - Storage
 
     /// The expected-revision check `append` and `appendAtomically` share. Throws
-    /// `wrongExpectedRevision` with the stream's current revision (`nil`: no stream).
-    private static func checkExpectedRevision(_ expected: StreamRevision, of stored: [StoredEvent]) throws {
-        let lastRevision = stored.last?.revision
+    /// `wrongExpectedRevision` with the stream's current revision (`nil`: no stream). A
+    /// soft-deleted stream counts as no stream for `.noStream` and keeps its tail for
+    /// `.at(_:)`; `.streamExists` on it throws `resourceDeleted`, as the server does.
+    private func checkExpectedRevision(_ expected: StreamRevision, ofStream name: String) throws {
+        let stored = streams[name] ?? []
+        let tail = stored.last?.revision ?? deletedTails[name]
         switch expected {
         case .any:
             break
         case .noStream:
             guard stored.isEmpty else {
-                throw EventStoreClientError.wrongExpectedRevision(current: lastRevision)
+                throw EventStoreClientError.wrongExpectedRevision(current: tail)
             }
         case .streamExists:
-            guard !stored.isEmpty else {
-                throw EventStoreClientError.wrongExpectedRevision(current: nil)
-            }
+            guard stored.isEmpty else { break }
+            guard deletedTails[name] == nil else { throw KurrentError.resourceDeleted(resource: name) }
+            throw EventStoreClientError.wrongExpectedRevision(current: nil)
         case let .at(expected):
-            guard lastRevision == expected else {
-                throw EventStoreClientError.wrongExpectedRevision(current: lastRevision)
+            guard tail == expected else {
+                throw EventStoreClientError.wrongExpectedRevision(current: tail)
             }
         }
     }
@@ -299,7 +309,8 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     private func store(_ events: [(event: EventData, payload: Data)], inStream name: String) -> [StoredEvent] {
         let systemCategory = Self.systemCategory(forStreamName: name)
         var existing = streams[name] ?? []
-        var nextRevision = existing.last.map { $0.revision + 1 } ?? 0
+        // A soft-deleted stream is recreated from its old tail + 1.
+        var nextRevision = (existing.last?.revision ?? deletedTails.removeValue(forKey: name)).map { $0 + 1 } ?? 0
         var stored: [StoredEvent] = []
         for (event, payload) in events {
             globalSequenceCounter += 1
@@ -328,18 +339,22 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     private static func idempotentRevision(
         of events: [EventData], in stored: [StoredEvent], expected: StreamRevision
     ) -> UInt64? {
-        guard !events.isEmpty else { return nil }
-        let start: Int
+        guard !events.isEmpty, let first = stored.first?.revision else { return nil }
+        // Stored revisions are contiguous but start after the old tail on a stream that
+        // was soft-deleted and recreated, so positions are revisions minus the first one.
+        let startRevision: UInt64
         switch expected {
-        case .noStream: start = 0
+        case .noStream: startRevision = 0
         case let .at(revision):
-            // Compare in `UInt64` first: a revision at or beyond the stored count
-            // has nothing after it to match, and `Int(revision) + 1` would trap
-            // for huge values.
-            guard revision < UInt64(stored.count) else { return nil }
-            start = Int(revision) + 1
+            // A revision at UInt64.max has nothing after it to match.
+            guard revision < .max else { return nil }
+            startRevision = revision + 1
         case .any, .streamExists: return nil
         }
+        // Compare in `UInt64` first: a start beyond the stored records has nothing to
+        // match, and converting a huge revision to `Int` would trap.
+        guard startRevision >= first, startRevision - first < UInt64(stored.count) else { return nil }
+        let start = Int(startRevision - first)
         let end = start + events.count
         guard end <= stored.count else { return nil }
         guard stored[start..<end].map({ $0.id }) == events.map({ $0.id }) else { return nil }
@@ -366,16 +381,17 @@ public actor InMemoryEventStoreClient: EventStoreClient {
     /// producing stream `"Sales-Order-1"` therefore lands under `$ce-Sales`, not
     /// `$ce-Sales-Order`, on a real cluster — mirrored here so this fake's
     /// `$ce-<Category>` routing matches it.
-    private static func systemCategory(forStreamName name: String) -> String {
-        guard let dashIndex = name.firstIndex(of: "-") else { return name }
+    /// A name without a dash gets no category, so no `$ce-` stream ever gets its events.
+    private static func systemCategory(forStreamName name: String) -> String? {
+        guard let dashIndex = name.firstIndex(of: "-") else { return nil }
         return String(name[..<dashIndex])
     }
 
-    private func deliverToSubscriptions(_ newEvents: [StoredEvent], streamName: String, category: String) {
+    private func deliverToSubscriptions(_ newEvents: [StoredEvent], streamName: String, category: String?) {
         guard !newEvents.isEmpty else { return }
         for (key, session) in subscriptions {
             let matchesExactStream = key.stream == streamName
-            let matchesCategory = key.stream == "$ce-\(category)"
+            let matchesCategory = category.map { key.stream == "$ce-\($0)" } ?? false
             guard matchesExactStream || matchesCategory else { continue }
 
             if deliveryDelay == .zero {
