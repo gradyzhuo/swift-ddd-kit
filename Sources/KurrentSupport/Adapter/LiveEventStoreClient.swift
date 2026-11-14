@@ -44,6 +44,9 @@ public struct LiveEventStoreClient: EventStoreClient {
         return response.currentRevision
     }
 
+    /// An event whose custom metadata holds only the server's `$schema.*` keys (written
+    /// through AppendRecords without metadata) comes back with empty custom metadata, as
+    /// an event a v1 append wrote without metadata does.
     public func readStream(
         name: String,
         from revision: RevisionCursor,
@@ -58,9 +61,9 @@ public struct LiveEventStoreClient: EventStoreClient {
                 $0.revision = revision
                 $0.resolveLinks = resolveLinks
             }
-            var records: [RecordedEvent] = []
+            var records: [any RecordedEventLike] = []
             for try await response in responses {
-                records.append(try response.event.record)
+                records.append(withoutServerOnlyMetadata(try response.event.record))
             }
             return records
         } catch KurrentError.resourceNotFound {
@@ -232,7 +235,10 @@ final class LiveSubscriptionSession: PersistentSubscriptionSession, Sendable {
                     try Task.checkCancellation()
                     let record = result.event.record
                     self.pendingReadEvents.withLock { $0[record.id] = result.event }
-                    continuation.yield(SubscriptionDelivery(event: record, retryCount: Int(result.retryCount)))
+                    continuation.yield(SubscriptionDelivery(
+                        event: withoutServerOnlyMetadata(record),
+                        retryCount: Int(result.retryCount)
+                    ))
                 }
                 continuation.finish()
             } catch {

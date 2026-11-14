@@ -393,8 +393,11 @@ struct UnitOfWorkLiveTests {
         }
     }
 
-    @Test("a purged id and a conflicting stream in one commit → streamPurged, not commitConflict, wherever the purged one is in the batch; nothing new is written")
-    func tombstonedNextToConflictIsStreamPurged() async throws {
+    @Test(
+        "a purged id and a conflicting stream in one commit → streamPurged, not commitConflict, with the purged one first or second in the batch; nothing new is written",
+        arguments: [true, false]
+    )
+    func tombstonedNextToConflictIsStreamPurged(purgedFirst: Bool) async throws {
         try await KurrentDBClient.withPooledIntegrationTestClient { client in
             let live = LiveEventStoreClient(client: client)
             let quotes = quoteRepository(client, streams: LiveQuoteStream.self)
@@ -407,11 +410,16 @@ struct UnitOfWorkLiveTests {
             let earlierInvoiceIds = earlierInvoice.events.map { $0.id }
             try await invoices.save(aggregateRoot: earlierInvoice)
 
+            // The batch order is the order of the saves.
             let error = await thrownError {
                 try await withUnitOfWork { _ in
-                    // The conflicting stream first, so the purged one is not first in the batch.
-                    try await invoices.save(aggregateRoot: try LiveInvoice(id: invoiceId, amount: 100))
-                    try await quotes.save(aggregateRoot: try LiveQuote(id: quoteId, line: "again"))
+                    if purgedFirst {
+                        try await quotes.save(aggregateRoot: try LiveQuote(id: quoteId, line: "again"))
+                        try await invoices.save(aggregateRoot: try LiveInvoice(id: invoiceId, amount: 100))
+                    } else {
+                        try await invoices.save(aggregateRoot: try LiveInvoice(id: invoiceId, amount: 100))
+                        try await quotes.save(aggregateRoot: try LiveQuote(id: quoteId, line: "again"))
+                    }
                 }
             }
 
@@ -472,8 +480,8 @@ struct UnitOfWorkLiveTests {
         }
     }
 
-    @Test("a unit of work over two streams with no ambient metadata: each record reads back with custom metadata holding only the server's $schema.name and $schema.format keys, and the generated-style mapper leaves event.metadata nil")
-    func nilMetadataCommitReadsBackSchemaKeysOnly() async throws {
+    @Test("a unit of work over two streams with no ambient metadata: the server stores only its $schema.name and $schema.format keys, LiveEventStoreClient reads them back as empty custom metadata, and event.metadata stays nil")
+    func nilMetadataCommitReadsBackEmpty() async throws {
         try await KurrentDBClient.withPooledIntegrationTestClient { client in
             let live = LiveEventStoreClient(client: client)
             let quotes = quoteRepository(client, streams: LiveQuoteStream.self)
@@ -486,17 +494,26 @@ struct UnitOfWorkLiveTests {
                 try await invoices.save(aggregateRoot: invoice)
             }
 
-            // Not empty, as a v1 append with nil metadata leaves it: AppendRecords sends
-            // no properties, and the server still adds its two schema keys on read.
-            let records = try await storedRecords(live, LiveQuoteStream.getStreamName(id: quote.id))
-                + storedRecords(live, LiveInvoiceStream.getStreamName(id: invoice.id))
-            #expect(records.map(\.eventType) == ["LiveQuoteOpened", "LiveInvoiceIssued"])
-            for record in records {
+            // The server itself stores the two schema keys: AppendRecords sends no properties,
+            // and the server adds them on read. Read without the seam to see them.
+            let quoteStreamName = LiveQuoteStream.getStreamName(id: quote.id)
+            var raw: [RecordedEvent] = []
+            for try await response in client.streams(specified: quoteStreamName).read() {
+                raw.append(try response.event.record)
+            }
+            #expect(raw.count == 1)
+            for record in raw {
                 let keys = try JSONDecoder().decode([String: String].self, from: record.customMetadata)
                 #expect(keys == ["$schema.name": record.eventType, "$schema.format": "Json"])
             }
 
-            // SpikeMetadata has required fields, so the mapper's `try?` gives nil.
+            // Through the seam they read as no metadata, as after a v1 append, a staged
+            // read inside a scope, or InMemoryEventStoreClient.
+            let records = try await storedRecords(live, quoteStreamName)
+                + storedRecords(live, LiveInvoiceStream.getStreamName(id: invoice.id))
+            #expect(records.map(\.eventType) == ["LiveQuoteOpened", "LiveInvoiceIssued"])
+            #expect(records.allSatisfy { $0.customMetadata.isEmpty })
+
             let opened = try #require(try await quotes.store.fetchEvents(byId: quote.id)?.events.first as? LiveQuoteOpened)
             #expect(opened.metadata == nil)
             let issued = try #require(try await invoices.store.fetchEvents(byId: invoice.id)?.events.first as? LiveInvoiceIssued)
@@ -607,12 +624,79 @@ private func tombstonedStream(_ live: LiveEventStoreClient) async throws -> Stri
     return stream
 }
 
+/// Metadata keyed with a leading `$`, which KurrentDB reserves for its own properties.
+private struct DollarKeyMetadata: EventMetadata, Equatable {
+    let tenant: String
+    let schemaNote: String
+
+    enum CodingKeys: String, CodingKey {
+        case tenant = "$tenant"
+        case schemaNote = "$schema.note"
+    }
+}
+
+/// Metadata holding an integer a `Double` cannot represent exactly.
+private struct BigIntegerMetadata: EventMetadata, Equatable {
+    let n: Int64
+}
+
+/// Encodes `metadata` as `KurrentStorageCoordinator` does, writes one event to each of two
+/// new streams in one `appendAtomically`, and returns the streams' records as the seam
+/// reads them back.
+private func atomicRoundTrip<Metadata: EventMetadata>(
+    _ live: LiveEventStoreClient,
+    metadata: Metadata
+) async throws -> [any RecordedEventLike] {
+    let first = seamStream()
+    let second = seamStream()
+    let opened = LiveQuoteOpened(aggregateRootId: first, line: "desk")
+    let issued = LiveInvoiceIssued(aggregateRootId: second, amount: 1)
+    let encodedFirst = try encodeForKurrent(events: [opened], metadata: metadata).events
+    let encodedSecond = try encodeForKurrent(events: [issued], metadata: metadata).events
+    _ = try await live.appendAtomically([
+        batch(first, .noStream, encodedFirst),
+        batch(second, .noStream, encodedSecond),
+    ])
+    return try await storedRecords(live, first) + storedRecords(live, second)
+}
+
 // Pins what `appendAtomically` makes of the server's answers (spec §9, KurrentDB 26.1): in a
 // consistency violation `actualState` -1 is a missing stream (`current == nil`) and -6 a
 // tombstoned one, which wins over revision conflicts in the same request; a resent request
 // with the same event ids is idempotent.
 @Suite("LiveEventStoreClient.appendAtomically on a live KurrentDB")
 struct LiveEventStoreClientAppendAtomicallyTests {
+
+    @Test("metadata keys starting with $, $schema. included, survive a commit of two streams next to the server's own $schema keys")
+    func dollarPrefixedMetadataKeysRoundTrip() async throws {
+        try await KurrentDBClient.withPooledIntegrationTestClient { client in
+            let live = LiveEventStoreClient(client: client)
+            let metadata = DollarKeyMetadata(tenant: "acme", schemaNote: "mine")
+
+            let records = try await atomicRoundTrip(live, metadata: metadata)
+
+            #expect(records.count == 2)
+            for record in records {
+                #expect(try JSONDecoder().decode(DollarKeyMetadata.self, from: record.customMetadata) == metadata)
+            }
+        }
+    }
+
+    @Test("an integer beyond 2^53 in metadata, committed with another stream, reads back as the nearest Double without an error")
+    func bigIntegerMetadataIsRoundedOnTheMultiStreamPath() async throws {
+        try await KurrentDBClient.withPooledIntegrationTestClient { client in
+            let live = LiveEventStoreClient(client: client)
+            let exact: Int64 = 9_007_199_254_740_993   // 2^53 + 1
+
+            let records = try await atomicRoundTrip(live, metadata: BigIntegerMetadata(n: exact))
+
+            #expect(records.count == 2)
+            for record in records {
+                let read = try JSONDecoder().decode(BigIntegerMetadata.self, from: record.customMetadata)
+                #expect(read.n == 9_007_199_254_740_992)   // Int64(Double(exact))
+            }
+        }
+    }
 
     @Test("an existing stream under .noStream and a missing stream under .at(5) → consistencyViolations with current 0 and nil, in batch order; nothing written")
     func missingStreamUnderAtReportsCurrentNil() async throws {
