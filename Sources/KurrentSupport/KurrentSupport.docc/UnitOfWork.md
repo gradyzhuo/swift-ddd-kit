@@ -120,13 +120,21 @@ included, are kept next to the server's.
 
 The server adds the keys also when the event carries no metadata, so such an event is stored with
 custom metadata `{"$schema.name": "<event type>", "$schema.format": "Json"}`. `LiveEventStoreClient`
-reads custom metadata that holds only `$schema.*` keys as empty, in `readStream` and in
-persistent-subscription deliveries, so an event saved with `nil` metadata (no
-`EventMetadataContext` around the `save`) reads back without metadata however it was written: one
-stream or several, a staged read inside the scope, or `InMemoryEventStoreClient`. `event.metadata`
-stays `nil` for every metadata type. Code that reads the stream with `KurrentDBClient` directly
-still sees the two keys, and so does `ContextForwarder`, which takes such metadata as absent:
-`ForwardedRecord.metadata` is `nil` and `decodeMetadata(_:)` returns `nil` for such an event.
+reads custom metadata whose keys are exactly `$schema.name` and `$schema.format` as empty, in
+`readStream` and in persistent-subscription deliveries, so an event saved with `nil` metadata (no
+`EventMetadataContext` around the `save`) reads back without metadata whether one stream or several
+were written, through a staged read inside the scope, or through `InMemoryEventStoreClient`.
+`event.metadata` stays `nil` for every metadata type. Metadata of your own whose keys are exactly
+those two would read back empty too, in or out of a scope; any other set of keys, such as only
+`$schema.note`, is kept. Three readers still see the two keys: code that reads the stream with
+`KurrentDBClient` directly, `MigrationUtility`, which takes swift-kurrentdb's `RecordedEvent`, and
+`ContextForwarder`, which takes such metadata as absent: `ForwardedRecord.metadata` is `nil` and
+`decodeMetadata(_:)` returns `nil` for such an event.
+
+Metadata that encodes to an empty object `{}` (a type whose fields are all optional, every one
+`nil`) is not `nil` metadata: a staged read and a one-stream commit read it back as a value with
+every field `nil`. A commit of two or more streams stores it with the server's two keys only, so it
+reads back as `nil`. Treat both as "no metadata".
 
 ## Writing an EventStoreClient
 

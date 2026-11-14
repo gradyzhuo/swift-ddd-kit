@@ -333,7 +333,7 @@
       "scope": "EventMetadata types saved inside withUnitOfWork",
       "before": "metadata stored as raw JSON bytes",
       "after": "a unit of work of two or more streams sends metadata as protobuf Value (AppendRecords properties)",
-      "action": "Inside a unit of work, metadata must encode to a JSON object, or save throws operationNotAllow. NaN and ±infinity throw EncodingError from JSONEncoder at save (not operationNotAllow), in and out of a unit of work, as before 1.5. Inside a unit of work that writes two or more streams every number travels as the nearest Double: integers beyond ±2^53, including beyond 64 bits (e.g. a large Decimal), are rounded without an error, so store them as strings. On read the server adds $schema.name and $schema.format keys to every event of a commit of two or more streams: compare decoded structs, not raw bytes. An event saved with nil metadata is stored with only those keys; LiveEventStoreClient reads them back as empty metadata, so through KurrentStorageCoordinator and the projection runners it reads as no metadata, as before 1.5. Reading with KurrentDBClient directly still shows the two keys."
+      "action": "Inside a unit of work, metadata must encode to a JSON object, or save throws operationNotAllow. NaN and ±infinity throw EncodingError from JSONEncoder at save (not operationNotAllow), in and out of a unit of work, as before 1.5. Inside a unit of work that writes two or more streams every number travels as the nearest Double: integers beyond ±2^53, including beyond 64 bits (e.g. a large Decimal), are rounded without an error, so store them as strings. On read the server adds $schema.name and $schema.format keys to every event of a commit of two or more streams: compare decoded structs, not raw bytes. An event saved with nil metadata is stored with only those keys; LiveEventStoreClient reads metadata whose keys are exactly those two back as empty, so through KurrentStorageCoordinator and the projection runners it reads as no metadata, as before 1.5. Metadata that encodes to {} reads back as nil after such a commit. Reading with KurrentDBClient directly, or through MigrationUtility, still shows the two keys."
     },
     {
       "id": "BC7",
@@ -557,10 +557,13 @@
          <code>$schema.name</code> and <code>$schema.format</code> keys; a struct decodes as before, so compare decoded values,
          not raw bytes or dictionaries. Keys of your own that start with <code>$</code> are kept.</p>
       <p>An event saved with <code>nil</code> metadata (no <code>EventMetadataContext</code>) is stored with only those two keys.
-         <code>LiveEventStoreClient</code> reads such metadata back as empty, so through <code>KurrentStorageCoordinator</code>
-         and the projection runners the event reads as having no metadata, as before 1.5.</p>
+         <code>LiveEventStoreClient</code> reads metadata whose keys are exactly <code>$schema.name</code> and
+         <code>$schema.format</code> back as empty, so through <code>KurrentStorageCoordinator</code> and the projection runners
+         the event reads as having no metadata, as before 1.5.</p>
       <ul class="tite">
-        <li>Code that reads the stream with <code>KurrentDBClient</code> directly still sees the two keys.</li>
+        <li>Metadata that encodes to <code>{}</code> (all fields optional and <code>nil</code>) reads back as <code>nil</code> after
+            such a commit, and as a value with every field <code>nil</code> otherwise: treat both as no metadata.</li>
+        <li>Code that reads the stream with <code>KurrentDBClient</code> directly, and <code>MigrationUtility</code>, still see the two keys.</li>
         <li><code>ContextForwarder</code> treats metadata that holds only <code>$schema.*</code> keys as absent
             (<code>decodeMetadata</code> returns <code>nil</code>).</li>
       </ul>
@@ -584,7 +587,7 @@
       <h3>How the scope ends</h3>
       <ol class="steps">
         <li><b>The block returns or throws, and the scope closes at once.</b> From then on <code>work.fail(_:)</code>,
-            <code>work.onCommitted(_:)</code> and <code>work.backend(_:identity:make:)</code> throw <code>operationNotAllow</code>,
+            <code>work.onCommitted(_:)</code> and <code>work.withBackend(_:identity:make:_:)</code> throw <code>operationNotAllow</code>,
             also from a <code>Task</code> started in the block, which still sees the scope as <code>UnitOfWork.current</code>.
             So a <code>save</code> that runs after the block throws instead of writing.</li>
         <li><b>The block threw</b> (<code>CancellationError</code> included): nothing is committed, no hook runs, the error is rethrown.</li>

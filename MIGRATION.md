@@ -588,9 +588,11 @@ Files that do not import `KurrentDB`, generated events and mappers included, are
   streams also holds the server's `$schema.name` and `$schema.format` keys; compare decoded
   structs, not raw bytes or dictionaries. Keys of your own that start with `$` are kept. An event
   saved with `nil` metadata (no `EventMetadataContext`) is stored with only those two keys;
-  `LiveEventStoreClient` reads such metadata back as empty, so through `KurrentStorageCoordinator`
-  and the projection runners it reads as no metadata, as before 1.5. Code that reads the stream
-  with `KurrentDBClient` directly still sees the two keys. `ContextForwarder` treats metadata that
+  `LiveEventStoreClient` reads metadata whose keys are exactly `$schema.name` and
+  `$schema.format` back as empty, so through `KurrentStorageCoordinator` and the projection
+  runners it reads as no metadata, as before 1.5. Metadata that encodes to `{}` reads back as
+  `nil` after such a commit, as an empty value otherwise. Code that reads the stream with
+  `KurrentDBClient` directly, and `MigrationUtility`, still see the two keys. `ContextForwarder` treats metadata that
   holds only `$schema.*` keys as absent (`decodeMetadata` returns `nil`).
 - **BC7 — A cancelled read throws.** swift-kurrentdb 3.0 reads a stream as it is iterated, so a
   `find` or `fetchEvents` through `KurrentStorageCoordinator` whose task is cancelled midway throws
