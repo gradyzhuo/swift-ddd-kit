@@ -208,6 +208,26 @@ struct EventSourcingRepositoryUnitOfWorkTests {
         #expect(!work.isFailed)
     }
 
+    @Test("a direct store.append on a store that cannot take part writes at once inside a scope, and stays written when the block then throws")
+    func directAppendOnNonParticipantWritesAtOnce() async throws {
+        let store = NonParticipantStore()
+        let opened = TicketOpened(aggregateRootId: "t-1", title: "first")
+
+        let error = await thrownError {
+            try await withUnitOfWork { work in
+                let revision = try await store.append(events: [opened], byId: "t-1", version: nil, metadata: nil as TestMetadata?)
+                #expect(revision == 0)
+                #expect(try await store.fetchEvents(byId: "t-1")?.latestRevision == 0)
+                #expect(!work.isFailed)
+                throw StoreFailure.unavailable
+            }
+        }
+
+        #expect(error as? StoreFailure == .unavailable)
+        let stored = try #require(try await store.fetchEvents(byId: "t-1"))
+        #expect(stored.events.map { $0.id } == [opened.id])
+    }
+
     @Test("save outside a scope writes straight to the store, as before")
     func saveOutsideScopeUnchanged() async throws {
         let store = NonParticipantStore()

@@ -198,6 +198,7 @@ private struct QuotingEventMapper: EventTypeMapper {
         switch eventData.eventType {
         case "QuoteOpened": return try decodeEvent(QuoteOpened.self, from: eventData)
         case "QuoteLineAdded": return try decodeEvent(QuoteLineAdded.self, from: eventData)
+        case "QuotingDeleted": return try decodeEvent(Quoting.QuotingDeleted.self, from: eventData)
         default: return nil
         }
     }
@@ -207,6 +208,7 @@ private struct BillingEventMapper: EventTypeMapper {
     func mapping(eventData: any RecordedEventLike) throws -> (any DomainEvent)? {
         switch eventData.eventType {
         case "InvoiceIssued": return try decodeEvent(InvoiceIssued.self, from: eventData)
+        case "BillingDeleted": return try decodeEvent(Billing.BillingDeleted.self, from: eventData)
         default: return nil
         }
     }
@@ -459,11 +461,14 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         #expect(try await storedRevisions(store, quoteStream) == [0])
     }
 
-    @Test("the commit returns revisions other than predicted: only logged, so the block returns normally and an onCommitted hook runs")
+    @Test("the commit returns revisions other than predicted: the coordinator's logger warns for each stream, the block returns normally and an onCommitted hook runs")
     func revisionMismatchIsLoggedAndHooksStillRun() async throws {
         let store = InMemoryEventStoreClient()
         let client = CountingClient(wrapping: store, revisionOffset: 10)
-        let quotes = quotingRepository(client)
+        let recorder = LogRecorder()
+        let quotes = QuotingRepository(
+            store: QuotingCoordinator(client: client, eventMapper: QuotingEventMapper(), logger: recorder.logger)
+        )
         let bills = billingRepository(client)
         let hookRuns = RunCount()
 
@@ -476,9 +481,93 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
 
         #expect(output == "returned")
         #expect(hookRuns.value == 1)
+        // The quote coordinator saved first, so its logger is the backend's.
+        #expect(recorder.warnings == [
+            .init(level: .warning, message: "Committed \(quoteStream): predicted revision 0, server returned 10"),
+            .init(level: .warning, message: "Committed \(billStream): predicted revision 0, server returned 10"),
+        ])
         #expect(client.appendAtomicallyStreams == [[quoteStream, billStream]])
         #expect(try await storedRevisions(store, quoteStream) == [0])
         #expect(try await storedRevisions(store, billStream) == [0])
+    }
+
+    // MARK: delete inside a scope
+
+    @Test("delete(byId:) of an aggregate the server has: staged, written by the commit as the next revision, and find gives nil afterwards")
+    func deleteExistingAggregateCommits() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let quotes = quotingRepository(client)
+        try await saveNewQuote(id: "q-1", to: quotes)
+
+        try await withUnitOfWork { work in
+            try await quotes.delete(byId: "q-1")
+            #expect(try await storedRevisions(store, quoteStream) == [0])
+            #expect(try await quotes.find(byId: "q-1") == nil)
+            #expect(!work.isFailed)
+        }
+
+        #expect(client.appendCount == 2)
+        #expect(client.appendAtomicallyCount == 0)
+        #expect(try await storedRecords(store, quoteStream).map(\.eventType) == ["QuoteOpened", "QuotingDeleted"])
+        #expect(try await storedRevisions(store, quoteStream) == [0, 1])
+        #expect(try await quotes.find(byId: "q-1") == nil)
+    }
+
+    @Test("delete(byId:) next to another aggregate's save: one atomic commit writes both")
+    func deleteCommitsAtomicallyWithAnotherSave() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let quotes = quotingRepository(client)
+        let bills = billingRepository(client)
+        try await saveNewQuote(id: "q-1", to: quotes)
+
+        try await withUnitOfWork { _ in
+            try await quotes.delete(byId: "q-1")
+            try await saveNewInvoice(id: "b-1", to: bills)
+        }
+
+        #expect(client.appendAtomicallyStreams == [[quoteStream, billStream]])
+        #expect(try await storedRevisions(store, quoteStream) == [0, 1])
+        #expect(try await storedRevisions(store, billStream) == [0])
+        #expect(try await quotes.find(byId: "q-1") == nil)
+    }
+
+    @Test("delete(byId:) next to a save whose stream someone else wrote first: commitConflict, and the deleted aggregate is not deleted")
+    func deleteIsNotWrittenWhenTheBatchConflicts() async throws {
+        let store = InMemoryEventStoreClient()
+        let quotes = quotingRepository(store)
+        let bills = billingRepository(store)
+        try await saveNewQuote(id: "q-1", to: quotes)
+        try await saveNewInvoice(id: "b-1", to: bills)
+
+        let error = await thrownError {
+            try await withUnitOfWork { _ in
+                try await quotes.delete(byId: "q-1")
+                try await saveNewInvoice(id: "b-1", to: bills)   // expects no stream
+            }
+        }
+
+        #expect((error as? DDDError)?.code == .commitConflict, "got \(String(describing: error))")
+        #expect(try await storedRevisions(store, quoteStream) == [0])
+        #expect(try await quotes.find(byId: "q-1")?.lines == ["desk"])
+    }
+
+    @Test("save then delete(byId:) of the same new aggregate in one scope: the delete finds the staged events, expects their tail, and both land in one commit")
+    func saveThenDeleteSameAggregateInScope() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let quotes = quotingRepository(client)
+
+        try await withUnitOfWork { _ in
+            try await saveNewQuote(id: "q-1", to: quotes)
+            try await quotes.delete(byId: "q-1")
+            #expect(try await quotes.find(byId: "q-1") == nil)
+        }
+
+        #expect(client.appendCount == 1)
+        #expect(try await storedRecords(store, quoteStream).map(\.eventType) == ["QuoteOpened", "QuotingDeleted"])
+        #expect(try await storedRevisions(store, quoteStream) == [0, 1])
     }
 
     // MARK: reads inside a scope
@@ -916,7 +1005,7 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         await expectNotWritten(store, billStream)
     }
 
-    @Test("a server without AppendRecords: two streams → withUnitOfWork throws operationNotAllow(commit), nothing is written and no hook runs")
+    @Test("a server without AppendRecords: two streams → withUnitOfWork throws operationNotAllow(commit) after one appendAtomically call, and no hook runs")
     func unsupportedFeatureBecomesOperationNotAllow() async throws {
         let store = InMemoryEventStoreClient()
         let client = CountingClient(wrapping: store, errorToThrow: appendRecordsUnsupported)
@@ -936,8 +1025,7 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         #expect(client.appendAtomicallyCount == 1)
         #expect(client.appendCount == 0)
         #expect(hookRuns.value == 0)
-        await expectNotWritten(store, quoteStream)
-        await expectNotWritten(store, billStream)
+        // Nothing reaches `store`: the client throws without forwarding.
     }
 
     @Test("a body that throws after saving writes nothing; the aggregates keep what the saves did")

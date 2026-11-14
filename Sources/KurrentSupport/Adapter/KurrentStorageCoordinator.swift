@@ -153,7 +153,7 @@ public final class KurrentStorageCoordinator<
     ///   of a client with another identity, or has ended.
     private func backend(of work: UnitOfWork) throws -> KurrentUnitOfWorkBackend {
         try work.backend(KurrentUnitOfWorkBackend.self, identity: client.identity) {
-            KurrentUnitOfWorkBackend(client: client)
+            KurrentUnitOfWorkBackend(client: client, logger: logger)
         }
     }
 
