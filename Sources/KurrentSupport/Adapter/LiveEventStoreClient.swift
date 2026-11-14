@@ -51,7 +51,9 @@ public struct LiveEventStoreClient: EventStoreClient {
     ) async throws -> [any RecordedEventLike] {
         do {
             let stream = client.streams(specified: name)
-            let responses = try await stream.read {
+            // Lazy since swift-kurrentdb 3.0: the RPC opens at the first element, so a
+            // missing stream throws from the loop, still inside this `do`.
+            let responses = stream.read {
                 $0.direction = .forward
                 $0.revision = revision
                 $0.resolveLinks = resolveLinks

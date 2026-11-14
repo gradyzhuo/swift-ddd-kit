@@ -32,7 +32,7 @@ struct KurrentProjectionRunnerHappyPathTests {
         let aggregateId = UUID().uuidString
         let aggregateStream = "\(category)-\(aggregateId)"
         let payload = #"{"hello":"world"}"#.data(using: .utf8)!
-        let eventData = try EventData(eventType: "TestEvent", payload: payload)
+        let eventData = EventData(eventType: "TestEvent", data: payload)
         _ = try await client.streams(of: .specified(aggregateStream)).append(events: eventData) { _ in }
 
         // Capture which inputs each registered closure received.
@@ -102,7 +102,7 @@ struct KurrentProjectionRunnerFailureTests {
 
         let aggregateStream = "\(category)-\(UUID().uuidString)"
         let payload = #"{}"#.data(using: .utf8)!
-        let eventData = try EventData(eventType: "TestEvent", payload: payload)
+        let eventData = EventData(eventType: "TestEvent", data: payload)
         _ = try await client.streams(of: .specified(aggregateStream)).append(events: eventData) { _ in }
 
         struct AlwaysFails: Error {}
@@ -159,7 +159,7 @@ struct KurrentProjectionRunnerStopTests {
 
         let aggregateStream = "\(category)-\(UUID().uuidString)"
         let payload = #"{}"#.data(using: .utf8)!
-        let eventData = try EventData(eventType: "TestEvent", payload: payload)
+        let eventData = EventData(eventType: "TestEvent", data: payload)
         _ = try await client.streams(of: .specified(aggregateStream)).append(events: eventData) { _ in }
 
         struct AlwaysFails: Error {}
@@ -257,7 +257,7 @@ struct KurrentProjectionRunnerEventFilterTests {
         // Append two events of different types
         for eventType in ["EventA", "EventB"] {
             let payload = #"{}"#.data(using: .utf8)!
-            let eventData = try EventData(eventType: eventType, payload: payload)
+            let eventData = EventData(eventType: eventType, data: payload)
             _ = try await client.streams(of: .specified(aggregateStream))
                 .append(events: eventData) { _ in }
         }

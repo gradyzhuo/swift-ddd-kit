@@ -42,12 +42,12 @@ private struct ThrowingClient: EventStoreClient {
     func appendAtomically(_ batches: [StreamBatch]) async throws -> [StreamBatchResult] { throw error }
 }
 
-private func makeCoordinator(throwing error: any Error) -> KurrentStorageCoordinator<Naming, CustomMetadata> {
+private func makeCoordinator(throwing error: any Error) -> KurrentStorageCoordinator<Naming, EventSourcing.CustomMetadata> {
     .init(client: ThrowingClient(error: error), eventMapper: NoMapper())
 }
 
 private func appendOne(
-    _ coordinator: KurrentStorageCoordinator<Naming, CustomMetadata>,
+    _ coordinator: KurrentStorageCoordinator<Naming, EventSourcing.CustomMetadata>,
     version: UInt64?
 ) async throws {
     _ = try await coordinator.append(events: [Happened(aggregateRootId: "1")], byId: "1", version: version, metadata: nil)

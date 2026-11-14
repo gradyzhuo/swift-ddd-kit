@@ -604,7 +604,7 @@ struct KurrentUnitOfWorkBackendTests {
     func encodeForKurrentWritesMetadataAsJSONObject() throws {
         let events = [Placed(aggregateRootId: "1", amount: 3), Placed(aggregateRootId: "1", amount: 5)]
 
-        let encoded = try encodeForKurrent(events: events, metadata: CustomMetadata(operatorId: "operator-7"))
+        let encoded = try encodeForKurrent(events: events, metadata: EventSourcing.CustomMetadata(operatorId: "operator-7"))
 
         #expect(encoded.events.map(\.id) == events.map(\.id))
         #expect(encoded.events.map(\.eventType) == events.map(\.eventType))
@@ -614,7 +614,7 @@ struct KurrentUnitOfWorkBackendTests {
         }
         #expect(try jsonStringObject(encoded.metadataBytes) == ["operatorId": "operator-7"])
 
-        let withoutMetadata = try encodeForKurrent(events: events, metadata: nil as CustomMetadata?)
+        let withoutMetadata = try encodeForKurrent(events: events, metadata: nil as EventSourcing.CustomMetadata?)
 
         #expect(withoutMetadata.metadataBytes == nil)
         #expect(withoutMetadata.events.map(\.customMetadata) == [nil, nil])

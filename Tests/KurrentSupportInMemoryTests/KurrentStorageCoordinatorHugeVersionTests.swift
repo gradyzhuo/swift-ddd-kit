@@ -32,7 +32,7 @@ struct KurrentStorageCoordinatorHugeVersionTests {
 
     @Test("on a stream never written it becomes commitConflict(actual: nil)", arguments: [UInt64.max, UInt64(Int64.max) + 1])
     func neverWritten(version: UInt64) async {
-        let coordinator = KurrentStorageCoordinator<Naming, CustomMetadata>(client: InMemoryEventStoreClient(), eventMapper: NoMapper())
+        let coordinator = KurrentStorageCoordinator<Naming, EventSourcing.CustomMetadata>(client: InMemoryEventStoreClient(), eventMapper: NoMapper())
         do {
             _ = try await coordinator.append(events: [Happened(aggregateRootId: "1")], byId: "1", version: version, metadata: nil)
             Issue.record("expected a throw")
@@ -46,7 +46,7 @@ struct KurrentStorageCoordinatorHugeVersionTests {
 
     @Test("on a purged stream it becomes streamPurged", arguments: [UInt64.max, UInt64(Int64.max) + 1])
     func purged(version: UInt64) async throws {
-        let coordinator = KurrentStorageCoordinator<Naming, CustomMetadata>(client: InMemoryEventStoreClient(), eventMapper: NoMapper())
+        let coordinator = KurrentStorageCoordinator<Naming, EventSourcing.CustomMetadata>(client: InMemoryEventStoreClient(), eventMapper: NoMapper())
         _ = try await coordinator.append(events: [Happened(aggregateRootId: "1")], byId: "1", version: nil, metadata: nil)
         try await coordinator.purge(byId: "1")
         do {
