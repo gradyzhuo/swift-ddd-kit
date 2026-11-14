@@ -487,7 +487,9 @@ KurrentDB 無法接受大於 `Int64.max` 的預期 revision，以前 `KurrentSto
 ## 1.5.0
 
 1.5.0 adds `withUnitOfWork`, which commits the saves of several usecases together (README section
-"Compose Usecases with `withUnitOfWork`"). Code that never calls it behaves exactly as before. The
+"Compose Usecases with `withUnitOfWork`"). Code that never calls it behaves as before, except that a read cancelled midway now
+throws `CancellationError` (BC7), and a bare `CustomMetadata` next to `import KurrentDB` no longer
+compiles (SB4). The
 IDs below are the same as in the
 [1.4 → 1.5 migration guide](https://gradyzhuo.github.io/swift-ddd-kit/migration/swift-ddd-kit-1.4-to-1.5.html).
 
@@ -584,15 +586,12 @@ Files that do not import `KurrentDB`, generated events and mappers included, are
   `Decimal`, is stored rounded without an error. Store values whose every digit matters as
   strings. Read back, the custom metadata of an event that a unit of work wrote to two or more
   streams also holds the server's `$schema.name` and `$schema.format` keys; compare decoded
-  structs, not raw bytes or dictionaries. The keys are there also when the event was saved with
-  `nil` metadata (no `EventMetadataContext`): it reads back as
-  `{"$schema.name": "<event type>", "$schema.format": "Json"}`, not empty bytes. The generated
-  mapper decodes it with `try?` (`nil` for a type with a required field, every field `nil` for a
-  type whose fields are all optional); code that reads `customMetadata` itself must decode with
-  `try?` or optional fields and treat a failure as no metadata, because a hand-written mapper that
-  throws makes the coordinator skip the event. `ContextForwarder` treats metadata that holds only
-  `$schema.*` keys as absent (`decodeMetadata` returns `nil`). `InMemoryEventStoreClient` adds no
-  such keys.
+  structs, not raw bytes or dictionaries. Keys of your own that start with `$` are kept. An event
+  saved with `nil` metadata (no `EventMetadataContext`) is stored with only those two keys;
+  `LiveEventStoreClient` reads such metadata back as empty, so through `KurrentStorageCoordinator`
+  and the projection runners it reads as no metadata, as before 1.5. Code that reads the stream
+  with `KurrentDBClient` directly still sees the two keys. `ContextForwarder` treats metadata that
+  holds only `$schema.*` keys as absent (`decodeMetadata` returns `nil`).
 - **BC7 — A cancelled read throws.** swift-kurrentdb 3.0 reads a stream as it is iterated, so a
   `find` or `fetchEvents` through `KurrentStorageCoordinator` whose task is cancelled midway throws
   `CancellationError`. With 2.x the read had already fetched every event and returned normally.

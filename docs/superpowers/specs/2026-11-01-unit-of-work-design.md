@@ -365,6 +365,8 @@ DDDKit 不再需要自己的 spike（實作計畫 Task 2 取消）；§7 的 liv
 
 更正（2026-11-14）：使用者決定 unit of work 隨 swift-kurrentdb 3.0 出版，floor 由 2.6.1 改為 3.0.0（2026-11-14 出版）。本設計用到的 `multiStreams.appendRecords`、`EventRecord(eventData:)` 與 v1 單串流 append 在 3.0 行為不變；`EventRecord(eventData:)` 的錯誤改為 `KurrentError.underlyingError`，但 save 時的檢查把任何錯誤都轉成 `operationNotAllow`，payload 則在檢查前先自行編碼，仍丟 `EncodingError`。DDDKit 這邊的調整：`encodeForKurrent` 改把 metadata 位元組包成 `CustomMetadata(data:format: .bytes)`，寫進伺服器的位元組不變；讀取改成延遲讀取，任務被取消時改丟 `CancellationError`（MIGRATION BC7）；3.0 自己的 `CustomMetadata` 讓同時 import `KurrentDB` 的檔案要寫 `EventSourcing.CustomMetadata`（MIGRATION SB4）。
 
+更正（2026-11-14，對抗式審查第 1 輪）：(1) 從作用域內啟動的 `Task` 呼叫 `withUnitOfWork` 一律拒絕，作用域結束前後都一樣，結束後的 reason 改成 `unit of work <id> already ended; …`，行為不隨時序改變。(2) `LiveEventStoreClient` 在 `readStream` 與 persistent subscription 的 delivery 把只含 `$schema.*` 的 custom metadata 讀成空 bytes，nil metadata 經任何路徑讀回都是空的（原本多串流 commit 後讀回只有 `$schema.*` 的物件，全 optional 的 metadata 型別會解出非 nil 的空 struct）。(3) live 實測：使用者以 `$` 開頭的 metadata key（含 `$schema.` 前綴）在多串流 commit 後原樣保留，不需在 save 時拒絕；超過 2^53 的整數四捨五入成最近的 Double。
+
 ## 10. 留給實作者
 
 - `UnitOfWork` 內部狀態與 TaskLocal 的放法（`EventMetadataContext` 已有同樣的 TaskLocal 作法可參考）。
