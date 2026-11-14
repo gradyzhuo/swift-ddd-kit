@@ -3,7 +3,7 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 
 # ── Canvas ──────────────────────────────────────────────────────────
-W, H = 1020, 590
+W, H = 1020, 630
 BG = '#F8FAFC'
 img = Image.new('RGB', (W, H), BG)
 draw = ImageDraw.Draw(img)
@@ -61,7 +61,7 @@ store_inner_y = FW_Y + 20 + FW_PAD     # below the "FRAMEWORKS & DRIVERS" label
 ARROW_GAP = 30                          # gap between FW&D bottom and layer grid
 GRID_TOP  = FW_Y + FW_BOX_H + ARROW_GAP
 
-ROW_H = {'ia': 88, 'uc': 128, 'en': 130}
+ROW_H = {'ia': 120, 'uc': 128, 'en': 130}
 
 row_y = {}
 y = GRID_TOP
@@ -69,7 +69,7 @@ for k in ('ia', 'uc', 'en'):
     row_y[k] = y
     y += ROW_H[k]
 
-GRID_BOT = y   # = GRID_TOP + 88 + 128 + 130 = GRID_TOP + 346
+GRID_BOT = y
 
 KDB_X = LX + CW//2 - STORE_W//2
 PG_X  = RX + CW//2 - STORE_W//2
@@ -127,8 +127,8 @@ draw.text(((fw_left + fw_right)//2, FW_Y + 10),
           'FRAMEWORKS & DRIVERS',
           fill=FW_BD, font=F_LAYER, anchor='mm')
 
-store_box(KDB_X, store_inner_y, STORE_W, STORE_H, KDB_BG, KDB_BD, 'KurrentDB', '(Event Store)')
-store_box(PG_X,  store_inner_y, STORE_W, STORE_H, PG_BG,  PG_BD,  'PostgreSQL / Memory', '(Read Store)')
+store_box(KDB_X, store_inner_y, STORE_W, STORE_H, KDB_BG, KDB_BD, 'KurrentDB / Local Files', '(Event Store)')
+store_box(PG_X,  store_inner_y, STORE_W, STORE_H, PG_BG,  PG_BD,  'PostgreSQL / In-Memory', '(Read Store)')
 
 # ── Divider between Write and Read columns (layer grid only) ─────────
 div_x = M + CW + GAP//2
@@ -137,23 +137,28 @@ draw.line([(div_x, GRID_TOP), (div_x, GRID_BOT)], fill=BORDER, width=1)
 # ── INTERFACE ADAPTERS ───────────────────────────────────────────────
 layer_box(LX, row_y['ia'], CW, ROW_H['ia'], 'ia', 'INTERFACE ADAPTERS',
           ['Command Handler  (Controller)',
-           'KurrentStorageCoordinator  (Gateway)'])
-layer_box(RX, row_y['ia'], CW, ROW_H['ia'], 'ia', 'INTERFACE ADAPTERS',
-          ['Query Handler  (Presenter)',
            'KurrentStorageCoordinator  (Gateway)',
-           'ReadModelStore  (Gateway)'])
+           'PersistentEventStore / InMemoryEventStore',
+           'EventTypeMapper  (Adapter)'])
+layer_box(RX, row_y['ia'], CW, ROW_H['ia'], 'ia', 'INTERFACE ADAPTERS',
+          ['KurrentProjection.*SubscriptionRunner',
+           'KurrentStorageCoordinator  (Gateway)',
+           '(Transactional)ReadModelStore  (Gateway)',
+           'EventTypeMapper  (Adapter)'])
 
 # ── USE CASES ────────────────────────────────────────────────────────
 layer_box(LX, row_y['uc'], CW, ROW_H['uc'], 'uc', 'USE CASES',
           ['Usecase',
+           'withUnitOfWork  (UnitOfWork)',
            'EventSourcingRepository',
-           'EventTypeMapper  (Adapter)'])
+           'EventStore  (Port)',
+           'EventMetadataContext'])
 layer_box(RX, row_y['uc'], CW, ROW_H['uc'], 'uc', 'USE CASES',
           ['EventSourcingProjector',
            '  ├─  buildReadModel(input:)',
            '  └─  apply(readModel:events:)',
-           'StatefulProjector',
-           'EventTypeMapper  (Adapter)'])
+           'StatefulEventSourcingProjector',
+           'EventStore  (Port)'])
 
 # ── ENTITIES ─────────────────────────────────────────────────────────
 layer_box(LX, row_y['en'], CW, ROW_H['en'], 'en', 'ENTITIES  (DDDCore)',
@@ -161,10 +166,11 @@ layer_box(LX, row_y['en'], CW, ROW_H['en'], 'en', 'ENTITIES  (DDDCore)',
            '  ├─  when(happened:)',
            '  ├─  apply(event:)',
            '  └─  ensureInvariant()',
-           'DomainEvent'])
-layer_box(RX, row_y['en'], CW, ROW_H['en'], 'en', 'ENTITIES  (DDDCore)',
-          ['ReadModel',
-           '  └─  id  (Codable)'])
+           'DomainEvent / DeletedEvent'])
+layer_box(RX, row_y['en'], CW, ROW_H['en'], 'en', 'ENTITIES  (EventSourcing)',
+          ['ReadModel  (Codable)',
+           '  ├─  id',
+           '  └─  readModelTypeName'])
 
 # ── Arrows ───────────────────────────────────────────────────────────
 kdb_cx    = KDB_X + STORE_W//2
@@ -185,7 +191,7 @@ bend_x    = RX + 50
 draw.line([(kdb_right, reads_y), (bend_x, reads_y)], fill=ARROW_C, width=2)
 arrow_v(bend_x, reads_y, GRID_TOP, ARROW_C)
 mid_rx = (kdb_right + bend_x) // 2
-draw.text((mid_rx, reads_y - 14), 'reads events', fill=ARROW_C, font=F_ARROW, anchor='mm')
+draw.text((mid_rx, reads_y - 14), 'persistent subscription', fill=ARROW_C, font=F_ARROW, anchor='mm')
 
 # ── Save ─────────────────────────────────────────────────────────────
 out = os.path.join(os.path.dirname(__file__), 'architecture.png')
