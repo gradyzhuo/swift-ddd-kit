@@ -22,10 +22,14 @@ private struct Line: Decodable, Equatable {
 @Suite("Custom metadata holding only the server's $schema.* keys")
 struct ServerSchemaMetadataTests {
     @Test(
-        "only a non-empty JSON object whose every key starts with $schema. counts as the server's",
+        "only a JSON object whose keys are exactly $schema.name and $schema.format counts as the server's",
         arguments: [
             (#"{"$schema.name":"QuoteOpened","$schema.format":"Json"}"#, true),
-            (#"{"$schema.name":"QuoteOpened"}"#, true),
+            (#" { "$schema.format" : "Json", "$schema.name" : "QuoteOpened" } "#, true),
+            (#"{"$schema.name":"QuoteOpened"}"#, false),
+            (#"{"$schema.note":"mine"}"#, false),
+            (#"{"$schema.note":"mine","$schema.format":"Json"}"#, false),
+            (#"{"$schema.name":"QuoteOpened","$schema.format":"Json","$schema.note":"mine"}"#, false),
             (#"{"$schema.name":"QuoteOpened","operatorId":"op-7"}"#, false),
             (#"{"operatorId":"op-7"}"#, false),
             (#"{}"#, false),

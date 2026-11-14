@@ -12,16 +12,27 @@
 import EventSourcing
 import Foundation
 
-/// Whether `bytes` is a non-empty JSON object whose every key starts with `$schema.`: what
-/// the server stores for an event written through AppendRecords without custom metadata.
+/// The keys KurrentDB writes into the custom metadata of an event appended through
+/// AppendRecords without metadata of its own.
+private let serverSchemaKeys: Set<String> = ["$schema.name", "$schema.format"]
+
+/// `$schema.name` as UTF-8, searched for before any JSON is parsed.
+private let schemaNameMarker = Data("$schema.name".utf8)
+
+/// Whether `bytes` is a JSON object whose keys are exactly `$schema.name` and
+/// `$schema.format`: what the server stores for an event written through AppendRecords
+/// without custom metadata. Metadata of your own keeps every other key set, `$`-prefixed
+/// ones included.
+///
+/// Called for every record read or delivered, so bytes without `$schema.name` in them
+/// (nearly every event that carries metadata) return `false` without being parsed.
 package func holdsOnlyServerSchemaKeys(_ bytes: Data) -> Bool {
-    guard !bytes.isEmpty,
-          let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
-          !object.isEmpty
+    guard bytes.range(of: schemaNameMarker) != nil,
+          let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any]
     else {
         return false
     }
-    return object.keys.allSatisfy { $0.hasPrefix("$schema.") }
+    return Set(object.keys) == serverSchemaKeys
 }
 
 /// `record` unchanged, or, when its custom metadata holds only the server's `$schema.*`

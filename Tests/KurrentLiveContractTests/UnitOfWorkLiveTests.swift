@@ -260,18 +260,18 @@ private final class RunCount: Sendable {
 
 /// The ids of the first `count` events `session` delivers, each acked; `nil` when `timeout`
 /// passes, or the session ends, before they all arrive.
-private func firstDeliveredIds(
+private func firstDeliveries(
     _ session: any PersistentSubscriptionSession,
     count: Int,
     within timeout: Duration
-) async throws -> [UUID]? {
-    try await withThrowingTaskGroup(of: [UUID]?.self) { group in
+) async throws -> [any RecordedEventLike]? {
+    try await withThrowingTaskGroup(of: [any RecordedEventLike]?.self) { group in
         group.addTask {
-            var ids: [UUID] = []
+            var records: [any RecordedEventLike] = []
             for try await delivery in session.events {
                 try await session.ack([delivery])
-                ids.append(delivery.event.id)
-                if ids.count == count { return ids }
+                records.append(delivery.event)
+                if records.count == count { return records }
             }
             return nil
         }
@@ -581,8 +581,11 @@ struct UnitOfWorkLiveTests {
                     try await invoices.save(aggregateRoot: invoice)
                 }
 
-                let delivered = try await firstDeliveredIds(session, count: 2, within: .seconds(10))
-                #expect(delivered.map(Set.init) == Set(savedIds), "\(stream) did not deliver both events within 10 s")
+                let delivered = try await firstDeliveries(session, count: 2, within: .seconds(10))
+                #expect(delivered.map { Set($0.map(\.id)) } == Set(savedIds), "\(stream) did not deliver both events within 10 s")
+                // Saved without metadata, stored with only the server's `$schema.*` keys, and
+                // delivered with none: the session drops those keys as readStream does.
+                #expect(delivered?.allSatisfy { $0.customMetadata.isEmpty } == true)
             } catch {
                 try? await live.deletePersistentSubscription(stream: stream, group: group)
                 throw error
