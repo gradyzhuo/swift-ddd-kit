@@ -66,7 +66,7 @@ private func register(
     in work: UnitOfWork,
     identity: ObjectIdentifier = clientA
 ) throws -> RecordingBackend {
-    try work.backend(RecordingBackend.self, identity: identity) { backend }
+    try work.withBackend(RecordingBackend.self, identity: identity, make: { backend }) { $0 }
 }
 
 /// The `operationNotAllow` error `body` throws for `operation`; records an issue and
@@ -279,13 +279,13 @@ struct UnitOfWorkTests {
         let registered = RecordingBackend()
         try await withUnitOfWork { work in
             let first = try register(registered, in: work)
-            let second = try work.backend(RecordingBackend.self, identity: clientA) {
+            let second = try work.withBackend(RecordingBackend.self, identity: clientA, make: {
                 Issue.record("make must not run once a backend is stored")
                 return RecordingBackend()
-            }
+            }) { $0 }
             #expect(first === second)
             let error = await captureOperationNotAllow("backend") {
-                _ = try work.backend(RecordingBackend.self, identity: clientB) { RecordingBackend() }
+                _ = try work.withBackend(RecordingBackend.self, identity: clientB, make: { RecordingBackend() }) { $0 }
             }
             #expect(reason(of: error) == "a unit of work commits through exactly one backend")
         }
@@ -297,24 +297,49 @@ struct UnitOfWorkTests {
         try await withUnitOfWork { work in
             try register(RecordingBackend(), in: work)
             let error = await captureOperationNotAllow("backend") {
-                _ = try work.backend(OtherBackend.self, identity: clientA) { OtherBackend() }
+                _ = try work.withBackend(OtherBackend.self, identity: clientA, make: { OtherBackend() }) { $0 }
             }
             #expect(reason(of: error) == "a unit of work commits through exactly one backend")
         }
+    }
+
+    @Test(
+        "withBackend on a scope that ended, however it ended, throws without running make or body",
+        arguments: ScopeEnding.allCases
+    )
+    func withBackendAfterEndNeverRunsBody(ending: ScopeEnding) async throws {
+        var ended: UnitOfWork?
+        let error = await runScope(endingAs: ending) { work in
+            ended = work
+            try register(makeBackend(endingAs: ending), in: work)
+        }
+        expectError(error, endingAs: ending)
+        let work = try #require(ended)
+
+        let bodyRuns = Recorder<Int>()
+        let refusal = await captureOperationNotAllow("backend") {
+            try work.withBackend(RecordingBackend.self, identity: clientA, make: {
+                Issue.record("make must not run on a closed scope")
+                return RecordingBackend()
+            }) { _ in bodyRuns.append(1) }
+        }
+
+        #expect(reason(of: refusal) == "unit of work \(work.id) already ended")
+        #expect(bodyRuns.all.isEmpty)
     }
 
     @Test("Two child tasks registering at once create a single backend")
     func concurrentFirstRegistrationMakesOneBackend() async throws {
         let makes = Recorder<Int>()
         try await withUnitOfWork { work in
-            async let first = try work.backend(RecordingBackend.self, identity: clientA) {
+            async let first = try work.withBackend(RecordingBackend.self, identity: clientA, make: {
                 makes.append(1)
                 return RecordingBackend()
-            }
-            async let second = try work.backend(RecordingBackend.self, identity: clientA) {
+            }) { $0 }
+            async let second = try work.withBackend(RecordingBackend.self, identity: clientA, make: {
                 makes.append(2)
                 return RecordingBackend()
-            }
+            }) { $0 }
             let (a, b) = try await (first, second)
             #expect(a === b)
         }
@@ -359,7 +384,7 @@ struct UnitOfWorkTests {
 
         // A subclass of the type asked for is another type too.
         try await withUnitOfWork { work in
-            let derived = try work.backend(DerivedBackend.self, identity: clientA) { DerivedBackend() }
+            let derived = try work.withBackend(DerivedBackend.self, identity: clientA, make: { DerivedBackend() }) { $0 }
             #expect(work.existingBackend(BaseBackend.self, identity: clientA) == nil)
             #expect(work.existingBackend(DerivedBackend.self, identity: clientA) === derived)
         }
@@ -492,10 +517,10 @@ struct UnitOfWorkTests {
                 let endedReason = "unit of work \(work.id) already ended"
 
                 let backendError = await captureOperationNotAllow("backend") {
-                    _ = try work.backend(RecordingBackend.self, identity: clientA) {
+                    _ = try work.withBackend(RecordingBackend.self, identity: clientA, make: {
                         Issue.record("make must not run on a closed scope")
                         return RecordingBackend()
-                    }
+                    }) { $0 }
                 }
                 #expect(reason(of: backendError) == endedReason)
 
@@ -540,9 +565,9 @@ struct UnitOfWorkTests {
         let hookRuns = Recorder<UUID>()
         let error = await runScope(endingAs: ending) { work in
             weakWork = work
-            weakBackend = try work.backend(RecordingBackend.self, identity: clientA) {
+            weakBackend = try work.withBackend(RecordingBackend.self, identity: clientA, make: {
                 makeBackend(endingAs: ending)
-            }
+            }) { $0 }
             // Captures `work`, as a hook that logs `work.id` would.
             try work.onCommitted { hookRuns.append(work.id) }
         }

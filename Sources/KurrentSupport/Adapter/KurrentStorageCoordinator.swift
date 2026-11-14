@@ -137,23 +137,21 @@ public final class KurrentStorageCoordinator<
                 )
             }
         }
-        return try backend(of: work).stage(
-            id: id,
-            stream: streamName,
-            category: StreamNaming.category,
-            expectedRevision: expectedRevision,
-            events: events
-        )
-    }
-
-    /// The backend `work` commits through, created for this coordinator's client on first use.
-    /// Only writes call it: reads look the backend up without creating or binding one.
-    ///
-    /// - Throws: `DDDError.operationNotAllow` when `work` already commits through the backend
-    ///   of a client with another identity, or has ended.
-    private func backend(of work: UnitOfWork) throws -> KurrentUnitOfWorkBackend {
-        try work.backend(KurrentUnitOfWorkBackend.self, identity: client.identity) {
-            KurrentUnitOfWorkBackend(client: client, logger: logger)
+        // Staged under the scope's lock, so a save from a task that outlived the block
+        // cannot reach the backend after the scope closed: it is refused instead of being
+        // dropped with a discarded backend or joining a commit that already started.
+        return try work.withBackend(
+            KurrentUnitOfWorkBackend.self,
+            identity: client.identity,
+            make: { KurrentUnitOfWorkBackend(client: client, logger: logger) }
+        ) { backend in
+            try backend.stage(
+                id: id,
+                stream: streamName,
+                category: StreamNaming.category,
+                expectedRevision: expectedRevision,
+                events: events
+            )
         }
     }
 

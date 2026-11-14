@@ -1238,10 +1238,10 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         try await withUnitOfWork { work in
             try await quotes.save(aggregateRoot: try Quoting(id: "q-1", line: "desk"))
 
-            let backend = try work.backend(KurrentUnitOfWorkBackend.self, identity: store.identity) {
+            let backend = try work.withBackend(KurrentUnitOfWorkBackend.self, identity: store.identity, make: {
                 Issue.record("the save should have created the backend")
                 return KurrentUnitOfWorkBackend(client: store)
-            }
+            }) { $0 }
             let staged = try #require(try backend.stagedEvents(stream: quoteStream))
             #expect(staged.events.map(\.customMetadata) == [nil])
             let events = try #require(try await quotes.store.fetchEvents(byId: "q-1")).events
@@ -1421,9 +1421,9 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
                 #expect(conflict?.code == .commitConflict)
                 #expect(conflict?.commitConflicts == [DDDError.CommitConflict(id: "q-1", expected: version, actual: nil)])
 
-                let backend = try work.backend(KurrentUnitOfWorkBackend.self, identity: store.identity) {
+                let backend = try work.withBackend(KurrentUnitOfWorkBackend.self, identity: store.identity, make: {
                     KurrentUnitOfWorkBackend(client: store)
-                }
+                }) { $0 }
                 #expect(try backend.stagedEvents(stream: quoteStream) == nil)
             }
         }
@@ -1454,6 +1454,25 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         #expect(client.appendCount == 0)
         #expect(try await storedRevisions(store, quoteStream) == [0])
         #expect(try await storedRevisions(store, billStream) == [0])
+    }
+
+    @Test("one stream: resending the same event ids in a second scope returns the original revision and writes nothing twice")
+    func singleStreamResendInScopeIsIdempotent() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let coordinator = quotingRepository(client).store
+        let opened = QuoteOpened(aggregateRootId: "q-1", line: "desk")
+
+        for _ in 0..<2 {
+            let predicted = try await withUnitOfWork { _ in
+                try await coordinator.append(events: [opened], byId: "q-1", version: nil, metadata: nil as AuditMetadata?)
+            }
+            #expect(predicted == 0)
+        }
+
+        #expect(client.appendCount == 2)
+        #expect(client.appendAtomicallyCount == 0)
+        #expect(try await storedRecords(store, quoteStream).map(\.id) == [opened.id])
     }
 
     @Test("a Task started in the block that saves after the block ended → operationNotAllow, nothing written")

@@ -18,7 +18,7 @@ private enum _UnitOfWorkStorage {
 ///
 /// The end of the scope, in order:
 /// 1. `body` returns or throws, and the scope closes. From then on
-///    ``UnitOfWork/backend(_:identity:make:)``, ``UnitOfWork/fail(_:)`` and
+///    ``UnitOfWork/withBackend(_:identity:make:_:)``, ``UnitOfWork/fail(_:)`` and
 ///    ``UnitOfWork/onCommitted(_:)`` throw `operationNotAllow`, including from a
 ///    `Task` started inside `body`, which still sees this scope as
 ///    ``UnitOfWork/current``.
@@ -40,8 +40,8 @@ private enum _UnitOfWorkStorage {
 /// `DDDError.operationNotAllow(operation: "withUnitOfWork", ...)` without running
 /// `body` and leaves the outer scope untouched. A `Task` started inside a scope stays
 /// in it after it ended, so it cannot open a scope of its own either; the reason then
-/// says the scope already ended. Whether such a task runs before or after the end of
-/// the block, it is refused the same way.
+/// says the scope already ended. Such a task is refused whether it runs before or after
+/// the end of the block; only the reason differs.
 @discardableResult
 public func withUnitOfWork<R>(_ body: (UnitOfWork) async throws -> R) async throws -> R {
     if let current = UnitOfWork.current {
@@ -142,31 +142,40 @@ public final class UnitOfWork: Sendable {
         }
     }
 
-    /// For store implementations: the backend this scope commits through, created by
-    /// `make` on first use. Looking up, creating and storing happen under one lock, so
-    /// concurrent first callers get the same instance.
+    /// For store implementations: runs `body` with the backend this scope commits through,
+    /// created by `make` on first use, and returns what `body` returns. Looking up,
+    /// creating, storing and `body` all run under the scope's lock, the lock the end of the
+    /// scope also takes: a write staged in `body` either lands before the scope closes, and
+    /// is part of what it commits, or is refused because the scope has ended. Concurrent
+    /// first callers get the same instance.
+    ///
+    /// Stage writes inside `body` only. A backend kept after `body` returned is no longer
+    /// guarded: a write through it once the scope closed would be dropped or slip into a
+    /// commit that already started.
     ///
     /// - Parameters:
     ///   - type: The backend type the store commits through.
     ///   - identity: What the backend writes to, e.g. the client's identity. Stores
     ///     that pass the same type and identity share one backend.
-    ///   - make: Creates the backend when the scope has none yet. It runs while the
-    ///     scope's lock is held, so it must not call back into this scope.
+    ///   - make: Creates the backend when the scope has none yet.
+    ///   - body: Stages the write. `make` and `body` run while the scope's lock is held,
+    ///     so neither may call back into this scope.
     /// - Throws: `DDDError.operationNotAllow` when the scope already has a backend of
     ///   another type or identity (a unit of work commits through exactly one), or
-    ///   once the scope has ended.
-    public func backend<B: UnitOfWorkBackend>(
+    ///   once the scope has ended; otherwise what `body` throws.
+    public func withBackend<B: UnitOfWorkBackend, R>(
         _ type: B.Type,
         identity: ObjectIdentifier,
-        make: () -> B
-    ) throws -> B {
+        make: () -> B,
+        _ body: (B) throws -> R
+    ) throws -> R {
         try state.withLock { state in
             guard !state.closed else { throw ended(operation: "backend") }
             guard let stored = state.backend else {
                 let created = make()
                 state.backend = created
                 state.backendIdentity = identity
-                return created
+                return try body(created)
             }
             guard Swift.type(of: stored) == B.self,
                   state.backendIdentity == identity,
@@ -177,7 +186,7 @@ public final class UnitOfWork: Sendable {
                     reason: "a unit of work commits through exactly one backend"
                 )
             }
-            return existing
+            return try body(existing)
         }
     }
 
@@ -185,7 +194,7 @@ public final class UnitOfWork: Sendable {
     /// the scope is open and its backend has exactly type `B` and was registered for
     /// `identity`; `nil` when there is none yet, it has another type or identity, or the
     /// scope has ended. Never creates a backend and never throws, so a read leaves the
-    /// scope as it found it. Writes use ``backend(_:identity:make:)``.
+    /// scope as it found it. Writes use ``withBackend(_:identity:make:_:)``.
     package func existingBackend<B: UnitOfWorkBackend>(_ type: B.Type, identity: ObjectIdentifier) -> B? {
         state.withLock { state in
             guard !state.closed,
