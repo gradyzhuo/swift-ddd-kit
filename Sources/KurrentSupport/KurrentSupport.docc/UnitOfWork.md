@@ -115,24 +115,18 @@ whose every digit matters as strings.
 On read, KurrentDB adds `$schema.name` and `$schema.format` keys to the custom metadata of every
 event written through `AppendRecords`, that is, every event of a commit that writes two or more
 streams. A struct decodes as before, because `JSONDecoder` ignores keys it does not know; compare
-decoded values, not raw bytes or dictionaries.
+decoded values, not raw bytes or dictionaries. Keys of your own that start with `$`, `$schema.`
+included, are kept next to the server's.
 
-The keys are added also when the event carries no metadata. Saved with `nil` metadata (no
-`EventMetadataContext` around the `save`) in a commit of two or more streams, an event reads back
-with custom metadata `{"$schema.name": "<event type>", "$schema.format": "Json"}`, not empty bytes.
-A one-stream commit, like every save outside a scope, still leaves it empty, and
-`InMemoryEventStoreClient` stores custom metadata as written and adds no keys. For code that
-reads it:
-
-- The mapper `generate event` emits decodes metadata with `try?`. A metadata type with a required
-  field, such as `CustomMetadata`, gives `event.metadata == nil`, as for empty bytes; a type whose
-  fields are all optional gives a value with every field `nil` instead of `nil`.
-- Code that reads `customMetadata` itself must not take non-empty bytes to mean that metadata was
-  written: decode with `try?` or with optional fields, and treat a failure as no metadata. A
-  hand-written `EventTypeMapper` that throws on such an event makes the coordinator skip it with
-  a warning, so `find` rebuilds the aggregate without that event.
-- `ContextForwarder` takes custom metadata that holds only `$schema.*` keys as absent:
-  `ForwardedRecord.metadata` is `nil` and `decodeMetadata(_:)` returns `nil` for such an event.
+The server adds the keys also when the event carries no metadata, so such an event is stored with
+custom metadata `{"$schema.name": "<event type>", "$schema.format": "Json"}`. `LiveEventStoreClient`
+reads custom metadata that holds only `$schema.*` keys as empty, in `readStream` and in
+persistent-subscription deliveries, so an event saved with `nil` metadata (no
+`EventMetadataContext` around the `save`) reads back without metadata however it was written: one
+stream or several, a staged read inside the scope, or `InMemoryEventStoreClient`. `event.metadata`
+stays `nil` for every metadata type. Code that reads the stream with `KurrentDBClient` directly
+still sees the two keys, and so does `ContextForwarder`, which takes such metadata as absent:
+`ForwardedRecord.metadata` is `nil` and `decodeMetadata(_:)` returns `nil` for such an event.
 
 ## Writing an EventStoreClient
 

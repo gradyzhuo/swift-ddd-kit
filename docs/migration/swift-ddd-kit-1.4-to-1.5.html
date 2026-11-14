@@ -181,9 +181,11 @@
     <p style="margin:10px 0 0;color:var(--muted);font-size:13.5px">
       1.5 adds <code>withUnitOfWork { work in … }</code>: every <code>repository.save</code> inside the block is collected and
       written together when the block returns, or not at all when it throws. Existing usecases, repositories, generated code
-      and the composition root take part <b>unchanged</b>; code that never calls <code>withUnitOfWork</code> behaves exactly as in 1.4.
+      and the composition root take part <b>unchanged</b>. Code that never calls <code>withUnitOfWork</code> behaves as in 1.4,
+      except that a read cancelled midway now throws <code>CancellationError</code> (<span class="chgid">BC7</span>).
       What breaks the build is limited to custom <code>EventStoreClient</code> conformances, exhaustive <code>switch</code>es over
-      <code>EventStoreClientError</code>, and a direct swift-kurrentdb requirement below 3.0.0.
+      <code>EventStoreClientError</code>, a direct swift-kurrentdb requirement below 3.0.0, and a bare <code>CustomMetadata</code>
+      in a file that imports <code>KurrentDB</code> (<span class="chgid">SB4</span>).
       The public signatures of <code>Usecase</code>, <code>EventStore</code>, <code>EventSourcingRepository</code> and
       <code>KurrentStorageCoordinator</code> do not change.
     </p>
@@ -331,7 +333,7 @@
       "scope": "EventMetadata types saved inside withUnitOfWork",
       "before": "metadata stored as raw JSON bytes",
       "after": "a unit of work of two or more streams sends metadata as protobuf Value (AppendRecords properties)",
-      "action": "Inside a unit of work, metadata must encode to a JSON object, or save throws operationNotAllow. NaN and ±infinity throw EncodingError from JSONEncoder at save (not operationNotAllow), in and out of a unit of work, as before 1.5. Inside a unit of work that writes two or more streams every number travels as the nearest Double: integers beyond ±2^53, including beyond 64 bits (e.g. a large Decimal), are rounded without an error, so store them as strings. On read the server adds $schema.name and $schema.format keys to every event of a commit of two or more streams, also to one saved with nil metadata, which then reads back as a JSON object of only those keys instead of empty bytes: compare decoded structs, not raw bytes, and decode metadata with try? or optional fields, treating a failure as no metadata."
+      "action": "Inside a unit of work, metadata must encode to a JSON object, or save throws operationNotAllow. NaN and ±infinity throw EncodingError from JSONEncoder at save (not operationNotAllow), in and out of a unit of work, as before 1.5. Inside a unit of work that writes two or more streams every number travels as the nearest Double: integers beyond ±2^53, including beyond 64 bits (e.g. a large Decimal), are rounded without an error, so store them as strings. On read the server adds $schema.name and $schema.format keys to every event of a commit of two or more streams: compare decoded structs, not raw bytes. An event saved with nil metadata is stored with only those keys; LiveEventStoreClient reads them back as empty metadata, so through KurrentStorageCoordinator and the projection runners it reads as no metadata, as before 1.5. Reading with KurrentDBClient directly still shows the two keys."
     },
     {
       "id": "BC7",
@@ -381,8 +383,8 @@
       "mechanical": false,
       "scope": "do/catch inside the block",
       "before": "do { try await usecase.execute(input: i) } catch { return .failed(error) }   // inside the block",
-      "after": "do { try await usecase.execute(input: i) } catch { try work.fail(error); return .failed(error) }   // or let the error leave the block",
-      "action": "Do not catch a usecase's error inside the block. To return a normal failure output, call try work.fail(error) and return."
+      "after": "do { return .ok(try await withUnitOfWork { _ in try await usecase.execute(input: i) }) } catch { return .failed((error as? DDDError)?.userInfos[\"cause\"] as? any Error ?? error) }",
+      "action": "Do not catch a usecase's error inside the block: let it leave the block, or call try work.fail(error) when the block must go on. Either way withUnitOfWork throws and drops the block's result, so map the error to a failure output outside withUnitOfWork; fail(_:) and failed repository calls put the original error in userInfos[\"cause\"]."
     },
     {
       "id": "R3",
@@ -553,17 +555,14 @@
       </ul>
       <p>Read back, the custom metadata of an event that a unit of work wrote to two or more streams also holds the server's
          <code>$schema.name</code> and <code>$schema.format</code> keys; a struct decodes as before, so compare decoded values,
-         not raw bytes or dictionaries.</p>
-      <p>The keys are there also when the event was saved with <code>nil</code> metadata (no <code>EventMetadataContext</code>):
-         it reads back as <code>{"$schema.name": "&lt;event type&gt;", "$schema.format": "Json"}</code>, not empty bytes.</p>
+         not raw bytes or dictionaries. Keys of your own that start with <code>$</code> are kept.</p>
+      <p>An event saved with <code>nil</code> metadata (no <code>EventMetadataContext</code>) is stored with only those two keys.
+         <code>LiveEventStoreClient</code> reads such metadata back as empty, so through <code>KurrentStorageCoordinator</code>
+         and the projection runners the event reads as having no metadata, as before 1.5.</p>
       <ul class="tite">
-        <li>The generated mapper decodes metadata with <code>try?</code>: <code>nil</code> for a type with a required field (such
-            as <code>CustomMetadata</code>), a value with every field <code>nil</code> for a type whose fields are all optional.</li>
-        <li><b>Code that reads <code>customMetadata</code> itself must not take non-empty bytes to mean metadata was written.</b>
-            Decode with <code>try?</code> or optional fields and treat a failure as no metadata: a hand-written mapper that throws
-            makes the coordinator skip the event, so <code>find</code> rebuilds the aggregate without it.</li>
+        <li>Code that reads the stream with <code>KurrentDBClient</code> directly still sees the two keys.</li>
         <li><code>ContextForwarder</code> treats metadata that holds only <code>$schema.*</code> keys as absent
-            (<code>decodeMetadata</code> returns <code>nil</code>). <code>InMemoryEventStoreClient</code> adds no such keys.</li>
+            (<code>decodeMetadata</code> returns <code>nil</code>).</li>
       </ul>
     </div>
 
@@ -639,13 +638,16 @@
       <li><b>No nesting.</b> <code>withUnitOfWork</code> inside a scope throws <code>operationNotAllow</code> and leaves the outer scope
           alone. A usecase does not call <code>withUnitOfWork</code>; it belongs to the handler. When two handlers share logic,
           extract a function that does not open a scope and let each handler wrap it.</li>
-      <li><b>Do not <code>do/catch</code> a usecase's error inside the block.</b> To return a normal failure output, call
-          <code>try work.fail(error)</code> and return. What goes wrong otherwise is a usecase that saves, then throws, and is
+      <li><b>Do not <code>do/catch</code> a usecase's error inside the block.</b> Let it leave the block, or call
+          <code>try work.fail(error)</code> when the block must go on. Either way <code>withUnitOfWork</code> throws and drops what
+          the block returned, so turn the error into a failure output outside it, taking the original error from
+          <code>userInfos["cause"]</code>. What goes wrong otherwise is a usecase that saves, then throws, and is
           caught: store errors in the default repository methods fail the scope automatically (<span class="chgid">BC4</span>),
           and this rule covers the rest.</li>
       <li><b>Do not move a <code>save</code> into <code>Task { … }</code>.</b> A task that is not detached inherits the scope; a
           <code>save</code> it reaches after the block ended throws <code>operationNotAllow</code>, never writes directly and never
-          joins a batch that was already committed. Await everything before returning.</li>
+          joins a batch that was already committed, and a <code>withUnitOfWork</code> in it throws too. Await everything before
+          returning.</li>
       <li><b>Do not move a <code>save</code> out of the task tree either.</b> <code>Task.detached</code>, and code that does not run
           in the block's task tree (a NIO future callback, a <code>DispatchQueue</code> block, a timer), do not see the scope at all
           (<code>UnitOfWork.current</code> is <code>nil</code>): a <code>save</code> there writes to the store at once, is not part of

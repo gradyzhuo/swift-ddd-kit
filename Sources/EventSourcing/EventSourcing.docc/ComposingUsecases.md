@@ -12,8 +12,9 @@ the block throws, nothing is written.
 
 Existing usecases, repositories and generated code take part unchanged, and so does the
 composition root: services built once at startup are called inside the block like anywhere else.
-A usecase does not know it runs inside a unit of work. Outside a block nothing changes:
-`repository.save` writes straight to the store, as before.
+A usecase needs no change to run inside a unit of work; only one that publishes right after
+`save` has to check ``UnitOfWork/current`` (see <doc:ComposingUsecases#Rules-inside-the-block>).
+Outside a block nothing changes: `repository.save` writes straight to the store, as before.
 
 ### Compose two usecases
 
@@ -86,7 +87,7 @@ let quoting = try await withUnitOfWork { work in
 |---|---|
 | ``UnitOfWork/id`` | Identifies the scope, for correlating logs. Every scope has its own. |
 | ``UnitOfWork/isFailed`` | True once ``UnitOfWork/fail(_:)`` was called, by the caller or by the framework (see <doc:ComposingUsecases#How-a-unit-of-work-ends>). |
-| ``UnitOfWork/fail(_:)`` | Marks the scope failed without throwing. The block may go on and return normally, but nothing is committed and `withUnitOfWork` throws `DDDError.operationNotAllow(operation: "commit", reason: "unit of work failed")` with the first cause in `userInfos["cause"]`. For a handler that returns a normal failure output and discards the writes. |
+| ``UnitOfWork/fail(_:)`` | Marks the scope failed without throwing. The block may go on and return, but its result is dropped: nothing is committed and `withUnitOfWork` throws `DDDError.operationNotAllow(operation: "commit", reason: "unit of work failed")` with the first cause in `userInfos["cause"]`. A handler that returns a failure output catches that outside `withUnitOfWork` (see <doc:ComposingUsecases#Rules-inside-the-block>). |
 | ``UnitOfWork/onCommitted(_:)`` | Registers a side effect (an event bus, a notification, an external API) to run after a successful commit. |
 
 Hooks run in registration order, one at a time, before `withUnitOfWork` returns. None of them runs
@@ -116,15 +117,32 @@ scope has ended, which is why both are called with `try`.
   block, and the outer scope is not affected. A usecase does not call `withUnitOfWork`; it belongs
   to the handler. When two handlers share logic, extract a function that does not open a scope
   and let each handler wrap it.
-- **Do not `do/catch` a usecase's error inside the block.** To return a normal failure output,
-  call `try work.fail(error)` and return. What goes wrong otherwise is a usecase that saves, then
-  throws, and is caught: store errors in the default repository methods fail the scope
-  automatically (see <doc:ComposingUsecases#How-a-unit-of-work-ends>), and this rule covers the
-  rest.
+- **Do not `do/catch` a usecase's error inside the block.** Let it leave the block. When the
+  block must go on after an error, call `try work.fail(error)` instead of swallowing it. Either way
+  `withUnitOfWork` throws, never returning what the block returned, so turn the error into a
+  failure output outside it:
+
+  ```swift
+  do {
+      let quoting = try await withUnitOfWork { _ in
+          try await createQuotingCaseService.execute(input: createInput)
+      }
+      return .created(quoting)
+  } catch {
+      // fail(_:) and a failed repository call put the original error in userInfos["cause"].
+      let cause = (error as? DDDError)?.userInfos["cause"] as? any Error
+      return .failed(cause ?? error)
+  }
+  ```
+
+  What goes wrong otherwise is a usecase that saves, then throws, and is caught: store errors in
+  the default repository methods fail the scope automatically (see
+  <doc:ComposingUsecases#How-a-unit-of-work-ends>), and this rule covers the rest.
 - **Do not move a `save` into `Task { … }`.** A task that is not detached inherits the scope. If
   it reaches `save` after the block ended, it hits the closed scope and throws `operationNotAllow`;
-  it never writes directly and never joins a batch that was already committed. Await everything
-  the scope must do before returning.
+  it never writes directly and never joins a batch that was already committed. Nor can such a task
+  open a scope of its own: `withUnitOfWork` in it throws `operationNotAllow`, while the block runs
+  and after it ended alike. Await everything the scope must do before returning.
 - **Do not move a `save` out of the task tree either.** `Task.detached`, and code that does not
   run in the block's task tree (a NIO future callback, a `DispatchQueue` block, a timer), do not
   see the scope at all: ``UnitOfWork/current`` is `nil` there, so a `save` writes to the store at
@@ -138,8 +156,9 @@ scope has ended, which is why both are called with `try`.
   is not supported: when both tasks found the aggregate before either saved it, the second `save`
   throws `commitConflict`.
 
-There is no early `commit()` or `rollback()`, no way to write directly from inside a scope, and no
-query of what is staged (tests assert on the store). `withUnitOfWork` takes no other parameters.
+There is no early `commit()` or `rollback()`, no way to make the default `save` write directly
+while the scope is current (only code that does not see the scope, as above, writes directly), and
+no query of what is staged (tests assert on the store). `withUnitOfWork` takes no other parameters.
 
 ## How a unit of work ends
 
@@ -156,7 +175,8 @@ query of what is staged (tests assert on the store). `withUnitOfWork` takes no o
    `streamPurged` nothing was written. After any other commit error (a transport error, a server
    or client that cannot append several streams at once) the writes **may have landed**, for
    example when the response was lost after the server committed: read the streams before running
-   the block again.
+   the block again. A task cancelled while the commit runs is one of these: its error is thrown,
+   the writes may have landed, and no hook runs.
 5. The ``UnitOfWork/onCommitted(_:)`` hooks run, outside the scope.
 
 The scope fails by itself when a store call made by ``EventSourcingRepository``'s default `find`,

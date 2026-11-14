@@ -303,7 +303,8 @@ removes the payload from the stream file.
 Some operations change two aggregates that must succeed or fail together. Call the usecases inside
 one `withUnitOfWork` block: every `repository.save` in it is collected, and when the block returns
 they are written together; when the block throws, nothing is written. Usecases, repositories and
-the composition root stay as they are, and a usecase does not know it runs inside a unit of work.
+the composition root stay as they are; only a usecase that publishes right after `save` needs to
+check `UnitOfWork.current` (see the rules below).
 
 ```swift
 func createQuotingCaseWithContact(_ input: Input) async throws -> Output {
@@ -352,16 +353,18 @@ Rules inside the block:
 - **No nesting.** `withUnitOfWork` inside a unit of work throws `operationNotAllow`. A usecase does
   not call `withUnitOfWork`; it belongs to the handler. When two handlers share logic, extract a
   function that does not open a scope and let each handler wrap it.
-- **Do not `do/catch` a usecase's error inside the block.** To return a normal failure output,
-  call `try work.fail(error)` and return; `withUnitOfWork` then commits nothing and throws
-  `operationNotAllow` with the cause in `userInfos["cause"]`. Store errors from
+- **Do not `do/catch` a usecase's error inside the block.** Let it leave the block, or, when the
+  block must go on, call `try work.fail(error)`; `withUnitOfWork` then commits nothing and throws
+  `operationNotAllow` with the cause in `userInfos["cause"]`, never returning what the block
+  returned. Turn the error into a failure output outside `withUnitOfWork`:
+  `(error as? DDDError)?.userInfos["cause"] as? any Error ?? error`. Store errors from
   `EventSourcingRepository`'s default `find`, `save` and `purge` (also when `delete` calls them),
   and the refusal of a store that cannot take part, fail the unit of work automatically, even
   when caught. The `aggregateNotFound` that `delete` throws, `markDelete` errors, and the errors
   of a custom repository that overrides these methods do not.
 - **Do not move a `save` into `Task { … }`.** The task inherits the scope; a `save` it reaches
-  after the block ended throws `operationNotAllow` instead of writing. Await everything before
-  returning.
+  after the block ended throws `operationNotAllow` instead of writing, and a `withUnitOfWork` in it
+  throws too. Await everything before returning.
 - **Do not move a `save` out of the task tree either.** `Task.detached`, and code that does not
   run in the block's task tree (a NIO future callback, a `DispatchQueue` block, a timer), do not
   see the scope at all (`UnitOfWork.current` is `nil`): a `save` there writes to the store at once,
