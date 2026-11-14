@@ -117,6 +117,31 @@ struct PersistentEventStoreUnitOfWorkTests {
         await store.close()
     }
 
+    @Test("save without new events inside a scope still throws operationNotAllow and leaves the stream file unchanged")
+    func saveWithNoEventsInsideScopeThrowsForPersistentEventStore() async throws {
+        let directory = makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try NoteStore.open(directory: directory, eventMapper: NoteMapper())
+        let repository = NoteRepository(store: store)
+        let note = try Note(id: "n-1", text: "first")
+        try await repository.save(aggregateRoot: note)
+        #expect(note.events.isEmpty)
+        let file = try streamFile(in: directory, id: "n-1")
+        let before = try Data(contentsOf: file)
+
+        let error = await dddError {
+            try await withUnitOfWork { _ in
+                try await repository.save(aggregateRoot: note)
+            }
+        }
+
+        #expect(error?.code == .aggregateOperationNotAllowed)
+        #expect(error?.userInfos["operation"] as? String == "save")
+        #expect(error?.userInfos["reason"] as? String == "\(NoteStore.self) cannot take part in a unit of work")
+        #expect(try Data(contentsOf: file) == before)
+        await store.close()
+    }
+
     @Test("purge inside a scope throws operationNotAllow, fails the scope and leaves the stream file unchanged")
     func purgeInsideScopeThrowsForPersistentEventStore() async throws {
         let directory = makeTemporaryDirectory()
