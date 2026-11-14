@@ -163,7 +163,7 @@ no query of what is staged (tests assert on the store). `withUnitOfWork` takes n
 ## How a unit of work ends
 
 1. The block returns or throws, and the scope closes at once. From then on
-   ``UnitOfWork/backend(_:identity:make:)``, ``UnitOfWork/fail(_:)`` and
+   ``UnitOfWork/withBackend(_:identity:make:_:)``, ``UnitOfWork/fail(_:)`` and
    ``UnitOfWork/onCommitted(_:)`` throw `operationNotAllow`, also from a `Task` started in the
    block, which still sees the scope as ``UnitOfWork/current``.
 2. The block threw (`CancellationError` included): nothing is committed, no hook runs, and the
@@ -215,11 +215,13 @@ own task outside any scope.
 ## Write a participating store
 
 A store collects its writes in one ``UnitOfWorkBackend`` per scope and marks itself with
-``UnitOfWorkParticipant``. Inside a scope, each write asks ``UnitOfWork/current`` for the backend
-with ``UnitOfWork/backend(_:identity:make:)``, passing what the backend writes to as `identity`.
-The scope keeps exactly one backend: a second type or identity throws `operationNotAllow`.
-Looking up, creating (`make`) and storing happen under one lock, so concurrent first writes share
-one backend; `make` must not call back into the scope. ``UnitOfWorkBackend/commit()`` is called at
+``UnitOfWorkParticipant``. Inside a scope, each write stages itself in the `body` of
+``UnitOfWork/withBackend(_:identity:make:_:)`` on ``UnitOfWork/current``, passing what the backend
+writes to as `identity`. The scope keeps exactly one backend: a second type or identity throws
+`operationNotAllow`. Looking up, creating (`make`), storing and `body` run under the lock the end of
+the scope takes, so concurrent first writes share one backend, and a write either lands before the
+scope closes or is refused; `make` and `body` must not call back into the scope. Do not keep the
+backend for writes after `body` returns. ``UnitOfWorkBackend/commit()`` is called at
 most once, after a block that returned on a scope that was not failed; otherwise the backend is
 dropped with what it collected.
 

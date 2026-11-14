@@ -185,7 +185,7 @@ public protocol UnitOfWorkBackend: AnyObject, Sendable {
 public protocol UnitOfWorkParticipant {}
 ```
 
-`body` 不是 `@Sendable`，與 `EventMetadataContext.withValue` 一致。`UnitOfWork` 的內部狀態（backend 參考、failed 旗標與原因、hook 佇列）用 `Mutex` 保護；hook 必須 `@Sendable`，因為它跨越 `Mutex` 存放。`backend(_:identity:make:)` 的「查、建、存」含 `make()` 在同一次 `withLock` 內完成，兩個 child task 同時第一次 `save` 只會建一個 backend。
+`body` 不是 `@Sendable`，與 `EventMetadataContext.withValue` 一致。`UnitOfWork` 的內部狀態（backend 參考、failed 旗標與原因、hook 佇列）用 `Mutex` 保護；hook 必須 `@Sendable`，因為它跨越 `Mutex` 存放。`withBackend(_:identity:make:_:)` 的「查、建、存」含 `make()` 在同一次 `withLock` 內完成，兩個 child task 同時第一次 `save` 只會建一個 backend。
 
 `EventSourcingRepository` 的預設實作加兩件事：
 - 守門：`save` 與 `purge` 在 `UnitOfWork.current != nil` 且 `Store` 不是 `UnitOfWorkParticipant` 時丟 `DDDError.operationNotAllow(operation: "save", reason: "<Store> cannot take part in a unit of work")`。`find` 不守門（讀沒有副作用）。這讓 `InMemoryEventStore`、`PersistentEventStore` 在作用域內不會靜默直接寫。
@@ -193,7 +193,7 @@ public protocol UnitOfWorkParticipant {}
 
 作用域結束（執行順序）：
 - `$current.withValue` 只包 `body`。body 返回或丟錯後 TaskLocal 立刻解開，作用域進入**已關閉**狀態；之後的 failed 判定、commit、hook 都在 TaskLocal 之外執行，hook 內 `UnitOfWork.current == nil`。
-- 已關閉的作用域：`backend(_:identity:make:)`、`fail(_:)`、`onCommitted(_:)` 一律丟 `DDDError.operationNotAllow(operation: "<該方法>", reason: "unit of work <id> already ended")`。這擋住區塊內用 `Task { }` 逃逸、在區塊結束後才 `save` 的情況：那個 task 的 `UnitOfWork.current` 仍指向這個已關閉的作用域，不會靜默直寫、也不會進一個已 commit 的 batch。`current` 不因關閉而變 nil，否則逃逸的 save 會直接落地。
+- 已關閉的作用域：`withBackend(_:identity:make:_:)`、`fail(_:)`、`onCommitted(_:)` 一律丟 `DDDError.operationNotAllow(operation: "<該方法>", reason: "unit of work <id> already ended")`。這擋住區塊內用 `Task { }` 逃逸、在區塊結束後才 `save` 的情況：那個 task 的 `UnitOfWork.current` 仍指向這個已關閉的作用域，不會靜默直寫、也不會進一個已 commit 的 batch。`current` 不因關閉而變 nil，否則逃逸的 save 會直接落地。
 - `body` 正常返回且 `isFailed == false` → 若有 backend 就 `commit()`。commit 丟 `commitConflict` / `streamPurged` → 重拋，backend 保證什麼都沒寫；commit 丟其他錯（transport、`atomicAppendUnsupported`、server 不支援 AppendRecords）→ 重拋，**不保證**沒寫（回應在 server commit 後遺失、client 內建的 node-failure 重送都可能已落地），文件寫明「重跑整個區塊前先讀取」。commit 成功（含沒有 backend）→ 依序執行 `onCommitted` 登記的 hook，再返回 body 的值。
 - `body` 正常返回但 `isFailed == true` → 不 commit、不跑 hook，丟 `DDDError.operationNotAllow(operation: "commit", reason: "unit of work failed")`，附第一個原因在 `userInfos["cause"]`。
 - `body` 丟錯（含 `CancellationError`）→ 不 commit、不跑 hook，重拋。
@@ -366,6 +366,8 @@ DDDKit 不再需要自己的 spike（實作計畫 Task 2 取消）；§7 的 liv
 更正（2026-11-14）：使用者決定 unit of work 隨 swift-kurrentdb 3.0 出版，floor 由 2.6.1 改為 3.0.0（2026-11-14 出版）。本設計用到的 `multiStreams.appendRecords`、`EventRecord(eventData:)` 與 v1 單串流 append 在 3.0 行為不變；`EventRecord(eventData:)` 的錯誤改為 `KurrentError.underlyingError`，但 save 時的檢查把任何錯誤都轉成 `operationNotAllow`，payload 則在檢查前先自行編碼，仍丟 `EncodingError`。DDDKit 這邊的調整：`encodeForKurrent` 改把 metadata 位元組包成 `CustomMetadata(data:format: .bytes)`，寫進伺服器的位元組不變；讀取改成延遲讀取，任務被取消時改丟 `CancellationError`（MIGRATION BC7）；3.0 自己的 `CustomMetadata` 讓同時 import `KurrentDB` 的檔案要寫 `EventSourcing.CustomMetadata`（MIGRATION SB4）。
 
 更正（2026-11-14，對抗式審查第 1 輪）：(1) 從作用域內啟動的 `Task` 呼叫 `withUnitOfWork` 一律拒絕，作用域結束前後都一樣，結束後的 reason 改成 `unit of work <id> already ended; …`，行為不隨時序改變。(2) `LiveEventStoreClient` 在 `readStream` 與 persistent subscription 的 delivery 把只含 `$schema.*` 的 custom metadata 讀成空 bytes，nil metadata 經任何路徑讀回都是空的（原本多串流 commit 後讀回只有 `$schema.*` 的物件，全 optional 的 metadata 型別會解出非 nil 的空 struct）。(3) live 實測：使用者以 `$` 開頭的 metadata key（含 `$schema.` 前綴）在多串流 commit 後原樣保留，不需在 save 時拒絕；超過 2^53 的整數四捨五入成最近的 Double。
+
+更正（2026-11-14，對抗式審查第 2 輪）：(1) `withBackend(_:identity:make:_:)` 改為 `withBackend(_:identity:make:_:)`：staging 在 `body` 裡、在作用域的鎖內執行，和 `close()` 共用同一把鎖。原本取得 backend 與 `stage` 之間沒有共同的鎖，逃逸的 Task 可能在作用域關閉後把事件 stage 進已被丟棄的 backend（save 回傳成功卻永不寫入），或擠進已開始的 commit。(2) 只有 key 剛好是 `$schema.name` 與 `$schema.format` 的 metadata 才讀成空的，判斷前先在位元組中找 `$schema.name`，沒有就不解析 JSON。(3) 編碼為 `{}` 的 metadata 在多串流 commit 後讀回 nil，其他路徑讀回欄位全為 nil 的值。`MigrationUtility` 直接讀 `RecordedEvent`，仍看得到伺服器的兩個 key。
 
 ## 10. 留給實作者
 
