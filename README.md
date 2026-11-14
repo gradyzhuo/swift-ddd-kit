@@ -432,7 +432,9 @@ func apply(readModel: inout OrderActivity, events: [any DomainEvent]) {
 single `operatorId` field — it is the default `Metadata` type that
 generator-produced events reference (`typealias Metadata = CustomMetadata`).
 Most applications replace it with their own `EventMetadata`-conforming struct
-(like `AuditMetadata` above).
+(like `AuditMetadata` above). swift-kurrentdb 3.0 has a `CustomMetadata` type of
+its own, so in a file that also imports `KurrentDB`, write
+`EventSourcing.CustomMetadata`.
 
 **Limits and gotchas:**
 - `Task.detached` does NOT inherit ambient context. Capture and re-apply if you
