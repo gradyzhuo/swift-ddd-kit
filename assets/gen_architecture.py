@@ -149,6 +149,7 @@ layer_box(RX, row_y['ia'], CW, ROW_H['ia'], 'ia', 'INTERFACE ADAPTERS',
 # ── USE CASES ────────────────────────────────────────────────────────
 layer_box(LX, row_y['uc'], CW, ROW_H['uc'], 'uc', 'USE CASES',
           ['Usecase',
+           'withUnitOfWork  (UnitOfWork)',
            'EventSourcingRepository',
            'EventStore  (Port)',
            'EventMetadataContext'])
