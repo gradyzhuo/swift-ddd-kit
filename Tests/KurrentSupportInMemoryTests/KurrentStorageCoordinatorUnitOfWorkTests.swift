@@ -776,6 +776,22 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         #expect(try await quotes.find(byId: "q-1")?.lines == ["desk", "chair"])
     }
 
+    // MARK: reads outside a scope
+
+    @Test("fetchEvents(byId:afterRevision:) at or beyond Int64.max returns no events instead of trapping, and nil for a stream that does not exist")
+    func fetchAfterMaxRevisionDoesNotTrap() async throws {
+        let store = InMemoryEventStoreClient()
+        let quotes = quotingRepository(store)
+        try await saveNewQuote(id: "q-1", to: quotes)
+
+        for revision in [UInt64(Int64.max), UInt64(Int64.max) + 1, .max] {
+            let after = try #require(try await quotes.store.fetchEvents(byId: "q-1", afterRevision: revision))
+            #expect(after.events.isEmpty)
+            #expect(after.latestRevision == revision)
+            #expect(try await quotes.store.fetchEvents(byId: "q-2", afterRevision: revision) == nil)
+        }
+    }
+
     @Test("the mapper gets each staged event as a record carrying the stream name, the event's id and its predicted revision")
     func stagedRecordsCarryStreamNameIdAndRevision() async throws {
         let store = InMemoryEventStoreClient()
