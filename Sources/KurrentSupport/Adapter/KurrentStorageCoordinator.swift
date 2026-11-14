@@ -193,7 +193,12 @@ public final class KurrentStorageCoordinator<
     public func fetchEvents(byId id: String, afterRevision revision: UInt64) async throws
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         let streamName = StreamNaming.getStreamName(id: id)
-        let (serverRecords, staged) = try await serverAndStagedRecords(of: streamName, id: id, from: .specified(revision + 1))
+        // KurrentDB revisions are Int64: reading from beyond Int64.max fails on the server, and
+        // `revision + 1` traps at UInt64.max. No record can follow such a revision, so read
+        // from Int64.max instead: an empty window for a stream that exists, `streamNotFound`
+        // for one that does not.
+        let cursor: RevisionCursor = .specified(min(revision, UInt64(Int64.max) - 1) + 1)
+        let (serverRecords, staged) = try await serverAndStagedRecords(of: streamName, id: id, from: cursor)
         guard serverRecords != nil || !staged.isEmpty else {
             return nil
         }
