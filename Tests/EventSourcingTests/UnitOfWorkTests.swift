@@ -171,7 +171,8 @@ struct UnitOfWorkTests {
         try await withUnitOfWork { outer in
             try register(backend, in: outer)
             let error = await captureOperationNotAllow("withUnitOfWork") {
-                try await withUnitOfWork { _ in
+                // `-> Void`: Swift 6.1 and 6.2 infer R from a lone `Issue.record` (it returns `Issue`).
+                try await withUnitOfWork { _ -> Void in
                     Issue.record("the nested body must not run")
                 }
             }
