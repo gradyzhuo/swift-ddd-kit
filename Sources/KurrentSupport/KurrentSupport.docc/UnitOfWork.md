@@ -45,7 +45,14 @@ written to another store and are not part of the unit of work, so such a project
 events that a failed commit never writes. Run projections on the ``KurrentProjection``
 subscription runners: they run in their own task, outside any scope.
 
-A read never creates, binds or fails on the scope's backend, so a usecase may read through a
+When another writer moved the stream past the revision a save in the scope expected, the staged
+events and the server's would repeat revisions. A read through the scope's client then throws
+`DDDError.commitConflict` (`expected` is the revision the save expected, `nil` for no stream;
+`actual` is the server's tail) instead of replaying both, and the scope fails, as the commit
+would. A read through `fetchEvents(byId:afterRevision:)` whose window holds no server records
+cannot see this; the commit still reports it.
+
+Apart from that, a read never creates, binds or fails on the scope's backend, so a usecase may read through a
 repository over another `KurrentDBClient`; only writes bind the scope to a client. Such a read
 sees only what the server has, not the events the scope staged through its own client. A usecase
 that reads what an earlier usecase in the same block saved needs a repository over the same

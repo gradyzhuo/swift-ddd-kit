@@ -622,7 +622,9 @@
             also when called directly. A direct <code>store.purge</code> on <code>InMemoryEventStore</code> or
             <code>PersistentEventStore</code> is not refused: it purges at once and permanently, even when the block then throws.</li>
         <li>Reads through a coordinator whose client has the scope's identity see the events the scope has staged, after the
-            server's (read-your-writes). A read never creates, binds or fails on the scope's backend, so a usecase may read through a
+            server's (read-your-writes). When another writer moved the stream past the revision a save in the scope expected,
+            such a read throws <code>commitConflict</code> and fails the scope, instead of replaying overlapping revisions.
+            Otherwise a read never creates, binds or fails on the scope's backend, so a usecase may read through a
             repository over another <code>KurrentDBClient</code>, but that read sees only what the server has (a read error through
             it still fails the unit of work, <span class="chgid">BC3</span>). A usecase that reads what an earlier usecase in the
             same block saved needs a repository over the same <code>KurrentDBClient</code> instance.</li>
