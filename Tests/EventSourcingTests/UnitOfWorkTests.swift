@@ -183,6 +183,27 @@ struct UnitOfWorkTests {
         #expect(backend.commitCount == 1)
     }
 
+    @Test("A Task started in the block that calls withUnitOfWork after the block ended is refused, saying the scope ended; its body never runs")
+    func escapedTaskCannotOpenScopeAfterEnd() async throws {
+        let blockEnded = AsyncStream<Void>.makeStream()
+        let bodyRuns = Recorder<Int>()
+        var outerId: UUID?
+        let escaped = try await withUnitOfWork { work in
+            outerId = work.id
+            return Task {
+                for await _ in blockEnded.stream { break }
+                return await captureOperationNotAllow("withUnitOfWork") {
+                    try await withUnitOfWork { _ -> Void in bodyRuns.append(1) }
+                }
+            }
+        }
+        blockEnded.continuation.yield()
+        let error = await escaped.value
+        let id = try #require(outerId)
+        #expect(reason(of: error) == "unit of work \(id) already ended; a Task started inside it cannot open another")
+        #expect(bodyRuns.all.isEmpty)
+    }
+
     @Test("A body that throws is rethrown and nothing is committed")
     func bodyThrowDoesNotCommit() async throws {
         let backend = RecordingBackend()
