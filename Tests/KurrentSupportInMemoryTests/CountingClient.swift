@@ -7,14 +7,24 @@ import Synchronization
 /// Forwards every call to a wrapped `InMemoryEventStoreClient`, counting `append` and
 /// `appendAtomically` calls and recording the streams each `appendAtomically` call receives.
 /// Optionally adds `revisionOffset` to the revisions both append methods return, withholds
-/// one stream's revision, makes both throw `errorToThrow` without forwarding, or parks both
-/// on `gate` until the test lets them go on.
+/// one stream's revision, makes both throw `errorToThrow` without forwarding, parks both
+/// on `gate` until the test lets them go on, or makes both check for cancellation.
 final class CountingClient: EventStoreClient {
+    /// Where an append checks for cancellation, as a client whose call is cancelled does.
+    enum CancellationCheck: Sendable, CaseIterable {
+        /// Before forwarding: a cancelled call writes nothing.
+        case beforeWrite
+        /// After forwarding: the write lands, and the call still throws `CancellationError`,
+        /// like a server that committed before the cancelled client got its answer.
+        case afterWrite
+    }
+
     let wrapped: InMemoryEventStoreClient
     private let revisionOffset: UInt64
     private let withheldRevisionStream: String?
     private let errorToThrow: (any Error)?
     private let gate: AsyncStream<CheckedContinuation<Void, Never>>.Continuation?
+    private let cancellationCheck: CancellationCheck?
     private let calls = Mutex<[String: Int]>([:])
     private let atomicBatchStreams = Mutex<[[String]]>([])
 
@@ -25,18 +35,27 @@ final class CountingClient: EventStoreClient {
     ///   yields a continuation to `gate` and waits until the test resumes it, so the test
     ///   knows the call is in flight and controls when it goes on. Once the test finishes
     ///   `gate`, later calls go straight on.
+    /// - Parameter cancellationCheck: When set, each `append` / `appendAtomically` call, once
+    ///   past `gate`, throws `CancellationError` if its task is cancelled, before or after
+    ///   forwarding.
     init(
         wrapping wrapped: InMemoryEventStoreClient,
         revisionOffset: UInt64 = 0,
         withholdingRevisionOf withheldRevisionStream: String? = nil,
         errorToThrow: (any Error)? = nil,
-        gate: AsyncStream<CheckedContinuation<Void, Never>>.Continuation? = nil
+        gate: AsyncStream<CheckedContinuation<Void, Never>>.Continuation? = nil,
+        cancellationCheck: CancellationCheck? = nil
     ) {
         self.wrapped = wrapped
         self.revisionOffset = revisionOffset
         self.withheldRevisionStream = withheldRevisionStream
         self.errorToThrow = errorToThrow
         self.gate = gate
+        self.cancellationCheck = cancellationCheck
+    }
+
+    private func checkCancellation(_ point: CancellationCheck) throws {
+        if cancellationCheck == point { try Task.checkCancellation() }
     }
 
     /// How many times `append(events:toStream:category:expectedRevision:)` was called.
@@ -68,7 +87,9 @@ final class CountingClient: EventStoreClient {
         record("append")
         await passGate()
         if let errorToThrow { throw errorToThrow }
+        try checkCancellation(.beforeWrite)
         let revision = try await wrapped.append(events: events, toStream: name, category: category, expectedRevision: expectedRevision)
+        try checkCancellation(.afterWrite)
         guard name != withheldRevisionStream else { return nil }
         return revision.map { $0 + revisionOffset }
     }
@@ -78,7 +99,9 @@ final class CountingClient: EventStoreClient {
         atomicBatchStreams.withLock { $0.append(batches.map(\.stream)) }
         await passGate()
         if let errorToThrow { throw errorToThrow }
+        try checkCancellation(.beforeWrite)
         let results = try await wrapped.appendAtomically(batches)
+        try checkCancellation(.afterWrite)
         return results
             .filter { $0.stream != withheldRevisionStream }
             .map { StreamBatchResult(stream: $0.stream, revision: $0.revision + revisionOffset) }
