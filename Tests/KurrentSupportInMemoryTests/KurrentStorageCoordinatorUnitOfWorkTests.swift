@@ -338,6 +338,16 @@ private final class RunCount: Sendable {
 private let quoteStream = "Quoting-q-1"
 private let billStream = "Billing-b-1"
 
+/// Adds `line` to the stored quote `q-1` from a detached task, which does not see the
+/// current unit of work, so the save writes at once: another writer, as far as the scope knows.
+private func addLineOutsideScope(_ line: String, to repository: QuotingRepository<QuotingCoordinator>) async throws {
+    try await Task.detached {
+        let quote = try #require(try await repository.find(byId: "q-1"))
+        try quote.addLine(line)
+        try await repository.save(aggregateRoot: quote)
+    }.value
+}
+
 /// The warning a read logs when the server has no `stream` and nothing is staged for it.
 private func streamNotFoundWarning(_ stream: String) -> LogRecorder.Entry {
     .init(level: .warning, message: "Skip an error happened, stream not found: \(stream)")
@@ -692,6 +702,78 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
             #expect(afterFreshFirst.events.map { $0.id } == [freshIds[1]])
             #expect(afterFreshFirst.latestRevision == 2)
         }
+    }
+
+    @Test("a find after a save whose expected revision the server has since passed throws commitConflict instead of replaying overlapping revisions, and the scope commits nothing")
+    func findAfterStaleSaveThrowsCommitConflict() async throws {
+        let store = InMemoryEventStoreClient()
+        let client = CountingClient(wrapping: store)
+        let quotes = quotingRepository(client)
+        try await saveNewQuote(id: "q-1", to: quotes)
+
+        let error = await thrownError {
+            try await withUnitOfWork { _ in
+                let found = try #require(try await quotes.find(byId: "q-1"))
+                #expect(found.version == 0)
+                try await addLineOutsideScope("chair", to: quotes)   // the server is at 1 now
+                try found.addLine("lamp")
+                try await quotes.save(aggregateRoot: found)          // staged as revision 1, expecting 0
+
+                let thrown = await thrownError { _ = try await quotes.find(byId: "q-1") }
+                #expect((thrown as? DDDError)?.commitConflict == .init(id: "q-1", expected: 0, actual: 1), "got \(String(describing: thrown))")
+                let afterFirst = await thrownError { _ = try await quotes.store.fetchEvents(byId: "q-1", afterRevision: 0) }
+                #expect((afterFirst as? DDDError)?.commitConflict == .init(id: "q-1", expected: 0, actual: 1), "got \(String(describing: afterFirst))")
+            }
+        }
+
+        let cause = failedScopeCause(error)
+        #expect((cause as? DDDError)?.commitConflict == .init(id: "q-1", expected: 0, actual: 1), "got \(String(describing: cause))")
+        #expect(client.appendCount == 2)   // the first save and the writer outside the scope
+        #expect(try await quotes.find(byId: "q-1")?.lines == ["desk", "chair"])
+    }
+
+    @Test("a find after a save that expects no stream, once someone else created it, throws commitConflict with expected nil")
+    func findAfterCreateOfExistingStreamThrowsCommitConflict() async throws {
+        let store = InMemoryEventStoreClient()
+        let quotes = quotingRepository(store)
+
+        let error = await thrownError {
+            try await withUnitOfWork { _ in
+                try await saveNewQuote(id: "q-1", to: quotes)                   // staged as revision 0, expecting no stream
+                try await Task.detached { try await saveNewQuote(id: "q-1", to: quotes) }.value   // the server has revision 0
+
+                let thrown = await thrownError { _ = try await quotes.find(byId: "q-1") }
+                #expect((thrown as? DDDError)?.commitConflict == .init(id: "q-1", expected: nil, actual: 0), "got \(String(describing: thrown))")
+            }
+        }
+
+        let cause = failedScopeCause(error)
+        #expect((cause as? DDDError)?.commitConflict == .init(id: "q-1", expected: nil, actual: 0), "got \(String(describing: cause))")
+        #expect(try await storedRevisions(store, quoteStream) == [0])
+    }
+
+    @Test("fetchEvents(byId:afterRevision:) past the server's tail does not see a stale save's overlap; the commit reports it")
+    func fetchAfterServerTailLeavesStaleSaveToTheCommit() async throws {
+        let store = InMemoryEventStoreClient()
+        let quotes = quotingRepository(store)
+        try await saveNewQuote(id: "q-1", to: quotes)
+
+        let error = await thrownError {
+            try await withUnitOfWork { _ in
+                let found = try #require(try await quotes.find(byId: "q-1"))
+                try await addLineOutsideScope("chair", to: quotes)
+                try found.addLine("lamp")
+                try await quotes.save(aggregateRoot: found)
+
+                // The server's records after revision 1 are none, so the overlap is not visible here.
+                let after = try #require(try await quotes.store.fetchEvents(byId: "q-1", afterRevision: 1))
+                #expect(after.events.isEmpty)
+                #expect(after.latestRevision == 1)
+            }
+        }
+
+        #expect((error as? DDDError)?.commitConflict == .init(id: "q-1", expected: 0, actual: 1), "got \(String(describing: error))")
+        #expect(try await quotes.find(byId: "q-1")?.lines == ["desk", "chair"])
     }
 
     @Test("the mapper gets each staged event as a record carrying the stream name, the event's id and its predicted revision")
