@@ -161,13 +161,16 @@ public final class KurrentStorageCoordinator<
     /// last staged one, even when the mapper leaves that event out.
     ///
     /// - Throws: The client's read errors, inside `withUnitOfWork(_:)` as outside it; a
-    ///   missing or purged stream is not one. A read never fails because of the unit of work:
-    ///   when it commits through a client with another identity, or has ended, the read
-    ///   returns the server's events alone.
+    ///   missing or purged stream is not one. Inside `withUnitOfWork(_:)`,
+    ///   `DDDError.commitConflict` when the server's stream already holds a revision the
+    ///   unit of work staged events for: the save expected a revision the stream has since
+    ///   moved past, so its commit cannot succeed, and the events would overlap. A unit of
+    ///   work that commits through a client with another identity, or has ended, never
+    ///   makes a read fail: the read returns the server's events alone.
     public func fetchEvents(byId id: String) async throws
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         let streamName = StreamNaming.getStreamName(id: id)
-        let (serverRecords, staged) = try await serverAndStagedRecords(of: streamName, from: .start)
+        let (serverRecords, staged) = try await serverAndStagedRecords(of: streamName, id: id, from: .start)
 
         let eventWrappers = mapRecords((serverRecords ?? []) + staged)
 
@@ -184,11 +187,13 @@ public final class KurrentStorageCoordinator<
     /// in `fetchEvents(byId:)`, and `latestRevision` is the last staged one whenever the unit
     /// of work has staged events for the stream.
     ///
-    /// - Throws: The same errors as `fetchEvents(byId:)`.
+    /// - Throws: The same errors as `fetchEvents(byId:)`. The `commitConflict` check sees
+    ///   only the server's records after `revision`, which always include the stream's tail
+    ///   when there are any.
     public func fetchEvents(byId id: String, afterRevision revision: UInt64) async throws
         -> (events: [any DomainEvent], latestRevision: UInt64)? {
         let streamName = StreamNaming.getStreamName(id: id)
-        let (serverRecords, staged) = try await serverAndStagedRecords(of: streamName, from: .specified(revision + 1))
+        let (serverRecords, staged) = try await serverAndStagedRecords(of: streamName, id: id, from: .specified(revision + 1))
         guard serverRecords != nil || !staged.isEmpty else {
             return nil
         }
@@ -207,7 +212,14 @@ public final class KurrentStorageCoordinator<
     /// event appear twice. A stream the server does not have is logged as a warning only when
     /// nothing is staged for it either: with staged events it is a stream the unit of work is
     /// creating.
-    private func serverAndStagedRecords(of streamName: String, from cursor: RevisionCursor) async throws
+    ///
+    /// - Throws: `DDDError.commitConflict` for `id` when the server's last record is at or
+    ///   past the first staged revision. The staged batch expected the stream to end just
+    ///   before that revision (`.noStream` when it is 0); the stream has moved on, so the
+    ///   commit would throw the same conflict, and the two lists would repeat revisions.
+    ///   Only such an overlap counts: a stream that ends before the staged batch expects is
+    ///   left for the commit to report, as a read cannot tell it from a truncated stream.
+    private func serverAndStagedRecords(of streamName: String, id: String, from cursor: RevisionCursor) async throws
         -> (server: [any RecordedEventLike]?, staged: [any RecordedEventLike]) {
         let serverRecords: [any RecordedEventLike]?
         var streamNotFound = false
@@ -224,6 +236,13 @@ public final class KurrentStorageCoordinator<
             throw error
         }
         let staged = stagedRecords(of: streamName)
+        // The server's records run to the stream's end, so the last one is its tail even
+        // when `cursor` starts after the stream's start.
+        if let firstStaged = staged.first?.revision,
+           let serverTail = serverRecords?.last?.revision,
+           serverTail >= firstStaged {
+            throw DDDError.commitConflict(id: id, expected: firstStaged == 0 ? nil : firstStaged - 1, actual: serverTail)
+        }
         if streamNotFound, staged.isEmpty {
             logger.warning("Skip an error happened, stream not found: \(streamName)")
         }
