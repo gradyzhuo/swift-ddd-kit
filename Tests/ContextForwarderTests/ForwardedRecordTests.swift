@@ -78,7 +78,13 @@ struct ForwardedRecordTests {
 
     @Test("normalizedMetadata passes an empty object, other $-prefixed keys and non-object bytes through untouched")
     func otherShapesPassThrough() {
-        for text in ["{}", #"{"$correlationId":"c-1"}"#, #""$schema.name""#, "not json"] {
+        for text in [
+            "{}", #"{"$correlationId":"c-1"}"#, #""$schema.name""#, "not json",
+            #"{"$schema.note":"x"}"#,
+            #"{"$schema.name":"X"}"#,
+            #"{"$schema.note":"x","$schema.format":"Json"}"#,
+            #"{"$schema.name":"X","$schema.format":"Json","$schema.note":"x"}"#,
+        ] {
             let bytes = Data(text.utf8)
             #expect(ForwardedRecord.normalizedMetadata(bytes) == bytes, "\(text)")
         }

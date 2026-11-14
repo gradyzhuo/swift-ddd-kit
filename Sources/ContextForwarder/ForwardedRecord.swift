@@ -94,20 +94,22 @@ public struct ForwardedRecord: Sendable {
     /// when nothing was written. Collapse that to `nil` so callers never have
     /// to ask "nil or empty?".
     ///
-    /// A JSON object whose every key starts with `$schema.` is collapsed too:
-    /// KurrentDB adds `$schema.name` and `$schema.format` to the custom metadata
-    /// of every event an `AppendRecords` call wrote, also when the writer attached
-    /// none (DDDKit's `withUnitOfWork` writing two or more streams without an
-    /// `EventMetadataContext`). Bytes with any other key, an empty object and
-    /// anything that is not a JSON object pass through untouched.
+    /// A JSON object whose keys are exactly `$schema.name` and `$schema.format`
+    /// is collapsed too: KurrentDB adds those two to the custom metadata of every
+    /// event an `AppendRecords` call wrote, also when the writer attached none
+    /// (DDDKit's `withUnitOfWork` writing two or more streams without an
+    /// `EventMetadataContext`). Any other key set (`$schema.note` alone included),
+    /// an empty object and anything that is not a JSON object pass through
+    /// untouched. The same rule as KurrentSupport's `holdsOnlyServerSchemaKeys`,
+    /// which this module does not depend on; keep the two in step.
     ///
     /// Kept `static` and side-effect free so it is testable without
     /// constructing a `ReadEvent`.
     static func normalizedMetadata(_ bytes: Data) -> Data? {
         if bytes.isEmpty { return nil }
-        if let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
-           !object.isEmpty,
-           object.keys.allSatisfy({ $0.hasPrefix("$schema.") }) {
+        if bytes.range(of: Data("$schema.name".utf8)) != nil,
+           let object = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+           Set(object.keys) == ["$schema.name", "$schema.format"] {
             return nil
         }
         return bytes
