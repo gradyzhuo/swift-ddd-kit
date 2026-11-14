@@ -28,9 +28,9 @@ private struct SeqInput: CQRSProjectorInput, Sendable { let id: String }
 private struct SeqProjector: EventSourcingProjector, Sendable {
     typealias Input = SeqInput
     typealias ReadModelType = SeqModel
-    typealias Store = KurrentStorageCoordinator<SeqProjector, CustomMetadata>
+    typealias Store = KurrentStorageCoordinator<SeqProjector, EventSourcing.CustomMetadata>
     static var categoryRule: StreamCategoryRule { .custom("Seq") }
-    let store: KurrentStorageCoordinator<SeqProjector, CustomMetadata>
+    let store: KurrentStorageCoordinator<SeqProjector, EventSourcing.CustomMetadata>
     func apply(readModel: inout SeqModel, events: [any DomainEvent]) throws {}
     func buildReadModel(input: SeqInput) throws -> SeqModel? { SeqModel(id: input.id) }
 }
@@ -61,7 +61,7 @@ struct TransactionalSequentialDispatchTests {
 
     private func run(failA: Bool) async throws -> [String] {
         let client = InMemoryEventStoreClient()
-        let coordinator = KurrentStorageCoordinator<SeqProjector, CustomMetadata>(client: client, eventMapper: PlacedMapper())
+        let coordinator = KurrentStorageCoordinator<SeqProjector, EventSourcing.CustomMetadata>(client: client, eventMapper: PlacedMapper())
         _ = try await coordinator.append(events: [Placed(aggregateRootId: "1")], byId: "1", version: nil, metadata: nil)
 
         let log = Log()

@@ -44,10 +44,10 @@ private struct DemoEventMapper: EventTypeMapper {
 private struct DemoProjector: EventSourcingProjector, Sendable {
     typealias Input = DemoInput
     typealias ReadModelType = DemoModel
-    typealias Store = KurrentStorageCoordinator<DemoProjector, CustomMetadata>
+    typealias Store = KurrentStorageCoordinator<DemoProjector, EventSourcing.CustomMetadata>
 
     static var categoryRule: StreamCategoryRule { .custom("TxDemo") }
-    let store: KurrentStorageCoordinator<DemoProjector, CustomMetadata>
+    let store: KurrentStorageCoordinator<DemoProjector, EventSourcing.CustomMetadata>
     let throwOnApply: Bool
 
     func apply(readModel: inout DemoModel, events: [any DomainEvent]) throws {
@@ -109,7 +109,7 @@ struct KurrentProjectionTransactionalRunnerIntegrationTests {
 
                 let aggregateId = UUID().uuidString
                 let event = DemoEvent(aggregateRootId: aggregateId, customerId: "alice")
-                let coordinator = KurrentStorageCoordinator<DemoProjector, CustomMetadata>(client: kdb, eventMapper: DemoEventMapper())
+                let coordinator = KurrentStorageCoordinator<DemoProjector, EventSourcing.CustomMetadata>(client: kdb, eventMapper: DemoEventMapper())
                 _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, metadata: nil)
 
                 let projector = DemoProjector(store: coordinator, throwOnApply: false)
@@ -169,7 +169,7 @@ struct KurrentProjectionTransactionalRunnerIntegrationTests {
 
                 let aggregateId = UUID().uuidString
                 let event = DemoEvent(aggregateRootId: aggregateId, customerId: "bob")
-                let coordinator = KurrentStorageCoordinator<DemoProjector, CustomMetadata>(client: kdb, eventMapper: DemoEventMapper())
+                let coordinator = KurrentStorageCoordinator<DemoProjector, EventSourcing.CustomMetadata>(client: kdb, eventMapper: DemoEventMapper())
                 _ = try await coordinator.append(events: [event], byId: aggregateId, version: nil, metadata: nil)
 
                 // Projector that always throws inside apply — every retry should also fail.

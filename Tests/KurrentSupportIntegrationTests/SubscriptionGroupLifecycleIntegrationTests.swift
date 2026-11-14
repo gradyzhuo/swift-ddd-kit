@@ -37,9 +37,9 @@ private struct LifecycleInput: CQRSProjectorInput, Sendable { let id: String }
 private struct LifecycleProjector: EventSourcingProjector, Sendable {
     typealias Input = LifecycleInput
     typealias ReadModelType = LifecycleModel
-    typealias Store = KurrentStorageCoordinator<LifecycleProjector, CustomMetadata>
+    typealias Store = KurrentStorageCoordinator<LifecycleProjector, EventSourcing.CustomMetadata>
     static var categoryRule: StreamCategoryRule { .custom("Lifecycle") }
-    let store: KurrentStorageCoordinator<LifecycleProjector, CustomMetadata>
+    let store: KurrentStorageCoordinator<LifecycleProjector, EventSourcing.CustomMetadata>
     func apply(readModel: inout LifecycleModel, events: [any DomainEvent]) throws {
         for case let e as LifecycleEvent in events { readModel.label = e.label }
     }
@@ -126,7 +126,7 @@ struct SubscriptionGroupLifecycleIntegrationTests {
                 let stream = "$ce-Lifecycle"
                 let group = "lifecycle-rebuild-\(UUID().uuidString.prefix(8))"
                 let id = UUID().uuidString
-                let coordinator = KurrentStorageCoordinator<LifecycleProjector, CustomMetadata>(client: kdb, eventMapper: LifecycleMapper())
+                let coordinator = KurrentStorageCoordinator<LifecycleProjector, EventSourcing.CustomMetadata>(client: kdb, eventMapper: LifecycleMapper())
                 _ = try await coordinator.append(events: [LifecycleEvent(aggregateRootId: id, label: "v1")], byId: id, version: nil, metadata: nil)
 
                 func runOnce() async throws -> String? {

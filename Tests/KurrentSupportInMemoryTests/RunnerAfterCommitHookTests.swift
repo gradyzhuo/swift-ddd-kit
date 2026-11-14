@@ -42,9 +42,9 @@ private struct BookingInput: CQRSProjectorInput, Sendable { let id: String }
 private struct BookingProjector: EventSourcingProjector, Sendable {
     typealias Input = BookingInput
     typealias ReadModelType = BookingModel
-    typealias Store = KurrentStorageCoordinator<BookingProjector, CustomMetadata>
+    typealias Store = KurrentStorageCoordinator<BookingProjector, EventSourcing.CustomMetadata>
     static var categoryRule: StreamCategoryRule { .custom("Booking") }
-    let store: KurrentStorageCoordinator<BookingProjector, CustomMetadata>
+    let store: KurrentStorageCoordinator<BookingProjector, EventSourcing.CustomMetadata>
     func apply(readModel: inout BookingModel, events: [any DomainEvent]) throws {}
     func buildReadModel(input: BookingInput) throws -> BookingModel? { BookingModel(id: input.id) }
 }
@@ -105,7 +105,7 @@ private func waitUntil(
     Issue.record("condition not met within \(timeout)")
 }
 
-private func append(_ event: some DomainEvent, id: String, to coordinator: KurrentStorageCoordinator<BookingProjector, CustomMetadata>) async throws {
+private func append(_ event: some DomainEvent, id: String, to coordinator: KurrentStorageCoordinator<BookingProjector, EventSourcing.CustomMetadata>) async throws {
     _ = try await coordinator.append(events: [event], byId: id, version: nil, metadata: nil)
 }
 
@@ -124,7 +124,7 @@ struct TransactionalAfterCommitHookTests {
         let provider = RecordingProvider()
         let shared = SharedRows()
         let recorder = Recorder()
-        var coordinator: KurrentStorageCoordinator<BookingProjector, CustomMetadata> {
+        var coordinator: KurrentStorageCoordinator<BookingProjector, EventSourcing.CustomMetadata> {
             .init(client: client, eventMapper: HookMapper())
         }
         var projector: BookingProjector { BookingProjector(store: coordinator) }
@@ -298,7 +298,7 @@ struct PersistentAfterCommitHookTests {
     @Test("Fires after the store saves succeeded, listing the ids saved")
     func firesAfterSave() async throws {
         let client = InMemoryEventStoreClient()
-        let coordinator = KurrentStorageCoordinator<BookingProjector, CustomMetadata>(client: client, eventMapper: HookMapper())
+        let coordinator = KurrentStorageCoordinator<BookingProjector, EventSourcing.CustomMetadata>(client: client, eventMapper: HookMapper())
         try await append(Booked(aggregateRootId: "b-1"), id: "b-1", to: coordinator)
         let store = InMemoryReadModelStore<BookingModel>()
 
@@ -328,7 +328,7 @@ struct PersistentAfterCommitHookTests {
     @Test("Does not fire when a projector throws, nor for filtered / nil-input events")
     func notOnFailureFilterOrNilInput() async throws {
         let client = InMemoryEventStoreClient()
-        let coordinator = KurrentStorageCoordinator<BookingProjector, CustomMetadata>(client: client, eventMapper: HookMapper())
+        let coordinator = KurrentStorageCoordinator<BookingProjector, EventSourcing.CustomMetadata>(client: client, eventMapper: HookMapper())
         try await append(Ignored(aggregateRootId: "x"), id: "x", to: coordinator)
         try await append(Booked(aggregateRootId: "skip"), id: "skip", to: coordinator)
         try await append(Booked(aggregateRootId: "bad"), id: "bad", to: coordinator)
@@ -361,7 +361,7 @@ struct PersistentAfterCommitHookTests {
     @Test("A slow hook does not hold up the next delivery")
     func slowHookDoesNotBlock() async throws {
         let client = InMemoryEventStoreClient()
-        let coordinator = KurrentStorageCoordinator<BookingProjector, CustomMetadata>(client: client, eventMapper: HookMapper())
+        let coordinator = KurrentStorageCoordinator<BookingProjector, EventSourcing.CustomMetadata>(client: client, eventMapper: HookMapper())
         try await append(Booked(aggregateRootId: "b-1"), id: "b-1", to: coordinator)
         try await append(Booked(aggregateRootId: "b-2"), id: "b-2", to: coordinator)
 
@@ -416,7 +416,7 @@ struct AfterCommitHookRestartTests {
         probe: ConcurrencyProbe,
         run: @escaping @Sendable () async throws -> Void
     ) async throws {
-        let coordinator = KurrentStorageCoordinator<BookingProjector, CustomMetadata>(client: client, eventMapper: HookMapper())
+        let coordinator = KurrentStorageCoordinator<BookingProjector, EventSourcing.CustomMetadata>(client: client, eventMapper: HookMapper())
         try await append(Booked(aggregateRootId: "b-1"), id: "b-1", to: coordinator)
 
         let first = Task { try await run() }
@@ -449,7 +449,7 @@ struct AfterCommitHookRestartTests {
     func transactionalRestart() async throws {
         let client = InMemoryEventStoreClient()
         let probe = ConcurrencyProbe()
-        let coordinator = KurrentStorageCoordinator<BookingProjector, CustomMetadata>(client: client, eventMapper: HookMapper())
+        let coordinator = KurrentStorageCoordinator<BookingProjector, EventSourcing.CustomMetadata>(client: client, eventMapper: HookMapper())
         let shared = SharedRows()
         let runner = KurrentProjection.TransactionalSubscriptionRunner(
             client: client, transactionProvider: RecordingProvider(), stream: "$ce-Booking", groupName: "g"

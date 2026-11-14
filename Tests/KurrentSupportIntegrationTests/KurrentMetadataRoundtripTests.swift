@@ -9,11 +9,11 @@ import KurrentDB
 // MARK: - Fixtures
 
 private struct RoundtripEvent: DomainEvent {
-    typealias Metadata = CustomMetadata
+    typealias Metadata = EventSourcing.CustomMetadata
     var id: UUID = .init()
     var occurred: Date = .now
     var aggregateRootId: String
-    var metadata: CustomMetadata? = nil
+    var metadata: EventSourcing.CustomMetadata? = nil
     var note: String
 }
 
@@ -24,7 +24,7 @@ private struct RoundtripEventMapper: EventTypeMapper {
         guard var event = try eventData.decode(to: RoundtripEvent.self) else { return nil }
         if !eventData.customMetadata.isEmpty {
             let decoder = JSONDecoder()
-            event.metadata = try? decoder.decode(CustomMetadata.self, from: eventData.customMetadata)
+            event.metadata = try? decoder.decode(EventSourcing.CustomMetadata.self, from: eventData.customMetadata)
         }
         return event
     }
@@ -43,18 +43,18 @@ struct KurrentMetadataRoundtripTests {
     @Test("metadata written via ambient context is recoverable via event.metadata on read")
     func ambientToCustomMetadataRoundtrip() async throws {
         let kdb = KurrentDBClient.makeIntegrationTestClient()
-        let store = KurrentStorageCoordinator<RoundtripStream, CustomMetadata>(
+        let store = KurrentStorageCoordinator<RoundtripStream, EventSourcing.CustomMetadata>(
             client: kdb,
             eventMapper: RoundtripEventMapper()
         )
 
         let aggregateId = UUID().uuidString
-        let written = CustomMetadata(operatorId: "alice")
+        let written = EventSourcing.CustomMetadata(operatorId: "alice")
         let event = RoundtripEvent(aggregateRootId: aggregateId, note: "hello")
 
         // Write side — ambient + direct store.append
-        try await EventMetadataContext<CustomMetadata>.withValue(written) {
-            let metadata = EventMetadataContext<CustomMetadata>.current
+        try await EventMetadataContext<EventSourcing.CustomMetadata>.withValue(written) {
+            let metadata = EventMetadataContext<EventSourcing.CustomMetadata>.current
             _ = try await store.append(
                 events: [event],
                 byId: aggregateId,
@@ -79,7 +79,7 @@ struct KurrentMetadataRoundtripTests {
     @Test("no ambient context yields nil event.metadata on read")
     func noAmbientYieldsNilMetadata() async throws {
         let kdb = KurrentDBClient.makeIntegrationTestClient()
-        let store = KurrentStorageCoordinator<RoundtripStream, CustomMetadata>(
+        let store = KurrentStorageCoordinator<RoundtripStream, EventSourcing.CustomMetadata>(
             client: kdb,
             eventMapper: RoundtripEventMapper()
         )

@@ -80,7 +80,9 @@ let package = Package(
         // which KurrentStorageCoordinator maps to "purged" (EventStore contract §3.5).
         // 2.6.1: AppendRecords (multiStreams.appendRecords) carries customMetadata
         // instead of dropping it, which withUnitOfWork's multi-stream commit needs.
-        .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "2.6.1"),
+        // 3.0.0: the release swift-ddd-kit 1.5 ships on; reads are lazy, EventData takes a
+        // typed CustomMetadata (see MIGRATION.md, 1.5.0 SB3, SB4 and BC7).
+        .package(url: "https://github.com/gradyzhuo/swift-kurrentdb.git", from: "3.0.0"),
         .package(url: "https://github.com/swift-server/async-http-client.git", from: "1.19.0"),
         // Floor matches async-http-client's own declared floor (2.81.0); already
         // resolved to 2.97.0 transitively, so this adds no new version constraint.
