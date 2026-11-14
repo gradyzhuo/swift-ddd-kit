@@ -31,20 +31,25 @@ private enum _UnitOfWorkStorage {
 ///    written. After any other commit error (transport, `atomicAppendUnsupported`, a
 ///    server without AppendRecords) the writes may have landed, for example when the
 ///    response was lost after the server committed: read the streams before running
-///    the block again.
+///    the block again. A task cancelled while the commit runs is one of these.
 /// 5. The ``UnitOfWork/onCommitted(_:)`` hooks run in registration order, each
 ///    awaited, with ``UnitOfWork/current`` `nil`. A hook error stops the later hooks
 ///    and is rethrown, but the commit has already happened.
 ///
 /// Scopes do not nest: called inside a scope, this throws
 /// `DDDError.operationNotAllow(operation: "withUnitOfWork", ...)` without running
-/// `body` and leaves the outer scope untouched.
+/// `body` and leaves the outer scope untouched. A `Task` started inside a scope stays
+/// in it after it ended, so it cannot open a scope of its own either; the reason then
+/// says the scope already ended. Whether such a task runs before or after the end of
+/// the block, it is refused the same way.
 @discardableResult
 public func withUnitOfWork<R>(_ body: (UnitOfWork) async throws -> R) async throws -> R {
     if let current = UnitOfWork.current {
         throw DDDError.operationNotAllow(
             operation: "withUnitOfWork",
-            reason: "already inside unit of work \(current.id)"
+            reason: current.isClosed
+                ? "unit of work \(current.id) already ended; a Task started inside it cannot open another"
+                : "already inside unit of work \(current.id)"
         )
     }
     let work = UnitOfWork()
@@ -97,6 +102,11 @@ public final class UnitOfWork: Sendable {
     /// True once ``fail(_:)`` was called, by the caller or by the framework.
     public var isFailed: Bool {
         state.withLock { $0.failure != nil }
+    }
+
+    /// True once the block returned or threw.
+    fileprivate var isClosed: Bool {
+        state.withLock { $0.closed }
     }
 
     /// The first cause passed to ``fail(_:)``.
