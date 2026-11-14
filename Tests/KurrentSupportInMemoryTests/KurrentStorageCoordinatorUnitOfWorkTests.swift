@@ -1456,11 +1456,12 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
         #expect(try await storedRevisions(store, billStream) == [0])
     }
 
-    @Test("one stream: resending the same event ids in a second scope returns the original revision and writes nothing twice")
+    @Test("one stream: resending the same event ids in a second scope commits without error, the server returns the original revision, and nothing is written twice")
     func singleStreamResendInScopeIsIdempotent() async throws {
         let store = InMemoryEventStoreClient()
         let client = CountingClient(wrapping: store)
-        let coordinator = quotingRepository(client).store
+        let recorder = LogRecorder()
+        let coordinator = QuotingCoordinator(client: client, eventMapper: QuotingEventMapper(), logger: recorder.logger)
         let opened = QuoteOpened(aggregateRootId: "q-1", line: "desk")
 
         for _ in 0..<2 {
@@ -1472,6 +1473,9 @@ struct KurrentStorageCoordinatorUnitOfWorkTests {
 
         #expect(client.appendCount == 2)
         #expect(client.appendAtomicallyCount == 0)
+        // The commit warns when the server returns another revision than predicted (0);
+        // no warning means the resend got the original revision 0 back.
+        #expect(recorder.warnings.isEmpty)
         #expect(try await storedRecords(store, quoteStream).map(\.id) == [opened.id])
     }
 

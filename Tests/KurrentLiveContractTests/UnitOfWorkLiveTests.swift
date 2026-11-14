@@ -643,6 +643,11 @@ private struct BigIntegerMetadata: EventMetadata, Equatable {
     let n: Int64
 }
 
+/// Metadata whose fields are all optional; with every one nil it encodes to `{}`.
+private struct OptionalOnlyMetadata: EventMetadata, Equatable {
+    var note: String?
+}
+
 /// Encodes `metadata` as `KurrentStorageCoordinator` does, writes one event to each of two
 /// new streams in one `appendAtomically`, and returns the streams' records as the seam
 /// reads them back.
@@ -682,6 +687,32 @@ struct LiveEventStoreClientAppendAtomicallyTests {
             for record in records {
                 #expect(try JSONDecoder().decode(DollarKeyMetadata.self, from: record.customMetadata) == metadata)
             }
+        }
+    }
+
+    @Test("metadata that encodes to {} reads back as {} after a one-stream append, and as no metadata after a commit of two streams")
+    func emptyObjectMetadataReadBack() async throws {
+        try await KurrentDBClient.withPooledIntegrationTestClient { client in
+            let live = LiveEventStoreClient(client: client)
+            let metadata = OptionalOnlyMetadata(note: nil)
+            #expect(try JSONEncoder().encode(metadata) == Data("{}".utf8))
+
+            let single = seamStream()
+            let opened = LiveQuoteOpened(aggregateRootId: single, line: "desk")
+            _ = try await live.append(
+                events: try encodeForKurrent(events: [opened], metadata: metadata).events,
+                toStream: single,
+                category: "UowSeam",
+                expectedRevision: .noStream
+            )
+            let singleRecords = try await storedRecords(live, single)
+            #expect(singleRecords.map(\.customMetadata) == [Data("{}".utf8)])
+            #expect(try JSONDecoder().decode(OptionalOnlyMetadata.self, from: singleRecords[0].customMetadata) == metadata)
+
+            // Stored as only the server's two keys, which LiveEventStoreClient reads as empty.
+            let atomicRecords = try await atomicRoundTrip(live, metadata: metadata)
+            #expect(atomicRecords.count == 2)
+            #expect(atomicRecords.allSatisfy { $0.customMetadata.isEmpty })
         }
     }
 

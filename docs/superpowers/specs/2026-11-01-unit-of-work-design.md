@@ -367,7 +367,7 @@ DDDKit 不再需要自己的 spike（實作計畫 Task 2 取消）；§7 的 liv
 
 更正（2026-11-14，對抗式審查第 1 輪）：(1) 從作用域內啟動的 `Task` 呼叫 `withUnitOfWork` 一律拒絕，作用域結束前後都一樣，結束後的 reason 改成 `unit of work <id> already ended; …`，行為不隨時序改變。(2) `LiveEventStoreClient` 在 `readStream` 與 persistent subscription 的 delivery 把只含 `$schema.*` 的 custom metadata 讀成空 bytes，nil metadata 經任何路徑讀回都是空的（原本多串流 commit 後讀回只有 `$schema.*` 的物件，全 optional 的 metadata 型別會解出非 nil 的空 struct）。(3) live 實測：使用者以 `$` 開頭的 metadata key（含 `$schema.` 前綴）在多串流 commit 後原樣保留，不需在 save 時拒絕；超過 2^53 的整數四捨五入成最近的 Double。
 
-更正（2026-11-14，對抗式審查第 2 輪）：(1) `withBackend(_:identity:make:_:)` 改為 `withBackend(_:identity:make:_:)`：staging 在 `body` 裡、在作用域的鎖內執行，和 `close()` 共用同一把鎖。原本取得 backend 與 `stage` 之間沒有共同的鎖，逃逸的 Task 可能在作用域關閉後把事件 stage 進已被丟棄的 backend（save 回傳成功卻永不寫入），或擠進已開始的 commit。(2) 只有 key 剛好是 `$schema.name` 與 `$schema.format` 的 metadata 才讀成空的，判斷前先在位元組中找 `$schema.name`，沒有就不解析 JSON。(3) 編碼為 `{}` 的 metadata 在多串流 commit 後讀回 nil，其他路徑讀回欄位全為 nil 的值。`MigrationUtility` 直接讀 `RecordedEvent`，仍看得到伺服器的兩個 key。
+更正（2026-11-14，對抗式審查第 2 輪）：(1) `backend(_:identity:make:)` 改為 `withBackend(_:identity:make:_:)`：staging 在 `body` 裡、在作用域的鎖內執行，和 `close()` 共用同一把鎖。原本取得 backend 與 `stage` 之間沒有共同的鎖，逃逸的 Task 可能在作用域關閉後把事件 stage 進已被丟棄的 backend（save 回傳成功卻永不寫入），或擠進已開始的 commit。(2) 只有 key 剛好是 `$schema.name` 與 `$schema.format` 的 metadata 才讀成空的，判斷前先在位元組中找 `$schema.name`，沒有就不解析 JSON。(3) 編碼為 `{}` 的 metadata 在多串流 commit 後讀回 nil，其他路徑讀回欄位全為 nil 的值。`MigrationUtility` 直接讀 `RecordedEvent`，仍看得到伺服器的兩個 key。
 
 ## 10. 留給實作者
 

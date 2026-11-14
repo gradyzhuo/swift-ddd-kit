@@ -328,6 +328,33 @@ struct UnitOfWorkTests {
         #expect(bodyRuns.all.isEmpty)
     }
 
+    @Test("The end of the scope waits for a withBackend body that is running: the body runs under the lock close() takes")
+    func scopeEndWaitsForRunningBody() async throws {
+        let order = Recorder<String>()
+        let inBody = Mutex(false)
+        var escaped: Task<Void, any Error>?
+
+        try await withUnitOfWork { work in
+            escaped = Task {
+                try work.withBackend(RecordingBackend.self, identity: clientA, make: { RecordingBackend() }) { _ in
+                    inBody.withLock { $0 = true }
+                    // Holds the body long enough for the block to end meanwhile. Blocking
+                    // here is the point: a close() that does not take the body's lock
+                    // would finish first.
+                    Thread.sleep(forTimeInterval: 0.2)
+                    order.append("body ended")
+                }
+            }
+            while !inBody.withLock({ $0 }) {
+                await Task.yield()
+            }
+        }
+        order.append("scope ended")
+        try await escaped?.value
+
+        #expect(order.all == ["body ended", "scope ended"])
+    }
+
     @Test("Two child tasks registering at once create a single backend")
     func concurrentFirstRegistrationMakesOneBackend() async throws {
         let makes = Recorder<Int>()
