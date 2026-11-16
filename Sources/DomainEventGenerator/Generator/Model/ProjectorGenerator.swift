@@ -15,17 +15,14 @@ package struct ProjectorGenerator {
         let yamlData = try Data(contentsOf: projectionModelYamlFileURL)
 
         let yamlDecoder = YAMLDecoder()
-        var definitions: [String: EventProjectionDefinition]
-        do{
-            if yamlData.isEmpty {
-                throw DomainEventGeneratorError.invalidYamlFile(url: projectionModelYamlFileURL, reason: "The yaml file is empty.")
-            }
-            
-            definitions = try yamlDecoder.decode([String: EventProjectionDefinition].self, from: yamlData)
-        }catch{
-            definitions = [:]
-        }
-        
+        // A file with no YAML document (empty, or only comments) means no projection
+        // models. A file that does not decode is an error: swallowing it generated
+        // nothing for every model in the file.
+        let hasDocument = try Yams.compose(yaml: String(decoding: yamlData, as: UTF8.self)) != nil
+        let definitions: [String: EventProjectionDefinition] = hasDocument
+            ? try yamlDecoder.decode([String: EventProjectionDefinition].self, from: yamlData)
+            : [:]
+
         self.definitions = definitions
     }
     

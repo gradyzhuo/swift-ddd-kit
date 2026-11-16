@@ -41,6 +41,7 @@ package struct EventProjectionDefinition: Codable {
     }
 
     package init(from decoder: any Decoder) throws {
+        try Self.rejectUnknownKeys(decoder)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let idType = try container.decodeIfPresent(PropertyDefinition.PropertyType.self, forKey: .idType) ?? .string
         let model = try container.decode(EventProjectionDefinition.ModelKind.self, forKey: .model)
@@ -82,10 +83,38 @@ package struct EventProjectionDefinition: Codable {
         try container.encode(createdKurrentDBEvents, forKey: .createdEvents)
     }
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case idType, model, deletedEvent, category, idField
         case events
         case createdEvents
+    }
+
+    private struct AnyKey: CodingKey {
+        let stringValue: String
+        let intValue: Int? = nil
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    /// A key the generator does not know would otherwise be dropped without a word: a
+    /// misspelt `createdEvent:` leaves the event out of the generated mapper.
+    private static func rejectUnknownKeys(_ decoder: any Decoder) throws {
+        let known = CodingKeys.allCases.map(\.stringValue)
+        let unknown = try decoder.container(keyedBy: AnyKey.self).allKeys
+            .map(\.stringValue)
+            .filter { !known.contains($0) }
+            .sorted()
+        guard !unknown.isEmpty else { return }
+
+        let model = decoder.codingPath.last?.stringValue ?? "<model>"
+        let described = unknown.map { key in
+            known.contains(key + "s") ? "\"\(key)\" (did you mean \"\(key)s\"?)" : "\"\(key)\""
+        }
+        throw DecodingError.dataCorrupted(.init(
+            codingPath: decoder.codingPath,
+            debugDescription: "Unknown key \(described.joined(separator: ", ")) in projection model \"\(model)\". "
+                + "Known keys: \(known.sorted().joined(separator: ", "))."
+        ))
     }
 }
 

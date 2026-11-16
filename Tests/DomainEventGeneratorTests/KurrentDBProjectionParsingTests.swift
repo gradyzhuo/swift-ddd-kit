@@ -176,4 +176,39 @@ struct KurrentDBProjectionParsingTests {
         #expect(def.kurrentDBEvents.count == 1)
         #expect(def.idField == nil)
     }
+
+    @Test("createdEvents is decoded for a read model")
+    func createdEventsDecodes() throws {
+        let yaml = """
+        MyModel:
+          model: readModel
+          createdEvents: OrderCreated
+          events:
+            - OrderShipped
+        """
+        let definitions = try YAMLDecoder().decode([String: EventProjectionDefinition].self, from: yaml)
+        let def = try #require(definitions["MyModel"])
+        #expect(def.createdEvents == ["OrderCreated"])
+        #expect(def.events == ["OrderShipped"])
+    }
+
+    @Test("an unknown key is an error that names the key and the model")
+    func unknownKeyThrows() throws {
+        let yaml = """
+        MyModel:
+          model: readModel
+          createdEvent: OrderCreated
+          events:
+            - OrderShipped
+        """
+        do {
+            _ = try YAMLDecoder().decode([String: EventProjectionDefinition].self, from: yaml)
+            Issue.record("Expected the unknown key to throw")
+        } catch {
+            let message = "\(error)"
+            #expect(message.contains("createdEvent"))
+            #expect(message.contains("createdEvents"))
+            #expect(message.contains("MyModel"))
+        }
+    }
 }
