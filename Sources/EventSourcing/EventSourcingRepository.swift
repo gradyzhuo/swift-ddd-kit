@@ -94,6 +94,11 @@ extension EventSourcingRepository {
 
     /// 危険操作!! 完全移除，不可恢復。該 id 之後永遠無法再寫入，不論先前是否存在。
     ///
+    /// Succeeds every time it is repeated and checks no version, so it cannot guard a
+    /// step that must run once: concurrent callers all succeed. For that, `find`,
+    /// `markDelete` and `save` first (`save` checks the version; the losers get
+    /// `DDDError.commitConflict`), then purge.
+    ///
     /// Inside ``withUnitOfWork(_:)`` a store that is not a ``UnitOfWorkParticipant``
     /// throws `DDDError.operationNotAllow(operation: "purge")`, and that error or one from
     /// the store's purge fails the unit of work before it is rethrown.
