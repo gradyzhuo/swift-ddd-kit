@@ -27,4 +27,22 @@ struct ProjectorGeneratorTests {
         #expect(output.contains("default:\n                continue"))
         #expect(!output.contains("default:\n                return"))
     }
+
+    @Test("a model file that does not decode is an error, not an empty output")
+    func undecodableFileThrows() {
+        #expect(throws: DecodingError.self) {
+            try render("""
+                OrderSummary:
+                  model: readModel
+                  createdEvent: OrderCreated
+                  events:
+                    - OrderAmountUpdated
+                """)
+        }
+    }
+
+    @Test("a model file with no YAML document renders no models", arguments: ["", "# no models yet\n"])
+    func emptyFileRendersNothing(yaml: String) throws {
+        #expect(try !render(yaml).contains("protocol"))
+    }
 }
