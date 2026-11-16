@@ -310,7 +310,7 @@
       "scope": "every call of purge(byId:) on a repository or store",
       "before": "KurrentStorageCoordinator.purge soft-deletes; the id could be written again; EventSourcingRepository.purge threw aggregateNotFound for an unknown id",
       "after": "purge tombstones the stream permanently; a later non-empty append throws DDDError.streamPurged (502); purge of a never-written id succeeds and reserves the id forever; EventSourcingRepository.purge no longer calls find first",
-      "action": "Do not purge ids that will be reused. Remove code relying on purge-then-recreate or on aggregateNotFound from purge."
+      "action": "Do not purge ids that will be reused. Remove code relying on purge-then-recreate or on aggregateNotFound from purge. purge succeeds every time it is repeated and checks no version, so code using read-then-purge as a run-once guard must become find, markDelete, save (version-checked: one caller wins, the others get DDDError.commitConflict), then purge."
     },
     {
       "id": "BC2",
@@ -512,6 +512,7 @@ dependencies:
         <li><code>KurrentStorageCoordinator.purge</code> 呼叫 KurrentDB 的 <code>tombstone(.any)</code>：stream 永遠無法再寫入，之後對同一 id 的 <code>append</code> 丟 <code>DDDError.streamPurged</code>（502）。先 purge 再用同一個 id 重建 aggregate 的做法不再可行。</li>
         <li>對從未寫過的 id 呼叫 <code>purge</code> 也會成功，並讓該 id 永久保留。不要 purge 之後還會使用的 id。</li>
         <li><code>EventSourcingRepository.purge</code> 不再先 <code>find</code>：未知的 id 不再丟 <code>aggregateNotFound</code>，已 soft-delete 的 aggregate 也可以被 purge。</li>
+        <li>重複 <code>purge</code> 同一個 id 每次都成功，也不檢查版本。以「讀取 → <code>purge</code>」保證只執行一次的程式（例如一次性 token）不再有保證：並發的請求會全部成功。改成 <code>find</code> → <code>markDelete</code> → <code>save</code> → <code>purge</code>；<code>save</code> 會檢查版本，只有一個請求成功，其餘丟 <code>DDDError.commitConflict</code>。</li>
         <li>資料不會被物理抹除：KurrentDB 保留到 scavenge；<code>PersistentEventStore</code> 則從 stream 檔中移除 payload。</li>
       </ul>
     </div>
