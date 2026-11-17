@@ -69,7 +69,7 @@
   <p lang="en">Add the package to your <code>Package.swift</code>. <code>DDDKit</code> is the umbrella product; it re-exports the core protocols, the event sourcing layer, the KurrentDB adapter, the in-memory event bus and read model persistence.</p>
   <p lang="zh-Hant">在 <code>Package.swift</code> 加入套件。<code>DDDKit</code> 是 umbrella product，會一併重新導出核心協定、event sourcing 層、KurrentDB 轉接層、記憶體內 event bus 與 read model 持久化。</p>
   <pre><code class="lang-swift">dependencies: [
-    .package(url: "https://github.com/gradyzhuo/swift-ddd-kit.git", from: "1.4.0")
+    .package(url: "https://github.com/gradyzhuo/swift-ddd-kit.git", from: "1.5.0")
 ],
 targets: [
     .target(
@@ -90,7 +90,8 @@ targets: [
     <div class="release-picker">
       <label class="visually-hidden" for="release-select"><span lang="en">Choose a release</span><span lang="zh-Hant">選擇版本</span></label>
       <select id="release-select">
-        <option value="v1.4" data-en="1.4 (latest stable)" data-zh="1.4（最新穩定版）">1.4 (latest stable)</option>
+        <option value="v1.5" data-en="1.5 (latest stable)" data-zh="1.5（最新穩定版）">1.5 (latest stable)</option>
+        <option value="v1.4" data-en="1.4" data-zh="1.4">1.4</option>
         <option value="v1.3" data-en="1.3" data-zh="1.3">1.3</option>
         <option value="v1.2" data-en="1.2" data-zh="1.2">1.2</option>
         <option value="v1.1" data-en="1.1" data-zh="1.1">1.1</option>
@@ -99,9 +100,54 @@ targets: [
     </div>
   </div>
 
+  <!-- ------------------------------------------------------------------ 1.5 -->
+  <article class="release" id="v1.5">
+    <div class="whats-new-tag"><span lang="en">Latest stable · 1.5.0</span><span lang="zh-Hant">最新穩定版 · 1.5.0</span></div>
+    <h3 class="release-title"><span lang="en"><code>withUnitOfWork</code>: several usecases, one commit</span><span lang="zh-Hant"><code>withUnitOfWork</code>：多個 usecase，一次提交</span></h3>
+    <p class="lead" lang="en">
+      1.5 adds <code>withUnitOfWork { work in … }</code>. Every <code>repository.save</code> inside the block is
+      collected and written together when the block returns, or not at all when it throws. Existing usecases,
+      repositories and generated code take part unchanged. 1.5 also moves to swift-kurrentdb 3.0, reads link streams
+      past links whose event is gone, and makes the generator reject unknown keys in <code>projection-model.yaml</code>.
+    </p>
+    <p class="lead" lang="zh-Hant">
+      1.5 新增 <code>withUnitOfWork { work in … }</code>：區塊內的每個 <code>repository.save</code> 會先收集起來，
+      區塊正常結束時一起寫入，丟錯時全部不寫。既有的 usecase、repository 與生成的程式碼不用修改就能參與。
+      另外升級到 swift-kurrentdb 3.0、讀取連結 stream 時跳過事件已不存在的連結，產生器也會拒絕
+      <code>projection-model.yaml</code> 裡的未知鍵。
+    </p>
+
+    <div class="table-scroll">
+      <table class="compat">
+        <thead>
+          <tr>
+            <th><span lang="en">Tag</span><span lang="zh-Hant">Tag</span></th>
+            <th><span lang="en">Change</span><span lang="zh-Hant">變更</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.5.0">1.5.0</a></td><td><span lang="en"><strong><code>withUnitOfWork</code></strong> (<code>EventSourcing</code>): saves inside the block commit together or not at all; <code>work.onCommitted</code> runs hooks after the commit. <code>KurrentStorageCoordinator</code> takes part; a commit of two or more streams needs KurrentDB 26.1 or later.</span><span lang="zh-Hant"><strong><code>withUnitOfWork</code></strong>（<code>EventSourcing</code>）：區塊內的 save 一起提交或全部不寫；<code>work.onCommitted</code> 在提交後執行 hook。<code>KurrentStorageCoordinator</code> 可參與；一次提交兩個以上的 stream 需要 KurrentDB 26.1 以上。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.5.0">1.5.0</a></td><td><span lang="en"><strong>swift-kurrentdb 3.0</strong>: the minimum is 3.0.0. Reads are lazy, so a cancelled read throws <code>CancellationError</code>; a bare <code>CustomMetadata</code> next to <code>import KurrentDB</code> must be written <code>EventSourcing.CustomMetadata</code>.</span><span lang="zh-Hant"><strong>swift-kurrentdb 3.0</strong>：下限為 3.0.0。讀取改為 lazy，被取消的讀取會丟 <code>CancellationError</code>；與 <code>import KurrentDB</code> 並用時，<code>CustomMetadata</code> 要寫成 <code>EventSourcing.CustomMetadata</code>。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.5.0">1.5.0</a></td><td><span lang="en"><strong>Link streams</strong>: <code>LiveEventStoreClient.readStream</code> skips a link whose event is gone (source stream deleted, tombstoned, truncated or scavenged) with a warning, instead of failing the whole read.</span><span lang="zh-Hant"><strong>連結 stream</strong>：<code>LiveEventStoreClient.readStream</code> 遇到事件已不存在的連結（來源 stream 被刪除、tombstone、截斷或 scavenge）會記一筆 warning 並跳過，不再讓整次讀取失敗。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.5.0">1.5.0</a></td><td><span lang="en"><strong>Generator</strong>: an unknown key in <code>projection-model.yaml</code>, or a file that does not decode, fails the build with the model, the key and the known keys.</span><span lang="zh-Hant"><strong>產生器</strong>：<code>projection-model.yaml</code> 有未知鍵或無法解碼時編譯失敗，錯誤訊息列出 model、鍵名與已知的鍵。</span></td></tr>
+          <tr><td><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.5.0">1.5.0</a></td><td><span lang="en"><strong>Projector</strong>: <code>EventSourcingProjector.execute</code> logs a warning when it returns <code>nil</code> because <code>buildReadModel</code> or <code>apply</code> threw.</span><span lang="zh-Hant"><strong>Projector</strong>：<code>EventSourcingProjector.execute</code> 因 <code>buildReadModel</code> 或 <code>apply</code> 丟錯而回 <code>nil</code> 時記一筆 warning。</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cta-row">
+      <a class="btn primary" href="./migration/swift-ddd-kit-1.4-to-1.5.html"><span lang="en">1.4 → 1.5 Migration Guide</span><span lang="zh-Hant">1.4 → 1.5 遷移指南</span></a>
+      <p class="cta-note" lang="en">Source-breaking and behaviour changes since 1.4, an upgrade checklist, and a machine-readable manifest for AI agents.</p>
+      <p class="cta-note" lang="zh-Hant">1.4 以來的 source-breaking 與行為變更、升級步驟清單，以及給 AI agent 的機器可讀遷移清單（英文撰寫）。</p>
+    </div>
+
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/README.md#6-compose-usecases-with-withunitofwork" target="_blank" rel="noopener"><span lang="en">Compose Usecases with <code>withUnitOfWork</code> in the README →</span><span lang="zh-Hant">README 的 <code>withUnitOfWork</code> 章節 →</span></a></p>
+    <p class="release-link"><a href="https://github.com/gradyzhuo/swift-ddd-kit/releases/tag/1.5.0" target="_blank" rel="noopener"><span lang="en">Full 1.5.0 release notes →</span><span lang="zh-Hant">1.5.0 完整 release notes →</span></a></p>
+  </article>
+
   <!-- ------------------------------------------------------------------ 1.4 -->
   <article class="release" id="v1.4">
-    <div class="whats-new-tag"><span lang="en">Latest stable · 1.4.0</span><span lang="zh-Hant">最新穩定版 · 1.4.0</span></div>
+    <div class="whats-new-tag"><span lang="en">1.4.0</span><span lang="zh-Hant">1.4.0</span></div>
     <h3 class="release-title"><span lang="en">An <code>EventStore</code> contract, a local event store, iOS, and template variables</span><span lang="zh-Hant"><code>EventStore</code> 契約、本機事件儲存、iOS 與 Template variables</span></h3>
     <p class="lead" lang="en">
       1.4 writes down what every <code>EventStore</code> must do (revisions from 0, <code>commitConflict</code> on a
