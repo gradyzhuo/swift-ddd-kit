@@ -182,10 +182,12 @@
       1.5 adds <code>withUnitOfWork { work in … }</code>: every <code>repository.save</code> inside the block is collected and
       written together when the block returns, or not at all when it throws. Existing usecases, repositories, generated code
       and the composition root take part <b>unchanged</b>. Code that never calls <code>withUnitOfWork</code> behaves as in 1.4,
-      except that a read cancelled midway now throws <code>CancellationError</code> (<span class="chgid">BC7</span>).
+      except that a read cancelled midway now throws <code>CancellationError</code> (<span class="chgid">BC7</span>) and a read
+      of a link stream skips links whose event is gone (<span class="chgid">BC8</span>).
       What breaks the build is limited to custom <code>EventStoreClient</code> conformances, exhaustive <code>switch</code>es over
-      <code>EventStoreClientError</code>, a direct swift-kurrentdb requirement below 3.0.0, and a bare <code>CustomMetadata</code>
-      in a file that imports <code>KurrentDB</code> (<span class="chgid">SB4</span>).
+      <code>EventStoreClientError</code>, a direct swift-kurrentdb requirement below 3.0.0, a bare <code>CustomMetadata</code>
+      in a file that imports <code>KurrentDB</code> (<span class="chgid">SB4</span>), and an unknown key in
+      <code>projection-model.yaml</code> (<span class="chgid">SB5</span>).
       The public signatures of <code>Usecase</code>, <code>EventStore</code>, <code>EventSourcingRepository</code> and
       <code>KurrentStorageCoordinator</code> do not change.
     </p>
@@ -217,10 +219,12 @@
           <tr><td>depends on swift-kurrentdb directly</td><td><span class="chgid">SB3</span> swift-kurrentdb ≥ 3.0.0</td></tr>
           <tr><td>names <code>CustomMetadata</code> in a file that imports <code>KurrentDB</code></td><td><span class="chgid">SB4</span></td></tr>
           <tr><td>reads aggregates through <code>KurrentStorageCoordinator</code> from tasks that can be cancelled</td><td><span class="chgid">BC7</span></td></tr>
+          <tr><td>has a <code>projection-model.yaml</code></td><td><span class="chgid">SB5</span></td></tr>
+          <tr><td>reads streams of links (<code>linkTo</code> projections, <code>$ce-</code>, <code>$et-</code>) through <code>LiveEventStoreClient</code> or <code>KurrentStorageCoordinator</code></td><td><span class="chgid">BC8</span></td></tr>
           <tr><td>implements or wraps <code>EventStoreClient</code></td><td><span class="chgid">SB1</span>, <span class="chgid">BC1</span></td></tr>
           <tr><td>has a <code>switch</code> over <code>EventStoreClientError</code> without <code>default</code></td><td><span class="chgid">SB2</span></td></tr>
           <tr><td>adopts <code>withUnitOfWork</code></td><td><span class="chgid">BC2</span>–<span class="chgid">BC6</span>, <a href="#scope">behaviour inside a scope</a>, <a href="#rules">rules inside the block</a>, <a href="#projections">projections</a></td></tr>
-          <tr><td>only uses <code>AggregateRoot</code> / <code>DomainEvent</code> / <code>Usecase</code> and the built-in stores, without <code>withUnitOfWork</code></td><td>bump the version and run the tests; also <span class="chgid">SB4</span> and <span class="chgid">BC7</span> if they apply</td></tr>
+          <tr><td>only uses <code>AggregateRoot</code> / <code>DomainEvent</code> / <code>Usecase</code> and the built-in stores, without <code>withUnitOfWork</code></td><td>bump the version and run the tests; also <span class="chgid">SB4</span>, <span class="chgid">SB5</span>, <span class="chgid">BC7</span> and <span class="chgid">BC8</span> if they apply</td></tr>
         </tbody>
       </table>
     </div>
@@ -280,6 +284,15 @@
       "before": "KurrentStorageCoordinator<OrderProjector, CustomMetadata>",
       "after": "KurrentStorageCoordinator<OrderProjector, EventSourcing.CustomMetadata>",
       "action": "swift-kurrentdb 3.0 adds its own CustomMetadata type, so a bare CustomMetadata is ambiguous in such a file. Qualify swift-ddd-kit's type as EventSourcing.CustomMetadata. Files that do not import KurrentDB, generated code included, are unchanged."
+    },
+    {
+      "id": "SB5",
+      "kind": "source-breaking",
+      "mechanical": true,
+      "scope": "projection-model.yaml files",
+      "before": "a key the generator does not know was ignored, and a file that did not decode produced no models",
+      "after": "both fail the build; the error names the model, the key and the known keys: category, createdEvents, deletedEvent, events, idField, idType, model",
+      "action": "Build, then fix each key the error names. A misspelt key was ignored before, so its events were missing from the generated code: after fixing it, check that the read model now handles them as intended. A file with no YAML document (empty or comments only) still yields no models."
     },
     {
       "id": "BC1",
@@ -345,6 +358,15 @@
       "action": "Catch CancellationError where a cancelled task must not count as a failed read."
     },
     {
+      "id": "BC8",
+      "kind": "behaviour-change",
+      "mechanical": false,
+      "scope": "reads of link streams through LiveEventStoreClient.readStream or KurrentStorageCoordinator.fetchEvents",
+      "before": "the read threw KurrentError.unservicableEventLink at the first link whose event is gone, or reported the stream as missing",
+      "after": "the read skips such links, logs a warning for each (logger label LiveEventStoreClient, metadata stream and link) and returns the remaining events",
+      "action": "Remove wrappers that caught unservicableEventLink around readStream. Code that relied on the error to detect deleted sources must check the source stream itself."
+    },
+    {
       "id": "N1",
       "kind": "new",
       "mechanical": false,
@@ -367,6 +389,14 @@
       "scope": "KurrentSupport seam",
       "after": "EventStoreClient.appendAtomically(_:), StreamBatch, StreamBatchResult, StreamConflict; InMemoryEventStoreClient implements it",
       "action": "Optional; see BC1 for wrappers."
+    },
+    {
+      "id": "N4",
+      "kind": "new",
+      "mechanical": false,
+      "scope": "EventSourcingProjector.execute(input:)",
+      "after": "when buildReadModel or apply throws, execute still returns nil and now logs a warning with the id and the error (logger label <ProjectorType>)",
+      "action": "None. Watch for the warning to find projectors that returned nil because of an error."
     },
     {
       "id": "R1",
@@ -479,6 +509,19 @@
       <pre class="diff"><span class="a">- KurrentStorageCoordinator&lt;OrderProjector, CustomMetadata&gt;(client: client, eventMapper: mapper)</span>
 <span class="d">+ KurrentStorageCoordinator&lt;OrderProjector, EventSourcing.CustomMetadata&gt;(client: client, eventMapper: mapper)</span></pre>
     </div>
+
+    <div class="card">
+      <h3><span class="chgid">SB5</span> &nbsp;<span class="tag sig">generator</span> &nbsp;An unknown key in <code>projection-model.yaml</code> fails the build</h3>
+      <p>The generator ignored a key it did not know, and a file that did not decode produced no models. Both now fail the
+         build. The error names the model, the key and the known keys (<code>category</code>, <code>createdEvents</code>,
+         <code>deletedEvent</code>, <code>events</code>, <code>idField</code>, <code>idType</code>, <code>model</code>):</p>
+      <pre>Unknown key "createdEvent" (did you mean "createdEvents"?) in projection model "OrderList".</pre>
+      <p>A misspelt key was ignored before, so its events were missing from the generated code. After fixing the key, check
+         that the read model now handles those events as intended. A file with no YAML document (empty, or comments only)
+         still yields no models.</p>
+      <pre class="diff"><span class="a">-   createdEvent: OrderCreated</span>
+<span class="d">+   createdEvents: OrderCreated</span></pre>
+    </div>
   </section>
 
   <!-- ================= BEHAVIOUR ================= -->
@@ -575,6 +618,18 @@
          <code>KurrentStorageCoordinator</code> whose task is cancelled midway throws <code>CancellationError</code>; with 2.x the
          read had already fetched every event and returned normally. Catch <code>CancellationError</code> where a cancelled task
          must not count as a failed read.</p>
+    </div>
+
+    <div class="card">
+      <h3><span class="chgid">BC8</span> &nbsp;<span class="tag sig">reads</span> &nbsp;A link whose event is gone is skipped</h3>
+      <p>A stream of links (a <code>linkTo</code> projection, <code>$ce-</code>, <code>$et-</code>) can hold a link whose event
+         no longer exists, because the source stream was deleted, tombstoned, truncated or scavenged.
+         <code>LiveEventStoreClient.readStream</code> threw <code>KurrentError.unservicableEventLink</code> at the first one,
+         or reported the stream as missing, so <code>KurrentStorageCoordinator.fetchEvents</code> and a projector over such
+         a stream failed. The read now skips these links, logs a warning for each (logger label
+         <code>LiveEventStoreClient</code>, metadata <code>stream</code> and <code>link</code>) and returns the remaining events.</p>
+      <p>Remove wrappers that caught <code>unservicableEventLink</code> around <code>readStream</code>. Code that relied on the
+         error to notice a deleted source must check the source stream itself.</p>
     </div>
   </section>
 
@@ -695,6 +750,7 @@
         <tr><td><span class="chgid">N1</span></td><td><code>withUnitOfWork</code>, <code>UnitOfWork</code>, <code>UnitOfWorkBackend</code>, <code>UnitOfWorkParticipant</code> (<code>EventSourcing</code>)</td><td>The scope and the hooks for store authors. <code>work</code> offers <code>id</code>, <code>isFailed</code>, <code>try work.fail(_:)</code> and <code>try work.onCommitted(_:)</code>. See the README section <a href="https://github.com/gradyzhuo/swift-ddd-kit/blob/main/README.md#6-compose-usecases-with-withunitofwork">Compose Usecases with <code>withUnitOfWork</code></a>.</td></tr>
         <tr><td><span class="chgid">N2</span></td><td><code>DDDError.commitConflict(conflicts:)</code>, <code>error.commitConflicts</code> (<code>DDDCore</code>)</td><td>One entry per conflicting stream, in batch order; still code 501. <code>error.commitConflict</code> returns the first.</td></tr>
         <tr><td><span class="chgid">N3</span></td><td><code>EventStoreClient.appendAtomically(_:)</code>, <code>StreamBatch</code>, <code>StreamBatchResult</code>, <code>StreamConflict</code> (<code>KurrentSupport</code>)</td><td>Atomic multi-stream append through KurrentDB's <code>AppendRecords</code>; <code>InMemoryEventStoreClient</code> implements it too. <code>KurrentStorageCoordinator</code> is a <code>UnitOfWorkParticipant</code>.</td></tr>
+        <tr><td><span class="chgid">N4</span></td><td>Warning from <code>EventSourcingProjector.execute(input:)</code> (<code>EventSourcing</code>)</td><td>When <code>buildReadModel</code> or <code>apply</code> throws, <code>execute</code> still returns <code>nil</code> and now logs a warning with the id and the error (logger label <code>&lt;ProjectorType&gt;</code>).</td></tr>
       </tbody>
     </table>
   </section>
@@ -707,8 +763,10 @@
       <li><b>Bump dependencies</b> — <code>swift-ddd-kit</code> to <code>from: "1.5.0"</code>; a direct swift-kurrentdb requirement to <code>3.0.0</code> (<span class="chgid">SB3</span>).</li>
       <li><b><code>CustomMetadata</code> next to <code>import KurrentDB</code></b> — write <code>EventSourcing.CustomMetadata</code> (<span class="chgid">SB4</span>).</li>
       <li><b>Custom <code>EventStoreClient</code></b> — implement or forward <code>identity</code> and <code>appendAtomically(_:)</code>; check that no <code>appendAtomically</code> deprecation warning is left (<span class="chgid">SB1</span>, <span class="chgid">BC1</span>).</li>
+      <li><b><code>projection-model.yaml</code></b> — fix each key the build error names, then check the read models that gain events (<span class="chgid">SB5</span>).</li>
       <li><b>Exhaustive switch</b> — handle <code>consistencyViolations</code> and <code>atomicAppendUnsupported</code> (<span class="chgid">SB2</span>).</li>
       <li><b>Build + test</b> — <code>swift build</code>, then run the test suite.</li>
+      <li><b>Link streams</b> — remove wrappers that caught <code>unservicableEventLink</code> around <code>readStream</code> (<span class="chgid">BC8</span>).</li>
       <li><b>Before adopting <code>withUnitOfWork</code></b> — move post-save publishing to <code>onCommitted</code> (<span class="chgid">BC2</span>), give the repositories that write together, or read what the block saved, one <code>KurrentDBClient</code> instance (<span class="chgid">BC3</span>), check metadata types (<span class="chgid">BC6</span>), keep projections on the subscription runners, and follow the <a href="#rules">rules inside the block</a>.</li>
     </ol>
   </section>

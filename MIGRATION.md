@@ -488,8 +488,9 @@ KurrentDB 無法接受大於 `Int64.max` 的預期 revision，以前 `KurrentSto
 
 1.5.0 adds `withUnitOfWork`, which commits the saves of several usecases together (README section
 "Compose Usecases with `withUnitOfWork`"). Code that never calls it behaves as before, except that a read cancelled midway now
-throws `CancellationError` (BC7), and a bare `CustomMetadata` next to `import KurrentDB` no longer
-compiles (SB4). The
+throws `CancellationError` (BC7), a read of a link stream skips links whose event is gone (BC8),
+a bare `CustomMetadata` next to `import KurrentDB` no longer compiles (SB4), and an unknown key in
+`projection-model.yaml` fails the build (SB5). The
 IDs below are the same as in the
 [1.4 → 1.5 migration guide](https://gradyzhuo.github.io/swift-ddd-kit/migration/swift-ddd-kit-1.4-to-1.5.html).
 
@@ -543,6 +544,20 @@ its module:
 ```
 
 Files that do not import `KurrentDB`, generated events and mappers included, are not affected.
+
+### SB5 — An unknown key in `projection-model.yaml` fails the build
+
+The generator ignored a key it did not know, and a file that did not decode produced no models.
+Both now fail the build. The error names the model, the key and the known keys (`category`,
+`createdEvents`, `deletedEvent`, `events`, `idField`, `idType`, `model`):
+
+```
+Unknown key "createdEvent" (did you mean "createdEvents"?) in projection model "OrderList".
+```
+
+A misspelt key was ignored before, so its events were missing from the generated code. After
+fixing the key, check that the read model now handles those events as intended. A file with no
+YAML document (empty, or comments only) still yields no models.
 
 ### Behaviour changes (the compiler will not point these out)
 
@@ -598,6 +613,18 @@ Files that do not import `KurrentDB`, generated events and mappers included, are
   `find` or `fetchEvents` through `KurrentStorageCoordinator` whose task is cancelled midway throws
   `CancellationError`. With 2.x the read had already fetched every event and returned normally.
   Catch `CancellationError` where a cancelled task must not count as a failed read.
+- **BC8 — A link whose event is gone is skipped.** A stream of links (a `linkTo` projection,
+  `$ce-`, `$et-`) can hold a link whose event no longer exists, because the source stream was
+  deleted, tombstoned, truncated or scavenged. `LiveEventStoreClient.readStream` threw
+  `KurrentError.unservicableEventLink` at the first one, or reported the stream as missing, so
+  `KurrentStorageCoordinator.fetchEvents` and a projector over such a stream failed. The read now
+  skips these links, logs a warning for each (logger label `LiveEventStoreClient`, metadata
+  `stream` and `link`) and returns the remaining events. Remove wrappers that caught
+  `unservicableEventLink` around `readStream`; code that relied on the error to notice a deleted
+  source must check the source stream itself.
+
+`EventSourcingProjector.execute(input:)` still returns `nil` when `buildReadModel` or `apply`
+throws, and now logs a warning with the id and the error (N4).
 
 Also inside a unit of work: `EventSourcingRepository`'s default `purge` is refused for every store
 in this package (`KurrentStorageCoordinator.purge` refuses even when called directly), but a
