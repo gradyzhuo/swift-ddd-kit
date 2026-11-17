@@ -10,6 +10,7 @@
 import EventSourcing
 import Foundation
 import KurrentDB
+import Logging
 import Synchronization
 
 extension RecordedEvent: RecordedEventLike {
@@ -18,6 +19,7 @@ extension RecordedEvent: RecordedEventLike {
 
 public struct LiveEventStoreClient: EventStoreClient {
     let client: KurrentDBClient
+    private let logger = Logger(label: "LiveEventStoreClient")
 
     public init(client: KurrentDBClient) {
         self.client = client
@@ -47,6 +49,9 @@ public struct LiveEventStoreClient: EventStoreClient {
     /// An event whose custom metadata holds only the server's `$schema.*` keys (written
     /// through AppendRecords without metadata) comes back with empty custom metadata, as
     /// an event a v1 append wrote without metadata does.
+    ///
+    /// A link whose event is gone (its stream was deleted, tombstoned, truncated or
+    /// scavenged) is skipped with a warning; the rest of the stream is still returned.
     public func readStream(
         name: String,
         from revision: RevisionCursor,
@@ -63,7 +68,17 @@ public struct LiveEventStoreClient: EventStoreClient {
             }
             var records: [any RecordedEventLike] = []
             for try await response in responses {
-                records.append(withoutServerOnlyMetadata(try response.event.record))
+                switch response {
+                case let .event(readEvent):
+                    records.append(withoutServerOnlyMetadata(readEvent.record))
+                case let .unserviceable(link):
+                    // Not `response.event`: it throws `unservicableEventLink`, or
+                    // `resourceNotFound` (read below as a missing stream) without a link.
+                    logger.warning("Skipped a link whose event is gone.", metadata: [
+                        "stream": "\(name)",
+                        "link": "\(link.map { "\($0.revision)@\($0.streamIdentifier.name)" } ?? "unknown")",
+                    ])
+                }
             }
             return records
         } catch KurrentError.resourceNotFound {
